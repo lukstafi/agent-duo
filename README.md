@@ -1,36 +1,30 @@
 # agent-duo
 
-Shell scripts and skills to coordinate two AI agent peers (Claude and Codex) on providing alternative solutions to the same task.
+Coordinate two AI agents (Claude and Codex) on providing **alternative solutions** to the same task.
 
 ## Overview
 
-Agent Duo enables **parallel development** where two AI coding agents work simultaneously on the same problem, each in their own git worktree. The agents periodically review each other's uncommitted changes, providing feedback while maintaining distinct implementation approaches. The result is **two alternative PRs** for the same task.
+Agent Duo enables **parallel development** where two AI coding agents work simultaneously on the same problem, each in their own git worktree. The agents periodically review each other's work via snapshots, providing feedback while maintaining distinct implementation approaches. The result is **two alternative PRs**.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Agent Duo Session                         │
 ├─────────────────────────────────────────────────────────────┤
-│                                                              │
 │   ┌─────────────┐              ┌─────────────┐              │
-│   │   Claude    │              │    Codex    │              │
+│   │   Claude    │   snapshots  │    Codex    │              │
 │   │  Worktree   │◄────────────►│  Worktree   │              │
-│   │ (claude-work)│   Reviews   │ (codex-work) │              │
-│   └─────────────┘              └─────────────┘              │
+│   └─────────────┘   & reviews  └─────────────┘              │
 │          │                            │                      │
 │          └──────────┬─────────────────┘                      │
-│                     │                                        │
 │              ┌──────▼──────┐                                 │
 │              │ .peer-sync/ │                                 │
-│              │  - states   │                                 │
-│              │  - diffs    │                                 │
-│              │  - reviews  │                                 │
+│              │ rounds/1/   │                                 │
+│              │ rounds/2/   │                                 │
 │              └─────────────┘                                 │
 │                     │                                        │
 │              ┌──────▼──────┐                                 │
 │              │ Orchestrator│                                 │
-│              │   (tmux)    │                                 │
 │              └─────────────┘                                 │
-│                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -38,190 +32,213 @@ Agent Duo enables **parallel development** where two AI coding agents work simul
 
 - **git** - Version control
 - **tmux** - Terminal multiplexer
-- **ttyd** - Terminal web server (`brew install ttyd`)
+- **ttyd** - Terminal web server (optional, for `--ttyd` mode)
 - **gh** - GitHub CLI (optional, for PR creation)
-- **Claude Code** and/or **Codex CLI**
 
 ## Quick Start
 
 ```bash
-# 1. Clone and enter the repo
+# 1. Clone the repo
 git clone https://github.com/lukstafi/agent-duo.git
 cd agent-duo
 
-# 2. Install skills for your AI agents
-./install-skills.sh
-
-# 3. Create a task file
+# 2. Create a task file
 cat > task.md << 'EOF'
 # Build a TODO API
 
-Create a simple REST API for managing TODO items.
-Requirements:
+Create a REST API for managing TODO items.
 - CRUD operations
 - In-memory storage
 - JSON responses
 EOF
 
-# 4. Start the session
-./start.sh task.md
+# 3. Start the session
+./agent-duo start task.md
 
-# 5. In Claude's ttyd terminal (http://localhost:7681):
-#    Run: claude --skill peer-work
+# 4. In each agent's tmux window, run the AI agent
+#    Window 1 (claude): claude
+#    Window 2 (codex):  codex
+```
 
-# 6. In Codex's ttyd terminal (http://localhost:7682):
-#    Run: codex --skill peer-work
+## CLI Reference
+
+```
+agent-duo - Coordinate two AI agents on parallel implementations
+
+COMMANDS:
+    start [task.md] [--ttyd]   Start a new session
+    setup                      Create worktrees without launching
+    cleanup [--full]           Remove worktrees and processes
+
+    signal <agent> <state> [msg]   Signal agent state change
+    snapshot <agent>               Generate snapshot for review
+
+    orchestrate                Run the coordination loop
+    status                     Show current session state
+    pr <agent>                 Create PR for agent's work
+
+AGENTS: claude, codex
+STATES: INITIALIZING, WORKING, READY, REVIEWING, DONE, ERROR
+```
+
+### Examples
+
+```bash
+# Start a session
+./agent-duo start task.md
+
+# Start with web terminals (ttyd)
+./agent-duo start task.md --ttyd
+
+# Check status
+./agent-duo status
+
+# Agent signals work complete
+./agent-duo signal claude READY "implemented the API"
+
+# Create PRs when done
+./agent-duo pr claude
+./agent-duo pr codex
+
+# Clean up
+./agent-duo cleanup
+./agent-duo cleanup --full  # also removes state files
 ```
 
 ## Session Flow
 
-### Turn-Based Coordination
-
-Each session runs for a configurable number of turns (default: 3):
+Each session runs for 3 rounds (configurable):
 
 ```
-Turn 1: [WORK] → [REVIEW] →
-Turn 2: [WORK] → [REVIEW] →
-Turn 3: [WORK] → [REVIEW] → [CREATE PRs]
+Round 1:  [WORK] → snapshot → [REVIEW] →
+Round 2:  [WORK] → snapshot → [REVIEW] →
+Round 3:  [WORK] → snapshot → [REVIEW] → [PR]
 ```
 
 ### States
 
-Agents transition through these states:
-
 | State | Description |
 |-------|-------------|
-| `INITIALIZING` | Agent starting up |
 | `WORKING` | Actively implementing |
-| `READY_FOR_REVIEW` | Finished work/review phase |
-| `REVIEWING` | Reading peer's changes |
+| `READY` | Finished phase, waiting for peer |
+| `REVIEWING` | Reading peer's snapshot |
 | `DONE` | Session complete |
 
-### Phase Timing
+### Timeouts
 
-- Work phase timeout: 10 minutes
-- Review phase timeout: 5 minutes
-- Orchestrator advances phases on timeout
+- Work phase: 10 minutes
+- Review phase: 5 minutes
+- Orchestrator advances automatically on timeout
 
 ## File Structure
 
 ```
 agent-duo/
-├── start.sh           # Launch worktrees and agents
-├── orchestrate.sh     # Coordinate turn-based workflow
-├── cleanup.sh         # Tear down worktrees and processes
-├── install-skills.sh  # Install skills to agent CLIs
+├── agent-duo              # Unified CLI
 ├── skills/
-│   ├── peer-work.md   # Main working skill
-│   └── peer-review.md # Review phase guidance
-├── .peer-sync/        # Coordination directory (created at runtime)
-│   ├── claude.state   # Claude's current state
-│   ├── codex.state    # Codex's current state
-│   ├── turn           # Current turn number
-│   ├── current_phase  # WORK or REVIEW
-│   ├── task.md        # Task description
-│   ├── claude.diff    # Claude's changes for review
-│   ├── codex.diff     # Codex's changes for review
-│   └── *_review_*.md  # Review files
-└── README.md
+│   ├── peer-work.md       # Main coordination skill
+│   └── peer-review.md     # Review phase skill
+└── .peer-sync/            # Coordination (created at runtime)
+    ├── phase              # Current phase
+    ├── round              # Current round number
+    ├── claude.status      # STATE|EPOCH|MESSAGE
+    ├── codex.status
+    ├── claude.path        # Worktree paths
+    ├── codex.path
+    ├── task.md            # Task description
+    └── rounds/
+        ├── 1/
+        │   ├── claude-snapshot.txt
+        │   ├── claude.patch
+        │   ├── codex-snapshot.txt
+        │   ├── codex.patch
+        │   └── *-review.md
+        ├── 2/
+        └── 3/
 ```
 
-## How It Works
+## How Agents Coordinate
 
-### 1. Worktree Setup (`start.sh`)
+1. **Orchestrator** sets phase to "work" and agent states to "WORKING"
+2. **Agents** implement their solutions independently
+3. **Agents** signal completion: `./agent-duo signal <name> READY`
+4. **Orchestrator** generates snapshots and sets phase to "review"
+5. **Agents** read peer snapshots, write reviews, signal READY
+6. Repeat for configured number of rounds
+7. **Orchestrator** marks session DONE
 
-Creates two git worktrees in sibling directories:
-- `../agent-duo-claude` on branch `claude-work`
-- `../agent-duo-codex` on branch `codex-work`
+### Status Format
 
-Both worktrees share a symlinked `.peer-sync/` for coordination.
+Status files use the format: `STATE|EPOCH|MESSAGE`
 
-### 2. Orchestration (`orchestrate.sh`)
+```
+WORKING|1705847123|implementing feature X
+READY|1705847456|finished round 1
+```
 
-The orchestrator:
-1. Signals agents to start working
-2. Polls for state changes
-3. Generates diffs when work phases complete
-4. Signals review phases
-5. Advances through turns
-6. Creates PRs at the end
+### Atomic Locking
 
-### 3. Agent Skills
+The CLI uses mkdir-based locking to prevent race conditions when multiple agents write status simultaneously.
 
-Agents use the `peer-work` skill which teaches them to:
+## Agent Skills
+
+Copy skills to your AI agent's skills directory, or reference them directly:
+
+```bash
+# For Claude Code
+cp skills/*.md ~/.claude/skills/
+
+# Then agents can use the peer-work skill
+claude  # in claude's worktree
+```
+
+The skills teach agents to:
 - Check their identity and current phase
-- Work on distinct implementations
-- Signal state transitions
-- Review peer's changes constructively
+- Signal state transitions properly
+- Review peer snapshots constructively
 - Maintain divergent approaches
 
 ## Configuration
 
-Edit `orchestrate.sh` to customize:
+Edit variables at the top of `agent-duo`:
 
 ```bash
 MAX_TURNS=3           # Number of work/review cycles
 WORK_TIMEOUT=600      # Work phase timeout (seconds)
 REVIEW_TIMEOUT=300    # Review phase timeout (seconds)
-POLL_INTERVAL=5       # State polling interval (seconds)
+POLL_INTERVAL=5       # State polling interval
 ```
 
-## Manual State Control
-
-Agents signal state changes by writing to their state file:
-
-```bash
-# Claude signals ready for review
-echo "READY_FOR_REVIEW" > .peer-sync/claude.state
-
-# Codex signals ready for review
-echo "READY_FOR_REVIEW" > .peer-sync/codex.state
-```
-
-## Cleanup
-
-```bash
-# Remove worktrees and stop processes
-./cleanup.sh
-
-# Also remove state files
-./cleanup.sh --full
-```
-
-## Tips for Good Sessions
+## Tips
 
 ### For Divergent Solutions
-
-1. **Different architectures**: One agent might use MVC, another might use functional composition
-2. **Different libraries**: One uses Express, another uses Fastify
-3. **Different patterns**: One uses classes, another uses closures
+- Different architectures (MVC vs functional)
+- Different libraries (Express vs Fastify)
+- Different patterns (classes vs closures)
 
 ### For Effective Reviews
+- Be constructive, not just critical
+- Don't push peer toward your approach
+- Reference specific files and lines
 
-1. **Be constructive**: Suggest improvements, don't just criticize
-2. **Respect divergence**: Don't push peer toward your approach
-3. **Be specific**: Reference files and line numbers
-
-### For Smooth Coordination
-
-1. **Commit frequently**: Makes changes visible in diffs
-2. **Signal promptly**: Don't forget to update your state
-3. **Read reviews**: Incorporate valid feedback
+### For Smooth Sessions
+- Commit frequently (makes snapshots useful)
+- Signal promptly when done
+- Read and consider peer feedback
 
 ## Troubleshooting
 
-### Agents not coordinating
-- Check `.peer-sync/*.state` files
-- Verify symlinks in worktrees
-- Check orchestrator logs in tmux
+**Agents not coordinating?**
+- Check `./agent-duo status`
+- Verify `.peer-sync/*.status` files
 
-### ttyd not starting
-- Check if ports 7681/7682 are in use
-- Try `pkill ttyd` and restart
+**Session stuck?**
+- Orchestrator advances on timeout
+- Check tmux orchestrator window for logs
 
-### PRs not created
+**PRs not created?**
 - Ensure `gh` CLI is installed and authenticated
-- Check for uncommitted changes in worktrees
+- Check for uncommitted changes
 
 ## License
 
