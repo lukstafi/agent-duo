@@ -1,0 +1,500 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+agent-duo: lightweight two-agent worktree coordination
+
+Usage:
+  ./agent-duo init [--base <ref>] [--agents "claude codex"]
+  ./agent-duo clean [--force] [--prune-branches]
+  ./agent-duo status
+  ./agent-duo paths
+  ./agent-duo doctor
+  ./agent-duo signal <agent> <phase> <state> [message...]
+  ./agent-duo wait <phase> [--round N] [--timeout S]
+  ./agent-duo snapshot <agent> [--round N]
+  ./agent-duo pr <agent> [--base <ref>]
+
+Phases:
+  work | review
+
+States:
+  pending | done | timeout | error
+USAGE
+}
+
+die() { echo "agent-duo: $*" >&2; exit 1; }
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+git_root() {
+  git rev-parse --show-toplevel 2>/dev/null || die "not in a git repo"
+}
+
+git_common_dir() {
+  git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || git rev-parse --git-common-dir
+}
+
+home_file() {
+  printf '%s/agent-duo-home' "$(git_common_dir)"
+}
+
+agent_duo_home() {
+  if [[ -n "${AGENT_DUO_HOME:-}" ]]; then
+    printf '%s' "$AGENT_DUO_HOME"
+    return
+  fi
+
+  local hf
+  hf="$(home_file)"
+  if [[ -f "$hf" ]]; then
+    cat "$hf"
+    return
+  fi
+
+  git_root
+}
+
+sync_dir() { printf '%s/.peer-sync' "$(agent_duo_home)"; }
+worktrees_dir() { printf '%s/.worktrees' "$(agent_duo_home)"; }
+
+lock_dir() { printf '%s/.lock' "$(sync_dir)"; }
+
+with_lock() {
+  local lock
+  lock="$(lock_dir)"
+
+  local i
+  for i in {1..200}; do
+    if mkdir "$lock" 2>/dev/null; then
+      trap 'rmdir "$lock" 2>/dev/null || true' RETURN
+      "$@"
+      trap - RETURN
+      rmdir "$lock" 2>/dev/null || true
+      return 0
+    fi
+    sleep 0.05
+  done
+  die "failed to acquire lock at $lock"
+}
+
+ensure_layout() {
+  mkdir -p "$(sync_dir)" "$(worktrees_dir)"
+  mkdir -p "$(sync_dir)/branches" "$(sync_dir)/rounds"
+}
+
+link_sync_into_worktree() {
+  local wt="$1"
+  local sync
+  sync="$(sync_dir)"
+
+  # Convenience for agents: make `.peer-sync` visible from within each worktree.
+  # This path is gitignored in the repo.
+  if [[ -e "$wt/.peer-sync" && ! -L "$wt/.peer-sync" ]]; then
+    rm -rf "$wt/.peer-sync" 2>/dev/null || true
+  fi
+  ln -sfn "$sync" "$wt/.peer-sync"
+}
+
+write_home_file() {
+  local hf
+  hf="$(home_file)"
+  mkdir -p "$(dirname "$hf")"
+  printf '%s' "$(git_root)" >"$hf"
+}
+
+now_epoch() { date +%s; }
+
+status_path() {
+  local agent="$1"
+  printf '%s/%s.status' "$(sync_dir)" "$agent"
+}
+
+write_status() {
+  local agent="$1" phase="$2" state="$3"; shift 3
+  local msg="${*:-}"
+  local ts
+  ts="$(now_epoch)"
+  printf '%s|%s|%s|%s\n' "$phase" "$state" "$ts" "$msg" >"$(status_path "$agent")"
+}
+
+read_status() {
+  local agent="$1" file
+  file="$(status_path "$agent")"
+  if [[ ! -f "$file" ]]; then
+    echo "missing"
+    return
+  fi
+  cat "$file"
+}
+
+round_file() { printf '%s/round' "$(sync_dir)"; }
+phase_file() { printf '%s/phase' "$(sync_dir)"; }
+
+get_round() {
+  local rf
+  rf="$(round_file)"
+  if [[ -f "$rf" ]]; then cat "$rf"; else echo 0; fi
+}
+
+set_round() {
+  printf '%s\n' "$1" >"$(round_file)"
+}
+
+set_phase() {
+  printf '%s\n' "$1" >"$(phase_file)"
+}
+
+get_phase() {
+  local pf
+  pf="$(phase_file)"
+  if [[ -f "$pf" ]]; then cat "$pf"; else echo "none"; fi
+}
+
+cmd_paths() {
+  ensure_layout
+  echo "home: $(agent_duo_home)"
+  echo "sync: $(sync_dir)"
+  echo "worktrees: $(worktrees_dir)"
+}
+
+cmd_doctor() {
+  need_cmd git
+  ensure_layout
+
+  echo "agent-duo doctor"
+  echo "- home: $(agent_duo_home)"
+  echo "- sync: $(sync_dir)"
+  echo "- phase: $(get_phase)"
+  echo "- round: $(get_round)"
+  echo
+
+  echo "dependencies:"
+  if command -v gh >/dev/null 2>&1; then echo "- gh: ok"; else echo "- gh: missing (PR creation disabled)"; fi
+  if command -v tmux >/dev/null 2>&1; then echo "- tmux: ok"; else echo "- tmux: missing (start.sh --tmux disabled)"; fi
+  if command -v ttyd >/dev/null 2>&1; then echo "- ttyd: ok"; else echo "- ttyd: missing (start.sh --ttyd disabled)"; fi
+  echo
+
+  echo "worktrees:"
+  git worktree list || true
+  echo
+
+  echo "agent status:"
+  cmd_status
+}
+
+parse_agents() {
+  local agents_str="$1"
+  if [[ -z "$agents_str" ]]; then
+    echo "claude codex"
+    return
+  fi
+  echo "$agents_str"
+}
+
+branch_file() {
+  local agent="$1"
+  printf '%s/branches/%s' "$(sync_dir)" "$agent"
+}
+
+get_branch() {
+  local agent="$1" bf
+  bf="$(branch_file "$agent")"
+  [[ -f "$bf" ]] || die "missing branch file for $agent ($bf); run ./agent-duo init"
+  cat "$bf"
+}
+
+set_branch() {
+  local agent="$1" branch="$2"
+  printf '%s\n' "$branch" >"$(branch_file "$agent")"
+}
+
+worktree_path() {
+  local agent="$1"
+  printf '%s/%s' "$(worktrees_dir)" "$agent"
+}
+
+cmd_init() {
+  need_cmd git
+
+  local base="" agents="claude codex"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --base) base="$2"; shift 2;;
+      --agents) agents="$2"; shift 2;;
+      -h|--help) usage; exit 0;;
+      *) die "unknown arg: $1";;
+    esac
+  done
+
+  ensure_layout
+  write_home_file
+
+  if [[ -z "$base" ]]; then
+    base="$(git rev-parse --abbrev-ref HEAD)"
+  fi
+
+  local stamp
+  stamp="$(date +%Y%m%d-%H%M%S)"
+
+  local agent
+  for agent in $(parse_agents "$agents"); do
+    local wt branch
+    wt="$(worktree_path "$agent")"
+    branch="duo/${agent}/${stamp}"
+
+    if [[ -d "$wt" ]]; then
+      echo "agent-duo: worktree exists: $wt (skipping)" >&2
+      link_sync_into_worktree "$wt"
+      if [[ ! -f "$(branch_file "$agent")" ]]; then
+        echo "agent-duo: warning: branch file missing for $agent" >&2
+      fi
+      continue
+    fi
+
+    echo "agent-duo: creating worktree for $agent at $wt" >&2
+    git worktree add -b "$branch" "$wt" "$base" >/dev/null
+    link_sync_into_worktree "$wt"
+    set_branch "$agent" "$branch"
+    write_status "$agent" "work" "pending" "initialized"
+  done
+
+  set_round "1"
+  set_phase "work"
+
+  cat <<EOF
+agent-duo initialized.
+
+- Home: $(agent_duo_home)
+- Worktrees: $(worktrees_dir)/{claude,codex}
+- Sync: $(sync_dir)
+
+Next:
+- Run: ./orchestrate.sh
+- Or open each worktree and start working.
+EOF
+}
+
+cmd_clean() {
+  need_cmd git
+  local force="0"
+  local prune_branches="0"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force) force="1"; shift;;
+      --prune-branches) prune_branches="1"; shift;;
+      -h|--help) usage; exit 0;;
+      *) die "unknown arg: $1";;
+    esac
+  done
+
+  local wt
+  for wt in "$(worktrees_dir)"/*; do
+    [[ -d "$wt" ]] || continue
+    echo "agent-duo: removing worktree $wt" >&2
+    if [[ "$force" == "1" ]]; then
+      git worktree remove --force "$wt" || true
+    else
+      git worktree remove "$wt" || true
+    fi
+  done
+
+  if [[ "$prune_branches" == "1" ]]; then
+    local agent branch
+    for agent in claude codex; do
+      if [[ -f "$(branch_file "$agent")" ]]; then
+        branch="$(cat "$(branch_file "$agent")")"
+        echo "agent-duo: deleting local branch $branch" >&2
+        git -C "$(agent_duo_home)" branch -D "$branch" >/dev/null 2>&1 || true
+      fi
+    done
+  fi
+
+  echo "agent-duo: leaving sync dir at $(sync_dir)" >&2
+  echo "agent-duo: to fully reset, remove $(sync_dir)" >&2
+}
+
+cmd_status() {
+  ensure_layout
+  echo "home: $(agent_duo_home)"
+  echo "phase: $(get_phase)"
+  echo "round: $(get_round)"
+  echo
+
+  local agent
+  for agent in claude codex; do
+    echo "$agent: $(read_status "$agent")"
+  done
+}
+
+cmd_signal() {
+  ensure_layout
+  [[ $# -ge 3 ]] || die "signal requires: <agent> <phase> <state> [message...]"
+  local agent="$1" phase="$2" state="$3"; shift 3
+  local msg="${*:-}"
+
+  local current
+  current="$(get_phase)"
+  if [[ "$current" != "none" && "$current" != "$phase" ]]; then
+    echo "agent-duo: warning: signaling phase '$phase' but controller phase is '$current'" >&2
+  fi
+
+  with_lock write_status "$agent" "$phase" "$state" "$msg"
+  echo "agent-duo: signaled $agent $phase $state" >&2
+}
+
+cmd_wait() {
+  ensure_layout
+  [[ $# -ge 1 ]] || die "wait requires: <phase> [--round N] [--timeout S]"
+  local want_phase="$1"; shift
+  local want_round=""
+  local timeout="0"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --round) want_round="$2"; shift 2;;
+      --timeout) timeout="$2"; shift 2;;
+      -h|--help) usage; exit 0;;
+      *) die "unknown arg: $1";;
+    esac
+  done
+
+  local start
+  start="$(now_epoch)"
+  while true; do
+    local phase round
+    phase="$(get_phase)"
+    round="$(get_round)"
+    if [[ "$phase" == "$want_phase" ]]; then
+      if [[ -z "$want_round" || "$round" -ge "$want_round" ]]; then
+        echo "$phase $round"
+        return 0
+      fi
+    fi
+    if [[ "$timeout" != "0" && $(( $(now_epoch) - start )) -ge "$timeout" ]]; then
+      die "wait timed out after ${timeout}s"
+    fi
+    sleep 1
+  done
+}
+
+snapshot_dir() {
+  local round="$1"
+  printf '%s/rounds/%s' "$(sync_dir)" "$round"
+}
+
+cmd_snapshot() {
+  need_cmd git
+  ensure_layout
+
+  [[ $# -ge 1 ]] || die "snapshot requires: <agent> [--round N]"
+  local agent="$1"; shift
+  local round="$(get_round)"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --round) round="$2"; shift 2;;
+      -h|--help) usage; exit 0;;
+      *) die "unknown arg: $1";;
+    esac
+  done
+
+  local wt outdir
+  wt="$(worktree_path "$agent")"
+  [[ -d "$wt" ]] || die "missing worktree for $agent at $wt"
+
+  outdir="$(snapshot_dir "$round")"
+  mkdir -p "$outdir"
+
+  local prefix
+  prefix="$outdir/from-${agent}"
+
+  {
+    echo "agent: $agent"
+    echo "round: $round"
+    echo "branch: $(get_branch "$agent" 2>/dev/null || true)"
+    echo "generated: $(date)"
+    echo
+    echo "## git status"
+    git -C "$wt" status --porcelain=v1
+    echo
+    echo "## diff --stat"
+    git -C "$wt" diff --stat
+    echo
+    echo "## diff (unstaged)"
+    git -C "$wt" diff
+    echo
+    echo "## diff (staged)"
+    git -C "$wt" diff --staged
+  } >"${prefix}.txt"
+
+  # A plain patch file is convenient for LLM review.
+  git -C "$wt" diff >"${prefix}.patch" || true
+
+  echo "agent-duo: wrote snapshot ${prefix}.{txt,patch}" >&2
+}
+
+cmd_pr() {
+  need_cmd git
+  need_cmd gh
+  ensure_layout
+
+  [[ $# -ge 1 ]] || die "pr requires: <agent> [--base <ref>]"
+  local agent="$1"; shift
+  local base=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --base) base="$2"; shift 2;;
+      -h|--help) usage; exit 0;;
+      *) die "unknown arg: $1";;
+    esac
+  done
+
+  local branch wt
+  branch="$(get_branch "$agent")"
+  wt="$(worktree_path "$agent")"
+  [[ -d "$wt" ]] || die "missing worktree for $agent at $wt"
+
+  if [[ -z "$base" ]]; then
+    base="$(git -C "$(agent_duo_home)" rev-parse --abbrev-ref HEAD)"
+  fi
+
+  echo "agent-duo: pushing $branch" >&2
+  git -C "$wt" push -u origin "$branch" >&2
+
+  local title body
+  title="agent-duo: ${agent} solution"
+  body="$(
+    printf '%s\n\n- Branch: `%s`\n- Base: `%s`\n\nGenerated by `./agent-duo pr %s`.\n' \
+      "This PR contains the **${agent}** agent's alternative solution." \
+      "$branch" \
+      "$base" \
+      "$agent"
+  )"
+
+  echo "agent-duo: creating PR" >&2
+  gh pr create --head "$branch" --base "$base" --title "$title" --body "$body"
+}
+
+main() {
+  local cmd="${1:-}"
+  shift || true
+
+  case "$cmd" in
+    init) cmd_init "$@";;
+    clean) cmd_clean "$@";;
+    status) cmd_status "$@";;
+    paths) cmd_paths "$@";;
+    doctor) cmd_doctor "$@";;
+    signal) cmd_signal "$@";;
+    wait) cmd_wait "$@";;
+    snapshot) cmd_snapshot "$@";;
+    pr) cmd_pr "$@";;
+    -h|--help|help|"") usage; exit 0;;
+    *) die "unknown command: $cmd";;
+  esac
+}
+
+main "$@"
