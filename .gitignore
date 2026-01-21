@@ -1,0 +1,21 @@
+# Runtime state files
+.peer-sync/*.state
+.peer-sync/*.diff
+.peer-sync/*.files
+.peer-sync/*.review
+.peer-sync/*_worktree_path
+.peer-sync/*_review_*.md
+.peer-sync/*_received_reviews.md
+.peer-sync/turn
+.peer-sync/current_phase
+.peer-sync/phase_start
+
+# Keep task file if user adds one
+!.peer-sync/task.md
+
+# OS files
+.DS_Store
+
+# Editor files
+*.swp
+*~
