@@ -1,0 +1,792 @@
+#!/bin/bash
+# agent-duo - Coordinate two AI coding agents working in parallel
+#
+# Usage: agent-duo <command> [options]
+#
+# Commands:
+#   start <feature>      Start session, creates worktrees
+#   stop                 Stop ttyd servers, keep worktrees
+#   status               Show session state
+#   pr <agent>           Create PR for agent's solution
+#   cleanup [--full]     Remove worktrees (--full: also state)
+#   setup                Install agent-duo to PATH and skills
+#
+# Agent Commands:
+#   signal <agent> <status> [message]   Signal status change
+#   peer-status                         Read peer's status
+#   phase                               Read current phase
+
+set -e
+
+# Determine script location (resolves symlinks)
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [ -L "$SCRIPT_PATH" ]; do
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    [[ $SCRIPT_PATH != /* ]] && SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Default agents
+DEFAULT_AGENT_A="claude"
+DEFAULT_AGENT_B="codex"
+
+# Ports for ttyd
+CLAUDE_PORT=7681
+CODEX_PORT=7682
+
+# Commands to launch each agent
+CLAUDE_CMD="claude --dangerously-skip-permissions"
+CODEX_CMD="codex --yolo"
+
+#------------------------------------------------------------------------------
+# Helper Functions
+#------------------------------------------------------------------------------
+
+die() {
+    echo -e "${RED}Error: $1${NC}" >&2
+    exit 1
+}
+
+info() {
+    echo -e "${BLUE}$1${NC}"
+}
+
+success() {
+    echo -e "${GREEN}$1${NC}"
+}
+
+warn() {
+    echo -e "${YELLOW}$1${NC}"
+}
+
+# Get project root (where .peer-sync is)
+get_project_root() {
+    if [ -n "$PEER_SYNC" ]; then
+        dirname "$PEER_SYNC"
+    elif [ -d ".peer-sync" ]; then
+        pwd
+    else
+        # Look for .peer-sync in parent directories
+        local dir="$PWD"
+        while [ "$dir" != "/" ]; do
+            if [ -d "$dir/.peer-sync" ]; then
+                echo "$dir"
+                return
+            fi
+            dir="$(dirname "$dir")"
+        done
+        die "Not in an agent-duo session (no .peer-sync found)"
+    fi
+}
+
+# Get feature name from session
+get_feature() {
+    local root
+    root="$(get_project_root)"
+    if [ -f "$root/.peer-sync/feature" ]; then
+        cat "$root/.peer-sync/feature"
+    else
+        die "No active session (missing .peer-sync/feature)"
+    fi
+}
+
+# Atomic file write with locking
+atomic_write() {
+    local file="$1"
+    local content="$2"
+    local lockdir
+    lockdir="$(dirname "$file")/.lock"
+
+    # Acquire lock
+    while ! mkdir "$lockdir" 2>/dev/null; do
+        sleep 0.05
+    done
+
+    # Write file
+    echo "$content" > "$file"
+
+    # Release lock
+    rmdir "$lockdir"
+}
+
+# Get agent command
+get_agent_cmd() {
+    local agent="$1"
+    case "$agent" in
+        claude) echo "$CLAUDE_CMD" ;;
+        codex) echo "$CODEX_CMD" ;;
+        *) echo "$agent" ;;  # Allow custom agents
+    esac
+}
+
+# Get agent port
+get_agent_port() {
+    local agent="$1"
+    case "$agent" in
+        claude) echo "$CLAUDE_PORT" ;;
+        codex) echo "$CODEX_PORT" ;;
+        *) echo "$((7680 + RANDOM % 100))" ;;
+    esac
+}
+
+#------------------------------------------------------------------------------
+# Command: setup
+#------------------------------------------------------------------------------
+
+# Install a skill from template with agent-specific replacements
+install_skill() {
+    local template="$1"
+    local dest="$2"
+    local skill_cmd="$3"  # e.g., "/duo-work" for Claude, "$duo-work" for Codex
+
+    if [ -f "$template" ]; then
+        # Replace {{SKILL_CMD}} placeholder with agent-specific command prefix
+        sed "s|{{SKILL_CMD}}|${skill_cmd}|g" "$template" > "$dest"
+    fi
+}
+
+cmd_setup() {
+    info "Installing agent-duo..."
+
+    local templates_dir="$SCRIPT_DIR/skills/templates"
+
+    if [ ! -d "$templates_dir" ]; then
+        die "Skills templates not found at $templates_dir"
+    fi
+
+    # Install CLI to ~/.local/bin
+    local install_dir="$HOME/.local/bin"
+    mkdir -p "$install_dir"
+
+    local install_path="$install_dir/agent-duo"
+    if [ "$SCRIPT_DIR/agent-duo" != "$install_path" ]; then
+        cp "$SCRIPT_DIR/agent-duo" "$install_path"
+        chmod +x "$install_path"
+        success "Installed agent-duo to $install_path"
+    else
+        success "agent-duo already installed at $install_path"
+    fi
+
+    # Check if ~/.local/bin is in PATH
+    if [[ ":$PATH:" != *":$install_dir:"* ]]; then
+        warn "Add $install_dir to your PATH:"
+        echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+    fi
+
+    # Install Claude skills (uses /command syntax)
+    local claude_skills="$HOME/.claude/commands"
+    mkdir -p "$claude_skills"
+
+    install_skill "$templates_dir/duo-work.md" "$claude_skills/duo-work.md" "/duo-work"
+    install_skill "$templates_dir/duo-review.md" "$claude_skills/duo-review.md" "/duo-review"
+    success "Installed Claude skills to $claude_skills"
+
+    # Install Codex skills (uses $command syntax)
+    local codex_skills="$HOME/.codex/skills"
+    mkdir -p "$codex_skills"
+
+    install_skill "$templates_dir/duo-work.md" "$codex_skills/\$duo-work.md" "\$duo-work"
+    install_skill "$templates_dir/duo-review.md" "$codex_skills/\$duo-review.md" "\$duo-review"
+    success "Installed Codex skills to $codex_skills"
+
+    success "Setup complete!"
+}
+
+#------------------------------------------------------------------------------
+# Command: start
+#------------------------------------------------------------------------------
+
+cmd_start() {
+    local feature=""
+    local ttyd_mode=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ttyd) ttyd_mode=true; shift ;;
+            -*) die "Unknown option: $1" ;;
+            *) feature="$1"; shift ;;
+        esac
+    done
+
+    [ -z "$feature" ] && die "Usage: agent-duo start <feature> [--ttyd]"
+
+    # Ensure we're in a git repo
+    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not a git repository"
+
+    local project_root
+    project_root="$(git rev-parse --show-toplevel)"
+    local project_name
+    project_name="$(basename "$project_root")"
+
+    # Check for task file
+    local task_file="$project_root/$feature.md"
+    if [ ! -f "$task_file" ]; then
+        warn "Task file not found: $task_file"
+        warn "Create it with the task description, or the agents won't know what to do."
+    fi
+
+    info "Starting Agent Duo session: $feature"
+    info "Project: $project_name"
+
+    # Set up worktree paths (siblings of project root)
+    local parent_dir
+    parent_dir="$(dirname "$project_root")"
+    local worktree_claude="$parent_dir/${project_name}-${feature}-claude"
+    local worktree_codex="$parent_dir/${project_name}-${feature}-codex"
+
+    # Create branches and worktrees
+    cd "$project_root"
+
+    local main_branch
+    main_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')" || main_branch="main"
+
+    if [ ! -d "$worktree_claude" ]; then
+        info "Creating worktree for claude..."
+        git worktree add -b "${feature}-claude" "$worktree_claude" "$main_branch" 2>/dev/null || \
+            git worktree add "$worktree_claude" "${feature}-claude"
+    else
+        warn "Worktree already exists: $worktree_claude"
+    fi
+
+    if [ ! -d "$worktree_codex" ]; then
+        info "Creating worktree for codex..."
+        git worktree add -b "${feature}-codex" "$worktree_codex" "$main_branch" 2>/dev/null || \
+            git worktree add "$worktree_codex" "${feature}-codex"
+    else
+        warn "Worktree already exists: $worktree_codex"
+    fi
+
+    # Initialize .peer-sync
+    local peer_sync="$project_root/.peer-sync"
+    mkdir -p "$peer_sync/reviews"
+    mkdir -p "$peer_sync/pids"
+
+    echo "active" > "$peer_sync/session"
+    echo "work" > "$peer_sync/phase"
+    echo "1" > "$peer_sync/round"
+    echo "$feature" > "$peer_sync/feature"
+    echo "working|$(date +%s)|starting" > "$peer_sync/claude.status"
+    echo "working|$(date +%s)|starting" > "$peer_sync/codex.status"
+
+    # Create symlinks in worktrees
+    ln -sfn "$peer_sync" "$worktree_claude/.peer-sync"
+    ln -sfn "$peer_sync" "$worktree_codex/.peer-sync"
+
+    # Copy task file to worktrees if it exists
+    if [ -f "$task_file" ]; then
+        cp "$task_file" "$worktree_claude/"
+        cp "$task_file" "$worktree_codex/"
+    fi
+
+    if $ttyd_mode; then
+        start_ttyd_mode "$feature" "$project_root" "$worktree_claude" "$worktree_codex" "$peer_sync"
+    else
+        start_tmux_mode "$feature" "$project_root" "$worktree_claude" "$worktree_codex" "$peer_sync"
+    fi
+}
+
+start_tmux_mode() {
+    local feature="$1"
+    local project_root="$2"
+    local worktree_claude="$3"
+    local worktree_codex="$4"
+    local peer_sync="$5"
+
+    local session_name="duo-${feature}"
+
+    # Kill existing session if any
+    tmux kill-session -t "$session_name" 2>/dev/null || true
+
+    # Create new tmux session with orchestrator window
+    tmux new-session -d -s "$session_name" -n "orchestrator" -c "$project_root"
+
+    # Create claude window
+    tmux new-window -t "$session_name" -n "claude" -c "$worktree_claude"
+    tmux send-keys -t "$session_name:claude" "export PEER_SYNC='$peer_sync'"
+    tmux send-keys -t "$session_name:claude" C-m
+    tmux send-keys -t "$session_name:claude" "export MY_NAME='claude'"
+    tmux send-keys -t "$session_name:claude" C-m
+    tmux send-keys -t "$session_name:claude" "export PEER_NAME='codex'"
+    tmux send-keys -t "$session_name:claude" C-m
+    tmux send-keys -t "$session_name:claude" "export PEER_WORKTREE='$worktree_codex'"
+    tmux send-keys -t "$session_name:claude" C-m
+    tmux send-keys -t "$session_name:claude" "export FEATURE='$feature'"
+    tmux send-keys -t "$session_name:claude" C-m
+
+    # Create codex window
+    tmux new-window -t "$session_name" -n "codex" -c "$worktree_codex"
+    tmux send-keys -t "$session_name:codex" "export PEER_SYNC='$peer_sync'"
+    tmux send-keys -t "$session_name:codex" C-m
+    tmux send-keys -t "$session_name:codex" "export MY_NAME='codex'"
+    tmux send-keys -t "$session_name:codex" C-m
+    tmux send-keys -t "$session_name:codex" "export PEER_NAME='claude'"
+    tmux send-keys -t "$session_name:codex" C-m
+    tmux send-keys -t "$session_name:codex" "export PEER_WORKTREE='$worktree_claude'"
+    tmux send-keys -t "$session_name:codex" C-m
+    tmux send-keys -t "$session_name:codex" "export FEATURE='$feature'"
+    tmux send-keys -t "$session_name:codex" C-m
+
+    success "Created tmux session: $session_name"
+    echo ""
+    echo "Windows:"
+    echo "  0: orchestrator  - Main project root"
+    echo "  1: claude        - $worktree_claude"
+    echo "  2: codex         - $worktree_codex"
+    echo ""
+    echo "Attach with: tmux attach -t $session_name"
+    echo ""
+    echo "To start agents, in each window run their CLI:"
+    echo "  claude window: $CLAUDE_CMD"
+    echo "  codex window:  $CODEX_CMD"
+}
+
+start_ttyd_mode() {
+    local feature="$1"
+    local project_root="$2"
+    local worktree_claude="$3"
+    local worktree_codex="$4"
+    local peer_sync="$5"
+
+    local session_name="duo-${feature}"
+
+    # Check ttyd is installed
+    command -v ttyd >/dev/null 2>&1 || die "ttyd not found. Install with: brew install ttyd"
+
+    # Kill existing sessions if any
+    tmux kill-session -t "${session_name}-claude" 2>/dev/null || true
+    tmux kill-session -t "${session_name}-codex" 2>/dev/null || true
+
+    # Create tmux sessions for each agent
+    tmux new-session -d -s "${session_name}-claude" -c "$worktree_claude"
+    tmux new-session -d -s "${session_name}-codex" -c "$worktree_codex"
+
+    # Set environment variables
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
+        tmux send-keys -t "${session_name}-claude" "export $var"
+        tmux send-keys -t "${session_name}-claude" C-m
+    done
+
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'"; do
+        tmux send-keys -t "${session_name}-codex" "export $var"
+        tmux send-keys -t "${session_name}-codex" C-m
+    done
+
+    # Start ttyd servers
+    local claude_port=$CLAUDE_PORT
+    local codex_port=$CODEX_PORT
+
+    ttyd -p "$claude_port" -W tmux attach -t "${session_name}-claude" &
+    echo $! > "$peer_sync/pids/ttyd-claude.pid"
+
+    ttyd -p "$codex_port" -W tmux attach -t "${session_name}-codex" &
+    echo $! > "$peer_sync/pids/ttyd-codex.pid"
+
+    success "Started ttyd servers"
+    echo ""
+    echo "Web terminals:"
+    echo "  Claude: http://localhost:$claude_port"
+    echo "  Codex:  http://localhost:$codex_port"
+    echo ""
+    echo "Stop with: agent-duo stop"
+}
+
+#------------------------------------------------------------------------------
+# Command: stop
+#------------------------------------------------------------------------------
+
+cmd_stop() {
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+
+    info "Stopping Agent Duo..."
+
+    # Kill ttyd processes
+    if [ -d "$peer_sync/pids" ]; then
+        for pidfile in "$peer_sync/pids"/*.pid; do
+            [ -f "$pidfile" ] || continue
+            local pid
+            pid="$(cat "$pidfile")"
+            if kill -0 "$pid" 2>/dev/null; then
+                kill "$pid" 2>/dev/null || true
+                info "Killed process $pid ($(basename "$pidfile" .pid))"
+            fi
+            rm -f "$pidfile"
+        done
+    fi
+
+    # Kill tmux sessions with duo- prefix
+    local feature
+    feature="$(get_feature 2>/dev/null)" || true
+    if [ -n "$feature" ]; then
+        tmux kill-session -t "duo-${feature}" 2>/dev/null && info "Killed tmux session: duo-${feature}" || true
+        tmux kill-session -t "duo-${feature}-claude" 2>/dev/null && info "Killed tmux session: duo-${feature}-claude" || true
+        tmux kill-session -t "duo-${feature}-codex" 2>/dev/null && info "Killed tmux session: duo-${feature}-codex" || true
+    fi
+
+    success "Stopped"
+}
+
+#------------------------------------------------------------------------------
+# Command: status
+#------------------------------------------------------------------------------
+
+cmd_status() {
+    local root
+    root="$(get_project_root 2>/dev/null)" || die "Not in an agent-duo session"
+    local peer_sync="$root/.peer-sync"
+
+    echo ""
+    echo "=== Agent Duo Status ==="
+    echo ""
+
+    if [ -f "$peer_sync/feature" ]; then
+        echo "Feature:  $(cat "$peer_sync/feature")"
+    fi
+
+    if [ -f "$peer_sync/session" ]; then
+        echo "Session:  $(cat "$peer_sync/session")"
+    fi
+
+    if [ -f "$peer_sync/phase" ]; then
+        echo "Phase:    $(cat "$peer_sync/phase")"
+    fi
+
+    if [ -f "$peer_sync/round" ]; then
+        echo "Round:    $(cat "$peer_sync/round")"
+    fi
+
+    echo ""
+    echo "--- Agent Status ---"
+
+    for agent in claude codex; do
+        local status_file="$peer_sync/${agent}.status"
+        if [ -f "$status_file" ]; then
+            local line
+            line="$(cat "$status_file")"
+            local status msg timestamp
+            status="$(echo "$line" | cut -d'|' -f1)"
+            timestamp="$(echo "$line" | cut -d'|' -f2)"
+            msg="$(echo "$line" | cut -d'|' -f3-)"
+
+            local time_str=""
+            if [ -n "$timestamp" ] && [ "$timestamp" != "$status" ]; then
+                time_str=" ($(date -r "$timestamp" '+%H:%M:%S' 2>/dev/null || echo "$timestamp"))"
+            fi
+
+            printf "%-8s: %s%s" "$agent" "$status" "$time_str"
+            [ -n "$msg" ] && [ "$msg" != "$status" ] && printf " - %s" "$msg"
+            echo ""
+        else
+            echo "$agent:   (no status)"
+        fi
+    done
+
+    # Check for PRs
+    echo ""
+    echo "--- Pull Requests ---"
+    for agent in claude codex; do
+        local pr_file="$peer_sync/${agent}.pr"
+        if [ -f "$pr_file" ]; then
+            echo "$agent:   $(cat "$pr_file")"
+        else
+            echo "$agent:   (none)"
+        fi
+    done
+
+    # List reviews
+    if [ -d "$peer_sync/reviews" ] && [ "$(ls -A "$peer_sync/reviews" 2>/dev/null)" ]; then
+        echo ""
+        echo "--- Reviews ---"
+        ls -1 "$peer_sync/reviews"
+    fi
+
+    echo ""
+}
+
+#------------------------------------------------------------------------------
+# Command: pr
+#------------------------------------------------------------------------------
+
+cmd_pr() {
+    local agent="$1"
+    [ -z "$agent" ] && die "Usage: agent-duo pr <agent>"
+
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+    local feature
+    feature="$(get_feature)"
+
+    # Determine worktree
+    local project_name
+    project_name="$(basename "$root")"
+    local parent_dir
+    parent_dir="$(dirname "$root")"
+    local worktree="$parent_dir/${project_name}-${feature}-${agent}"
+
+    [ -d "$worktree" ] || die "Worktree not found: $worktree"
+
+    info "Creating PR for $agent..."
+
+    cd "$worktree"
+
+    # Check for changes
+    if [ -z "$(git status --porcelain)" ]; then
+        warn "No changes to commit in $agent's worktree"
+    else
+        # Auto-commit changes
+        git add -A
+        git commit -m "Solution from $agent for $feature" || true
+    fi
+
+    # Push branch
+    local branch="${feature}-${agent}"
+    git push -u origin "$branch" 2>/dev/null || git push origin "$branch"
+
+    # Look for PR body file
+    local pr_body=""
+    local pr_body_file="$root/${feature}-${agent}-PR.md"
+    if [ -f "$pr_body_file" ]; then
+        pr_body="$(cat "$pr_body_file")"
+    else
+        pr_body="Solution from $agent for feature: $feature"
+    fi
+
+    # Create PR
+    local pr_url
+    pr_url="$(gh pr create --title "${agent}'s solution for $feature" --body "$pr_body" --head "$branch" 2>/dev/null)" || \
+        pr_url="$(gh pr view --json url -q '.url' 2>/dev/null)" || \
+        die "Failed to create PR. Is gh installed and authenticated?"
+
+    # Record PR
+    echo "$pr_url" > "$peer_sync/${agent}.pr"
+    atomic_write "$peer_sync/${agent}.status" "pr-created|$(date +%s)|$pr_url"
+
+    success "PR created: $pr_url"
+
+    # Check if both PRs exist
+    if [ -f "$peer_sync/claude.pr" ] && [ -f "$peer_sync/codex.pr" ]; then
+        echo "complete" > "$peer_sync/session"
+        success "Both PRs created - session complete!"
+    fi
+}
+
+#------------------------------------------------------------------------------
+# Command: cleanup
+#------------------------------------------------------------------------------
+
+cmd_cleanup() {
+    local full=false
+    [ "$1" = "--full" ] && full=true
+
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+    local feature
+    feature="$(get_feature)"
+    local project_name
+    project_name="$(basename "$root")"
+    local parent_dir
+    parent_dir="$(dirname "$root")"
+
+    info "Cleaning up session: $feature"
+
+    # Stop any running processes first
+    cmd_stop
+
+    # Remove worktrees
+    local worktree_claude="$parent_dir/${project_name}-${feature}-claude"
+    local worktree_codex="$parent_dir/${project_name}-${feature}-codex"
+
+    cd "$root"  # Make sure we're not in a worktree
+
+    if [ -d "$worktree_claude" ]; then
+        git worktree remove --force "$worktree_claude" 2>/dev/null || rm -rf "$worktree_claude"
+        info "Removed worktree: $worktree_claude"
+    fi
+
+    if [ -d "$worktree_codex" ]; then
+        git worktree remove --force "$worktree_codex" 2>/dev/null || rm -rf "$worktree_codex"
+        info "Removed worktree: $worktree_codex"
+    fi
+
+    # Prune worktree references
+    git worktree prune
+
+    if $full; then
+        # Remove state
+        rm -rf "$peer_sync"
+        info "Removed .peer-sync"
+
+        # Optionally delete branches
+        git branch -D "${feature}-claude" 2>/dev/null && info "Deleted branch: ${feature}-claude" || true
+        git branch -D "${feature}-codex" 2>/dev/null && info "Deleted branch: ${feature}-codex" || true
+    fi
+
+    success "Cleanup complete"
+}
+
+#------------------------------------------------------------------------------
+# Command: signal (for agents)
+#------------------------------------------------------------------------------
+
+cmd_signal() {
+    local agent="$1"
+    local status="$2"
+    local message="${3:-}"
+
+    [ -z "$agent" ] || [ -z "$status" ] && die "Usage: agent-duo signal <agent> <status> [message]"
+
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+
+    # Validate status
+    case "$status" in
+        working|done|reviewing|review-done|interrupted|error|pr-created) ;;
+        *) die "Invalid status: $status (valid: working, done, reviewing, review-done, interrupted, error, pr-created)" ;;
+    esac
+
+    local content="${status}|$(date +%s)|${message}"
+    atomic_write "$peer_sync/${agent}.status" "$content"
+
+    success "$agent status: $status"
+}
+
+#------------------------------------------------------------------------------
+# Command: peer-status (for agents)
+#------------------------------------------------------------------------------
+
+cmd_peer_status() {
+    local peer="${PEER_NAME:-}"
+    [ -z "$peer" ] && die "PEER_NAME not set. Are you in an agent session?"
+
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+    local status_file="$peer_sync/${peer}.status"
+
+    if [ -f "$status_file" ]; then
+        cat "$status_file"
+    else
+        echo "unknown"
+    fi
+}
+
+#------------------------------------------------------------------------------
+# Command: phase (for agents)
+#------------------------------------------------------------------------------
+
+cmd_phase() {
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+
+    if [ -f "$peer_sync/phase" ]; then
+        cat "$peer_sync/phase"
+    else
+        echo "unknown"
+    fi
+}
+
+#------------------------------------------------------------------------------
+# Command: help
+#------------------------------------------------------------------------------
+
+cmd_help() {
+    cat << 'EOF'
+Agent Duo - Coordinate two AI coding agents
+
+USAGE
+    agent-duo <command> [options]
+
+USER COMMANDS
+    start <feature> [--ttyd]
+        Start a new session for the given feature.
+        Creates worktrees and tmux session (or ttyd if --ttyd).
+        Looks for <feature>.md as the task description.
+
+    stop
+        Stop ttyd servers and tmux sessions, keep worktrees.
+
+    status
+        Show current session state, agent statuses, and PRs.
+
+    pr <agent>
+        Create a PR for the specified agent (claude or codex).
+        Auto-commits uncommitted changes and pushes.
+
+    cleanup [--full]
+        Remove worktrees. With --full, also removes .peer-sync
+        and deletes the feature branches.
+
+    setup
+        Install agent-duo to ~/.local/bin and skills to agent dirs.
+
+AGENT COMMANDS (used by AI agents)
+    signal <agent> <status> [message]
+        Signal a status change. Status values:
+        working, done, reviewing, review-done, interrupted, error, pr-created
+
+    peer-status
+        Read peer's current status (requires PEER_NAME env var).
+
+    phase
+        Read current phase (work or review).
+
+ENVIRONMENT VARIABLES (set in agent sessions)
+    PEER_SYNC       Path to .peer-sync directory
+    MY_NAME         This agent's name (claude or codex)
+    PEER_NAME       Other agent's name
+    PEER_WORKTREE   Path to peer's worktree
+    FEATURE         Feature name
+
+EXAMPLES
+    # Start a session
+    agent-duo start auth
+
+    # Check status
+    agent-duo status
+
+    # Create PR when done
+    agent-duo pr claude
+
+    # Clean up
+    agent-duo cleanup --full
+EOF
+}
+
+#------------------------------------------------------------------------------
+# Main
+#------------------------------------------------------------------------------
+
+main() {
+    local cmd="${1:-help}"
+    shift || true
+
+    case "$cmd" in
+        start)       cmd_start "$@" ;;
+        stop)        cmd_stop "$@" ;;
+        status)      cmd_status "$@" ;;
+        pr)          cmd_pr "$@" ;;
+        cleanup)     cmd_cleanup "$@" ;;
+        setup)       cmd_setup "$@" ;;
+        signal)      cmd_signal "$@" ;;
+        peer-status) cmd_peer_status "$@" ;;
+        phase)       cmd_phase "$@" ;;
+        help|--help|-h) cmd_help ;;
+        *)           die "Unknown command: $cmd (try 'agent-duo help')" ;;
+    esac
+}
+
+main "$@"
