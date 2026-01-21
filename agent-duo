@@ -3,13 +3,18 @@
 #
 # Usage: agent-duo <command> [options]
 #
-# Commands:
+# Session Commands:
 #   start <feature>      Start session, creates worktrees
+#   run [options]        Run orchestrator loop with timeouts
 #   stop                 Stop ttyd servers, keep worktrees
 #   status               Show session state
 #   pr <agent>           Create PR for agent's solution
 #   cleanup [--full]     Remove worktrees (--full: also state)
 #   setup                Install agent-duo to PATH and skills
+#
+# Control Commands:
+#   nudge <agent> [msg]  Send message to agent terminal
+#   interrupt <agent>    Interrupt agent (Esc + Ctrl-C)
 #
 # Agent Commands:
 #   signal <agent> <status> [message]   Signal status change
@@ -700,6 +705,376 @@ cmd_phase() {
 }
 
 #------------------------------------------------------------------------------
+# Command: run (orchestrator)
+#------------------------------------------------------------------------------
+
+# Default timeouts in seconds
+DEFAULT_WORK_TIMEOUT=600    # 10 minutes
+DEFAULT_REVIEW_TIMEOUT=300  # 5 minutes
+DEFAULT_POLL_INTERVAL=10    # Check every 10 seconds
+
+# Get agent status (just the status part, not timestamp/message)
+get_agent_status() {
+    local agent="$1"
+    local peer_sync="$2"
+    local status_file="$peer_sync/${agent}.status"
+
+    if [ -f "$status_file" ]; then
+        cut -d'|' -f1 < "$status_file"
+    else
+        echo "unknown"
+    fi
+}
+
+# Check if agent has created a PR
+has_pr() {
+    local agent="$1"
+    local peer_sync="$2"
+    [ -f "$peer_sync/${agent}.pr" ]
+}
+
+# Send interrupt to agent via tmux
+interrupt_agent() {
+    local agent="$1"
+    local session="$2"
+    local peer_sync="$3"
+
+    info "Interrupting $agent..."
+
+    # Try Escape first (works for many CLI tools)
+    tmux send-keys -t "$session" Escape
+    sleep 0.5
+
+    # Then Ctrl-C as backup
+    tmux send-keys -t "$session" C-c
+    sleep 1
+
+    # Update status
+    atomic_write "$peer_sync/${agent}.status" "interrupted|$(date +%s)|timed out by orchestrator"
+}
+
+# Send a nudge message to agent
+nudge_agent() {
+    local agent="$1"
+    local session="$2"
+    local message="$3"
+
+    info "Nudging $agent: $message"
+    tmux send-keys -t "$session" "$message"
+    tmux send-keys -t "$session" C-m
+}
+
+# Trigger skill for agent
+trigger_skill() {
+    local agent="$1"
+    local session="$2"
+    local skill="$3"
+
+    case "$agent" in
+        claude)
+            tmux send-keys -t "$session" "/$skill"
+            tmux send-keys -t "$session" C-m
+            ;;
+        codex)
+            tmux send-keys -t "$session" "\$$skill"
+            tmux send-keys -t "$session" C-m
+            ;;
+    esac
+}
+
+cmd_run() {
+    local work_timeout=$DEFAULT_WORK_TIMEOUT
+    local review_timeout=$DEFAULT_REVIEW_TIMEOUT
+    local poll_interval=$DEFAULT_POLL_INTERVAL
+    local max_rounds=10
+    local auto_start=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --work-timeout) work_timeout="$2"; shift 2 ;;
+            --review-timeout) review_timeout="$2"; shift 2 ;;
+            --poll) poll_interval="$2"; shift 2 ;;
+            --max-rounds) max_rounds="$2"; shift 2 ;;
+            --auto-start) auto_start=true; shift ;;
+            -*) die "Unknown option: $1" ;;
+            *) die "Unknown argument: $1" ;;
+        esac
+    done
+
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+    local feature
+    feature="$(get_feature)"
+
+    # Determine tmux session name
+    local session_name="duo-${feature}"
+
+    # Check tmux session exists
+    if ! tmux has-session -t "$session_name" 2>/dev/null; then
+        # Try ttyd-style separate sessions
+        if tmux has-session -t "${session_name}-claude" 2>/dev/null; then
+            local claude_session="${session_name}-claude"
+            local codex_session="${session_name}-codex"
+        else
+            die "No tmux session found. Run 'agent-duo start $feature' first."
+        fi
+    else
+        local claude_session="${session_name}:claude"
+        local codex_session="${session_name}:codex"
+    fi
+
+    echo ""
+    echo "=== Agent Duo Orchestrator ==="
+    echo "Feature:        $feature"
+    echo "Work timeout:   ${work_timeout}s"
+    echo "Review timeout: ${review_timeout}s"
+    echo "Max rounds:     $max_rounds"
+    echo ""
+
+    # Optionally auto-start agents
+    if $auto_start; then
+        info "Starting agents..."
+        tmux send-keys -t "$claude_session" "$CLAUDE_CMD"
+        tmux send-keys -t "$claude_session" C-m
+        tmux send-keys -t "$codex_session" "$CODEX_CMD"
+        tmux send-keys -t "$codex_session" C-m
+        sleep 3
+
+        # Send initial task
+        local task_file="$root/$feature.md"
+        if [ -f "$task_file" ]; then
+            info "Sending task to agents..."
+            local task_content
+            task_content="$(cat "$task_file" | head -c 4000)"
+            tmux send-keys -t "$claude_session" "$task_content"
+            tmux send-keys -t "$claude_session" C-m
+            tmux send-keys -t "$codex_session" "$task_content"
+            tmux send-keys -t "$codex_session" C-m
+        fi
+    fi
+
+    local round=1
+
+    while [ "$round" -le "$max_rounds" ]; do
+        # Check if session is complete
+        if [ "$(cat "$peer_sync/session" 2>/dev/null)" = "complete" ]; then
+            success "Session complete!"
+            break
+        fi
+
+        # Check if both have PRs
+        if has_pr "claude" "$peer_sync" && has_pr "codex" "$peer_sync"; then
+            echo "complete" > "$peer_sync/session"
+            success "Both PRs created - session complete!"
+            echo ""
+            echo "Claude PR: $(cat "$peer_sync/claude.pr")"
+            echo "Codex PR:  $(cat "$peer_sync/codex.pr")"
+            break
+        fi
+
+        echo ""
+        info "=== Round $round: Work Phase ==="
+        echo "$round" > "$peer_sync/round"
+        echo "work" > "$peer_sync/phase"
+
+        # Trigger work phase for agents that don't have PRs
+        if ! has_pr "claude" "$peer_sync"; then
+            trigger_skill "claude" "$claude_session" "duo-work"
+        fi
+        if ! has_pr "codex" "$peer_sync"; then
+            trigger_skill "codex" "$codex_session" "duo-work"
+        fi
+
+        # Wait for work phase completion with timeout
+        local work_start=$SECONDS
+        local claude_done=false
+        local codex_done=false
+
+        # Skip agents that already have PRs
+        has_pr "claude" "$peer_sync" && claude_done=true
+        has_pr "codex" "$peer_sync" && codex_done=true
+
+        while ! ($claude_done && $codex_done); do
+            local elapsed=$((SECONDS - work_start))
+
+            # Check for completion
+            local claude_status
+            claude_status="$(get_agent_status "claude" "$peer_sync")"
+            local codex_status
+            codex_status="$(get_agent_status "codex" "$peer_sync")"
+
+            [ "$claude_status" = "done" ] || [ "$claude_status" = "pr-created" ] && claude_done=true
+            [ "$codex_status" = "done" ] || [ "$codex_status" = "pr-created" ] && codex_done=true
+
+            # Check for PRs created mid-phase
+            has_pr "claude" "$peer_sync" && claude_done=true
+            has_pr "codex" "$peer_sync" && codex_done=true
+
+            if $claude_done && $codex_done; then
+                break
+            fi
+
+            # Check timeout
+            if [ "$elapsed" -ge "$work_timeout" ]; then
+                warn "Work phase timeout (${work_timeout}s)"
+
+                # Interrupt agents that aren't done
+                if ! $claude_done; then
+                    interrupt_agent "claude" "$claude_session" "$peer_sync"
+                    claude_done=true
+                fi
+                if ! $codex_done; then
+                    interrupt_agent "codex" "$codex_session" "$peer_sync"
+                    codex_done=true
+                fi
+                break
+            fi
+
+            printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$work_timeout"
+            sleep "$poll_interval"
+        done
+        echo ""
+
+        # Check again if both have PRs (might have been created during work)
+        if has_pr "claude" "$peer_sync" && has_pr "codex" "$peer_sync"; then
+            echo "complete" > "$peer_sync/session"
+            success "Both PRs created - session complete!"
+            break
+        fi
+
+        # Review phase
+        info "=== Round $round: Review Phase ==="
+        echo "review" > "$peer_sync/phase"
+
+        # Trigger review phase
+        if ! has_pr "claude" "$peer_sync"; then
+            trigger_skill "claude" "$claude_session" "duo-review"
+        fi
+        if ! has_pr "codex" "$peer_sync"; then
+            trigger_skill "codex" "$codex_session" "duo-review"
+        fi
+
+        # Wait for review phase completion with timeout
+        local review_start=$SECONDS
+        claude_done=false
+        codex_done=false
+
+        has_pr "claude" "$peer_sync" && claude_done=true
+        has_pr "codex" "$peer_sync" && codex_done=true
+
+        while ! ($claude_done && $codex_done); do
+            local elapsed=$((SECONDS - review_start))
+
+            local claude_status
+            claude_status="$(get_agent_status "claude" "$peer_sync")"
+            local codex_status
+            codex_status="$(get_agent_status "codex" "$peer_sync")"
+
+            [ "$claude_status" = "review-done" ] || [ "$claude_status" = "pr-created" ] && claude_done=true
+            [ "$codex_status" = "review-done" ] || [ "$codex_status" = "pr-created" ] && codex_done=true
+
+            has_pr "claude" "$peer_sync" && claude_done=true
+            has_pr "codex" "$peer_sync" && codex_done=true
+
+            if $claude_done && $codex_done; then
+                break
+            fi
+
+            # Check timeout
+            if [ "$elapsed" -ge "$review_timeout" ]; then
+                warn "Review phase timeout (${review_timeout}s)"
+
+                if ! $claude_done; then
+                    interrupt_agent "claude" "$claude_session" "$peer_sync"
+                    claude_done=true
+                fi
+                if ! $codex_done; then
+                    interrupt_agent "codex" "$codex_session" "$peer_sync"
+                    codex_done=true
+                fi
+                break
+            fi
+
+            printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$review_timeout"
+            sleep "$poll_interval"
+        done
+        echo ""
+
+        round=$((round + 1))
+    done
+
+    if [ "$round" -gt "$max_rounds" ]; then
+        warn "Reached max rounds ($max_rounds)"
+    fi
+
+    echo ""
+    info "=== Final Status ==="
+    cmd_status
+}
+
+#------------------------------------------------------------------------------
+# Command: nudge
+#------------------------------------------------------------------------------
+
+cmd_nudge() {
+    local agent="$1"
+    local message="${2:-Continue.}"
+
+    [ -z "$agent" ] && die "Usage: agent-duo nudge <agent> [message]"
+
+    local root
+    root="$(get_project_root)"
+    local feature
+    feature="$(get_feature)"
+    local session_name="duo-${feature}"
+
+    # Determine session target
+    local session
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+        session="${session_name}:${agent}"
+    elif tmux has-session -t "${session_name}-${agent}" 2>/dev/null; then
+        session="${session_name}-${agent}"
+    else
+        die "No tmux session found for $agent"
+    fi
+
+    nudge_agent "$agent" "$session" "$message"
+    success "Nudged $agent"
+}
+
+#------------------------------------------------------------------------------
+# Command: interrupt
+#------------------------------------------------------------------------------
+
+cmd_interrupt() {
+    local agent="$1"
+
+    [ -z "$agent" ] && die "Usage: agent-duo interrupt <agent>"
+
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+    local feature
+    feature="$(get_feature)"
+    local session_name="duo-${feature}"
+
+    # Determine session target
+    local session
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+        session="${session_name}:${agent}"
+    elif tmux has-session -t "${session_name}-${agent}" 2>/dev/null; then
+        session="${session_name}-${agent}"
+    else
+        die "No tmux session found for $agent"
+    fi
+
+    interrupt_agent "$agent" "$session" "$peer_sync"
+    success "Interrupted $agent"
+}
+
+#------------------------------------------------------------------------------
 # Command: help
 #------------------------------------------------------------------------------
 
@@ -710,11 +1085,22 @@ Agent Duo - Coordinate two AI coding agents
 USAGE
     agent-duo <command> [options]
 
-USER COMMANDS
+SESSION COMMANDS
     start <feature> [--ttyd]
         Start a new session for the given feature.
         Creates worktrees and tmux session (or ttyd if --ttyd).
         Looks for <feature>.md as the task description.
+
+    run [options]
+        Run the orchestrator loop (work -> review -> work...).
+        Automatically manages phase transitions and timeouts.
+
+        Options:
+          --work-timeout <secs>    Work phase timeout (default: 600)
+          --review-timeout <secs>  Review phase timeout (default: 300)
+          --poll <secs>            Status poll interval (default: 10)
+          --max-rounds <n>         Maximum rounds (default: 10)
+          --auto-start             Auto-launch agent CLIs and send task
 
     stop
         Stop ttyd servers and tmux sessions, keep worktrees.
@@ -732,6 +1118,14 @@ USER COMMANDS
 
     setup
         Install agent-duo to ~/.local/bin and skills to agent dirs.
+
+CONTROL COMMANDS
+    nudge <agent> [message]
+        Send a message to an agent's terminal.
+        Default message: "Continue."
+
+    interrupt <agent>
+        Send Escape + Ctrl-C to interrupt an agent and mark as interrupted.
 
 AGENT COMMANDS (used by AI agents)
     signal <agent> <status> [message]
@@ -752,8 +1146,17 @@ ENVIRONMENT VARIABLES (set in agent sessions)
     FEATURE         Feature name
 
 EXAMPLES
-    # Start a session
+    # Start a session and run orchestrator
     agent-duo start auth
+    agent-duo run --auto-start
+
+    # Or start manually then orchestrate
+    agent-duo start auth
+    # ... manually start agents in tmux windows ...
+    agent-duo run
+
+    # Nudge a stuck agent
+    agent-duo nudge claude "Please continue with the implementation."
 
     # Check status
     agent-duo status
@@ -776,11 +1179,14 @@ main() {
 
     case "$cmd" in
         start)       cmd_start "$@" ;;
+        run)         cmd_run "$@" ;;
         stop)        cmd_stop "$@" ;;
         status)      cmd_status "$@" ;;
         pr)          cmd_pr "$@" ;;
         cleanup)     cmd_cleanup "$@" ;;
         setup)       cmd_setup "$@" ;;
+        nudge)       cmd_nudge "$@" ;;
+        interrupt)   cmd_interrupt "$@" ;;
         signal)      cmd_signal "$@" ;;
         peer-status) cmd_peer_status "$@" ;;
         phase)       cmd_phase "$@" ;;

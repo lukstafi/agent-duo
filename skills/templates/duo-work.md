@@ -60,18 +60,6 @@ git -C "$PEER_WORKTREE" diff
 cat "$PEER_WORKTREE/path/to/file"
 ```
 
-### Handling Interrupts
-
-If you're interrupted (check `$PEER_SYNC/$MY_NAME.interrupt` exists), gracefully save your state and signal:
-
-```bash
-if [ -f "$PEER_SYNC/$MY_NAME.interrupt" ]; then
-    # Save progress, commit WIP if needed
-    git add -A && git commit -m "WIP: interrupted during $FEATURE"
-    agent-duo signal "$MY_NAME" interrupted "saved WIP, ready for review"
-fi
-```
-
 ### When You're Done with This Phase
 
 When you've made meaningful progress and want peer feedback:
@@ -81,6 +69,8 @@ agent-duo signal "$MY_NAME" done "completed initial implementation"
 ```
 
 Then **STOP and wait**. The orchestrator will trigger the review phase.
+
+**Note**: If you're taking too long, the orchestrator may interrupt you automatically. Don't worry - your work is preserved and you can continue in the next round.
 
 ### When You're Ready to Submit Final PR
 
