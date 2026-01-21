@@ -125,9 +125,10 @@ cmd_setup() {
     git worktree add "$claude_wt" "$CLAUDE_BRANCH"
     git worktree add "$codex_wt" "$CODEX_BRANCH"
 
-    # Initialize peer-sync
+    # Initialize peer-sync (remove stale lock directory if present)
     mkdir -p "$PEER_SYNC/rounds"
-    rm -f "$PEER_SYNC"/*.status "$PEER_SYNC/.lock" 2>/dev/null || true
+    rm -f "$PEER_SYNC"/*.status 2>/dev/null || true
+    rm -rf "$PEER_SYNC/.lock" 2>/dev/null || true
 
     # Symlink .peer-sync to worktrees
     ln -sf "$PEER_SYNC" "$claude_wt/.peer-sync"
@@ -252,8 +253,19 @@ cmd_snapshot() {
 # Start command (launches the session)
 # ============================================================================
 cmd_start() {
-    local task_file="${1:-}"
-    local mode="${2:-tmux}"
+    local task_file=""
+    local mode="tmux"
+
+    # Parse arguments (--ttyd can appear in any position)
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ttyd) mode="--ttyd"; shift ;;
+            --tmux) mode="tmux"; shift ;;
+            -h|--help) cmd_help; exit 0 ;;
+            -*) log_error "Unknown option: $1"; exit 1 ;;
+            *) task_file="$1"; shift ;;
+        esac
+    done
 
     log_phase "AGENT DUO SESSION"
 
@@ -269,6 +281,8 @@ cmd_start() {
     if [[ -n "$task_file" ]] && [[ -f "$task_file" ]]; then
         cp "$task_file" "$PEER_SYNC/task.md"
         log_info "Task: $task_file"
+    elif [[ -n "$task_file" ]]; then
+        log_warn "Task file not found: $task_file"
     fi
 
     local claude_wt=$(get_worktree_path "claude")
