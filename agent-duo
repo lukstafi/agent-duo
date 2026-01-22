@@ -951,10 +951,12 @@ trigger_skill() {
     case "$agent" in
         claude)
             tmux send-keys -t "$session" "/$skill"
+            sleep 0.1
             tmux send-keys -t "$session" C-m
             ;;
         codex)
             tmux send-keys -t "$session" "\$$skill"
+            sleep 0.1
             tmux send-keys -t "$session" C-m
             ;;
     esac
