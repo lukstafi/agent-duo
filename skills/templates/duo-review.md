@@ -1,3 +1,10 @@
+---
+name: duo-review
+description: Agent-duo review phase instructions for examining peer's work
+metadata:
+  short-description: Review peer's work in duo collaboration
+---
+
 # Agent Duo - Review Phase
 
 You are in the **review phase** of duo collaboration.

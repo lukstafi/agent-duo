@@ -1,3 +1,10 @@
+---
+name: duo-work
+description: Agent-duo work phase instructions for continuing development in round 2+
+metadata:
+  short-description: Continue work in duo collaboration
+---
+
 # Agent Duo - Work Phase (Round 2+)
 
 You're back in the **work phase**. Continue developing your solution.
