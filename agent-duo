@@ -1058,10 +1058,13 @@ cmd_run() {
         echo "work" > "$peer_sync/phase"
 
         # Trigger work phase for agents that don't have PRs
+        # Reset status to working before triggering (in case agent doesn't signal)
         if ! has_pr "claude" "$peer_sync"; then
+            atomic_write "$peer_sync/claude.status" "working|$(date +%s)|round $round work phase"
             trigger_skill "claude" "$claude_session" "duo-work"
         fi
         if ! has_pr "codex" "$peer_sync"; then
+            atomic_write "$peer_sync/codex.status" "working|$(date +%s)|round $round work phase"
             trigger_skill "codex" "$codex_session" "duo-work"
         fi
 
@@ -1127,10 +1130,13 @@ cmd_run() {
         echo "review" > "$peer_sync/phase"
 
         # Trigger review phase
+        # Reset status to reviewing before triggering (in case agent doesn't signal)
         if ! has_pr "claude" "$peer_sync"; then
+            atomic_write "$peer_sync/claude.status" "reviewing|$(date +%s)|round $round review phase"
             trigger_skill "claude" "$claude_session" "duo-review"
         fi
         if ! has_pr "codex" "$peer_sync"; then
+            atomic_write "$peer_sync/codex.status" "reviewing|$(date +%s)|round $round review phase"
             trigger_skill "codex" "$codex_session" "duo-review"
         fi
 
