@@ -223,11 +223,12 @@ cmd_setup() {
     success "Installed Claude skills to $claude_skills"
 
     # Install Codex skills (uses $command syntax)
+    # Codex expects skills as directories with SKILL.md inside
     local codex_skills="$HOME/.codex/skills"
-    mkdir -p "$codex_skills"
+    mkdir -p "$codex_skills/duo-work" "$codex_skills/duo-review"
 
-    install_skill "$templates_dir/duo-work.md" "$codex_skills/duo-work.md" "\$duo-work"
-    install_skill "$templates_dir/duo-review.md" "$codex_skills/duo-review.md" "\$duo-review"
+    install_skill "$templates_dir/duo-work.md" "$codex_skills/duo-work/SKILL.md" "\$duo-work"
+    install_skill "$templates_dir/duo-review.md" "$codex_skills/duo-review/SKILL.md" "\$duo-review"
     success "Installed Codex skills to $codex_skills"
 
     # Install shared notify hook script for both agents
