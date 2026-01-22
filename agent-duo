@@ -592,7 +592,7 @@ cmd_stop() {
 
     info "Stopping Agent Duo..."
 
-    # Kill ttyd processes
+    # Kill ttyd processes from PID files
     if [ -d "$peer_sync/pids" ]; then
         for pidfile in "$peer_sync/pids"/*.pid; do
             [ -f "$pidfile" ] || continue
@@ -605,6 +605,9 @@ cmd_stop() {
             rm -f "$pidfile"
         done
     fi
+
+    # Fallback: kill any ttyd processes for duo- sessions (in case PID files are missing)
+    pkill -f "ttyd.*duo-" 2>/dev/null && info "Killed remaining ttyd processes" || true
 
     # Kill tmux sessions with duo- prefix
     local feature
