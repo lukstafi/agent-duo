@@ -947,8 +947,9 @@ nudge_agent() {
 }
 
 # Trigger skill for agent
-# For Claude: use /skill invocation
-# For Codex: send skill content directly (skill invocation unreliable)
+# Trigger a skill for an agent
+# Claude: /skill invocation
+# Codex: $skill invocation (with double Enter workaround)
 trigger_skill() {
     local agent="$1"
     local session="$2"
@@ -961,21 +962,12 @@ trigger_skill() {
             tmux send-keys -t "$session" Enter
             ;;
         codex)
-            # Send skill content directly instead of invoking $skill
-            local skill_file="$HOME/.codex/skills/$skill/SKILL.md"
-            if [ -f "$skill_file" ]; then
-                local content
-                content="$(cat "$skill_file" | head -c 4000)"
-                # Use -- to prevent content with dashes from being interpreted as flags
-                tmux send-keys -t "$session" -l -- "$content"
-                sleep 0.5
-                tmux send-keys -t "$session" Enter
-            else
-                # Fallback to skill invocation
-                tmux send-keys -t "$session" -l -- "\$$skill"
-                sleep 0.5
-                tmux send-keys -t "$session" Enter
-            fi
+            # Use $skill invocation with double Enter (workaround for input buffering)
+            tmux send-keys -t "$session" -l "\$$skill"
+            sleep 0.5
+            tmux send-keys -t "$session" Enter
+            sleep 0.3
+            tmux send-keys -t "$session" Enter
             ;;
     esac
 }
