@@ -7,7 +7,9 @@ metadata:
 
 # Agent Duo - Review Phase
 
-You are in the **review phase** of duo collaboration.
+**PHASE CHANGE: You are now in the REVIEW phase, not work.**
+
+Stop any implementation work. Your task is to review your peer's solution.
 
 ## Your Environment
 

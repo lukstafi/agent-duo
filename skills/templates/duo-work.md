@@ -7,7 +7,9 @@ metadata:
 
 # Agent Duo - Work Phase (Round 2+)
 
-You're back in the **work phase**. Continue developing your solution.
+**PHASE CHANGE: You are now in the WORK phase, not review.**
+
+Stop any review activity. Your task is to continue developing your implementation.
 
 ## First Things First
 

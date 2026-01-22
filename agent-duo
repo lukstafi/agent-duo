@@ -966,12 +966,13 @@ trigger_skill() {
             if [ -f "$skill_file" ]; then
                 local content
                 content="$(cat "$skill_file" | head -c 4000)"
-                tmux send-keys -t "$session" "$content"
+                # Use -- to prevent content with dashes from being interpreted as flags
+                tmux send-keys -t "$session" -l -- "$content"
                 sleep 0.5
                 tmux send-keys -t "$session" Enter
             else
                 # Fallback to skill invocation
-                tmux send-keys -t "$session" -l "\$$skill"
+                tmux send-keys -t "$session" -l -- "\$$skill"
                 sleep 0.5
                 tmux send-keys -t "$session" Enter
             fi
@@ -1169,10 +1170,12 @@ cmd_run() {
             # Reset status to working before triggering (in case agent doesn't signal)
             if ! has_pr "claude" "$peer_sync"; then
                 atomic_write "$peer_sync/claude.status" "working|$(date +%s)|round $round work phase"
+                info "Triggering duo-work for claude..."
                 trigger_skill "claude" "$claude_session" "duo-work"
             fi
             if ! has_pr "codex" "$peer_sync"; then
                 atomic_write "$peer_sync/codex.status" "working|$(date +%s)|round $round work phase"
+                info "Triggering duo-work for codex..."
                 trigger_skill "codex" "$codex_session" "duo-work"
             fi
         fi
@@ -1195,8 +1198,9 @@ cmd_run() {
             local codex_status
             codex_status="$(get_agent_status "codex" "$peer_sync")"
 
-            [ "$claude_status" = "done" ] || [ "$claude_status" = "pr-created" ] && claude_done=true
-            [ "$codex_status" = "done" ] || [ "$codex_status" = "pr-created" ] && codex_done=true
+            # Accept done, review-done (agent jumped ahead), or pr-created
+            [[ "$claude_status" =~ ^(done|review-done|pr-created)$ ]] && claude_done=true
+            [[ "$codex_status" =~ ^(done|review-done|pr-created)$ ]] && codex_done=true
 
             # Check for PRs created mid-phase
             has_pr "claude" "$peer_sync" && claude_done=true
@@ -1242,10 +1246,12 @@ cmd_run() {
         # Reset status to reviewing before triggering (in case agent doesn't signal)
         if ! has_pr "claude" "$peer_sync"; then
             atomic_write "$peer_sync/claude.status" "reviewing|$(date +%s)|round $round review phase"
+            info "Triggering duo-review for claude..."
             trigger_skill "claude" "$claude_session" "duo-review"
         fi
         if ! has_pr "codex" "$peer_sync"; then
             atomic_write "$peer_sync/codex.status" "reviewing|$(date +%s)|round $round review phase"
+            info "Triggering duo-review for codex..."
             trigger_skill "codex" "$codex_session" "duo-review"
         fi
 
@@ -1265,8 +1271,9 @@ cmd_run() {
             local codex_status
             codex_status="$(get_agent_status "codex" "$peer_sync")"
 
-            [ "$claude_status" = "review-done" ] || [ "$claude_status" = "pr-created" ] && claude_done=true
-            [ "$codex_status" = "review-done" ] || [ "$codex_status" = "pr-created" ] && codex_done=true
+            # Accept review-done, done (agent skipped review), or pr-created
+            [[ "$claude_status" =~ ^(done|review-done|pr-created)$ ]] && claude_done=true
+            [[ "$codex_status" =~ ^(done|review-done|pr-created)$ ]] && codex_done=true
 
             has_pr "claude" "$peer_sync" && claude_done=true
             has_pr "codex" "$peer_sync" && codex_done=true
