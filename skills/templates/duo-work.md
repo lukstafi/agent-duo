@@ -1,33 +1,10 @@
-# Agent Duo - Work Phase
+# Agent Duo - Work Phase (Round 2+)
 
-You are participating in a **duo collaboration** with another AI agent. You both started from the same task and are developing **alternative solutions** in parallel.
+You're back in the **work phase**. Continue developing your solution.
 
-## Your Environment
+## First Things First
 
-- **Your worktree**: Current directory (read/write)
-- **Peer's worktree**: `$PEER_WORKTREE` (read-only - look but don't touch)
-- **Sync directory**: `$PEER_SYNC`
-- **Your name**: `$MY_NAME`
-- **Peer's name**: `$PEER_NAME`
-- **Feature**: `$FEATURE`
-
-## Current Phase: WORK
-
-You are in the **work phase**. Implement your solution while maintaining your distinct approach.
-
-### First Things First
-
-1. Signal that you're working:
-   ```bash
-   agent-duo signal "$MY_NAME" working "starting implementation"
-   ```
-
-2. Read the task description:
-   ```bash
-   cat "$FEATURE.md"
-   ```
-
-3. Check if there's peer feedback from a previous round:
+1. Check peer feedback from the previous round:
    ```bash
    ROUND=$(cat "$PEER_SYNC/round")
    PREV_ROUND=$((ROUND - 1))
@@ -35,49 +12,32 @@ You are in the **work phase**. Implement your solution while maintaining your di
    [ -f "$REVIEW" ] && cat "$REVIEW"
    ```
 
-### Guidelines
+2. Check peer's current status:
+   ```bash
+   agent-duo peer-status
+   ```
 
-1. **Diverge, don't converge**: Your goal is to produce an *alternative* solution, not to copy your peer
-2. **Different tradeoffs are good**: If your peer chose approach A, consider if approach B has merit
-3. **Read peer's code for insight, not imitation**: Understanding their approach helps you articulate why yours is different
-4. **Focus on your implementation**: Make progress on your own solution
+## Guidelines
 
-### Checking Peer's Progress (Optional)
+- **Diverge, don't converge**: Maintain your *alternative* approach
+- **Consider peer feedback**: Address valid concerns while keeping your distinct solution
+- **Different tradeoffs are good**: Your approach has merit even if different
 
-You can peek at your peer's work to understand their approach:
+## Checking Peer's Progress
 
 ```bash
-# See their status
-agent-duo peer-status
-
-# See what files they changed
-git -C "$PEER_WORKTREE" status
-
-# See their changes
 git -C "$PEER_WORKTREE" diff
-
-# Read specific files
-cat "$PEER_WORKTREE/path/to/file"
 ```
 
-### When You're Done with This Phase
+## When Done
 
-When you've made meaningful progress and want peer feedback:
-
+Signal completion and **STOP**:
 ```bash
-agent-duo signal "$MY_NAME" done "completed initial implementation"
+agent-duo signal "$MY_NAME" done "brief summary"
 ```
 
-Then **STOP and wait**. The orchestrator will trigger the review phase.
-
-**Note**: If you're taking too long, the orchestrator may interrupt you automatically. Don't worry - your work is preserved and you can continue in the next round.
-
-### When You're Ready to Submit Final PR
-
-If your solution is complete:
+## When Ready for Final PR
 
 ```bash
 agent-duo pr "$MY_NAME"
 ```
-
-This auto-commits, pushes, and creates the PR. The duo ends when both agents have PRs.

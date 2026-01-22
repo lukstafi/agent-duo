@@ -960,6 +960,68 @@ trigger_skill() {
     esac
 }
 
+# Generate augmented first-round message with full context
+# This replaces the need for /duo-work skill in round 1
+generate_round1_message() {
+    local agent="$1"
+    local peer="$2"
+    local feature="$3"
+    local task_content="$4"
+    local peer_worktree="$5"
+    local peer_sync="$6"
+
+    cat <<EOF
+# Task: $feature
+
+$task_content
+
+---
+## Agent-Duo Context
+
+You are **$agent** in a duo workflow with **$peer** as your peer.
+Both of you are developing **alternative solutions** in parallel.
+
+- **Phase**: Work (Round 1)
+- **Your worktree**: Current directory (read/write)
+- **Peer's worktree**: $peer_worktree (read-only - look but don't touch)
+- **Sync directory**: $peer_sync
+
+### Your Goal
+
+Implement your solution independently. Your peer works in parallel on the same task.
+
+### Guidelines
+
+1. **Diverge, don't converge**: Produce an *alternative* solution, not a copy
+2. **Different tradeoffs are good**: If peer chose approach A, consider approach B
+3. **Read peer's code for insight, not imitation**
+4. **Focus on your implementation**: Make progress on your own solution
+
+### Checking Peer's Progress (Optional)
+
+\`\`\`bash
+agent-duo peer-status
+git -C "$peer_worktree" diff
+\`\`\`
+
+### When Done
+
+Signal completion and **STOP**:
+\`\`\`bash
+agent-duo signal "$agent" done "brief summary of what you did"
+\`\`\`
+
+The orchestrator will then trigger the review phase.
+
+### When Ready to Submit Final PR
+
+If your solution is complete:
+\`\`\`bash
+agent-duo pr "$agent"
+\`\`\`
+EOF
+}
+
 cmd_run() {
     local work_timeout=$DEFAULT_WORK_TIMEOUT
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
@@ -1011,6 +1073,14 @@ cmd_run() {
     echo "Max rounds:     $max_rounds"
     echo ""
 
+    # Calculate worktree paths for augmented messages
+    local project_name
+    project_name="$(basename "$root")"
+    local parent_dir
+    parent_dir="$(dirname "$root")"
+    local worktree_claude="$parent_dir/${project_name}-${feature}-claude"
+    local worktree_codex="$parent_dir/${project_name}-${feature}-codex"
+
     # Optionally auto-start agents
     if $auto_start; then
         info "Starting agents..."
@@ -1019,18 +1089,7 @@ cmd_run() {
         tmux send-keys -t "$codex_session" "$CODEX_CMD"
         tmux send-keys -t "$codex_session" C-m
         sleep 3
-
-        # Send initial task
-        local task_file
-        if task_file="$(find_task_file "$root" "$feature")"; then
-            info "Sending task to agents..."
-            local task_content
-            task_content="$(cat "$task_file" | head -c 4000)"
-            tmux send-keys -t "$claude_session" "$task_content"
-            tmux send-keys -t "$claude_session" C-m
-            tmux send-keys -t "$codex_session" "$task_content"
-            tmux send-keys -t "$codex_session" C-m
-        fi
+        # Task will be sent as augmented round 1 message below
     fi
 
     local round=1
@@ -1058,14 +1117,43 @@ cmd_run() {
         echo "work" > "$peer_sync/phase"
 
         # Trigger work phase for agents that don't have PRs
-        # Reset status to working before triggering (in case agent doesn't signal)
-        if ! has_pr "claude" "$peer_sync"; then
-            atomic_write "$peer_sync/claude.status" "working|$(date +%s)|round $round work phase"
-            trigger_skill "claude" "$claude_session" "duo-work"
-        fi
-        if ! has_pr "codex" "$peer_sync"; then
-            atomic_write "$peer_sync/codex.status" "working|$(date +%s)|round $round work phase"
-            trigger_skill "codex" "$codex_session" "duo-work"
+        # Round 1: Send augmented message with full context (avoids skill race condition)
+        # Round 2+: Trigger duo-work skill (agent already has context)
+        if [ "$round" -eq 1 ]; then
+            # Round 1: Send augmented task with full context
+            local task_file
+            local task_content=""
+            if task_file="$(find_task_file "$root" "$feature")"; then
+                task_content="$(cat "$task_file" | head -c 4000)"
+            fi
+
+            if ! has_pr "claude" "$peer_sync"; then
+                atomic_write "$peer_sync/claude.status" "working|$(date +%s)|round $round work phase"
+                info "Sending augmented task to claude..."
+                local claude_msg
+                claude_msg="$(generate_round1_message "claude" "codex" "$feature" "$task_content" "$worktree_codex" "$peer_sync")"
+                tmux send-keys -t "$claude_session" "$claude_msg"
+                tmux send-keys -t "$claude_session" C-m
+            fi
+            if ! has_pr "codex" "$peer_sync"; then
+                atomic_write "$peer_sync/codex.status" "working|$(date +%s)|round $round work phase"
+                info "Sending augmented task to codex..."
+                local codex_msg
+                codex_msg="$(generate_round1_message "codex" "claude" "$feature" "$task_content" "$worktree_claude" "$peer_sync")"
+                tmux send-keys -t "$codex_session" "$codex_msg"
+                tmux send-keys -t "$codex_session" C-m
+            fi
+        else
+            # Round 2+: Trigger skill (agent already knows the context)
+            # Reset status to working before triggering (in case agent doesn't signal)
+            if ! has_pr "claude" "$peer_sync"; then
+                atomic_write "$peer_sync/claude.status" "working|$(date +%s)|round $round work phase"
+                trigger_skill "claude" "$claude_session" "duo-work"
+            fi
+            if ! has_pr "codex" "$peer_sync"; then
+                atomic_write "$peer_sync/codex.status" "working|$(date +%s)|round $round work phase"
+                trigger_skill "codex" "$codex_session" "duo-work"
+            fi
         fi
 
         # Wait for work phase completion with timeout
