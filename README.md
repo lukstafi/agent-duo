@@ -61,16 +61,17 @@ Implement user authentication with:
 Use the existing Express app structure.
 EOF
 
-# 2. Start the duo session
-agent-duo start add-auth
+# 2. Start the duo session with orchestration (recommended)
+agent-duo start add-auth --auto-run
+# Opens 3 web terminals (orchestrator, claude, codex) and starts immediately
 
-# 3. Attach to tmux and start agents manually in their windows
+# Alternative: manual control
+agent-duo start add-auth           # Start ttyd web terminals only
+agent-duo run --auto-start         # Then run orchestrator separately
+
+# Or use tmux directly (no web terminals)
+agent-duo start add-auth --no-ttyd
 tmux attach -t duo-add-auth
-# Window 1 (claude): claude --dangerously-skip-permissions
-# Window 2 (codex): codex --yolo
-
-# 4. Or run the orchestrator to manage everything
-agent-duo run --auto-start
 ```
 
 ## Example Session
@@ -78,21 +79,25 @@ agent-duo run --auto-start
 Here's what a typical session looks like:
 
 ```
-$ agent-duo start add-auth
+$ agent-duo start add-auth --auto-run
 Starting Agent Duo session: add-auth
 Project: myproject
 Creating worktree for claude...
 Creating worktree for codex...
-Created tmux session: duo-add-auth
+Started ttyd servers
 
-Windows:
-  0: orchestrator  - Main project root
-  1: claude        - /Users/me/myproject-add-auth-claude
-  2: codex         - /Users/me/myproject-add-auth-codex
+Web terminals:
+  Orchestrator: http://localhost:7680
+  Claude:       http://localhost:7681
+  Codex:        http://localhost:7682
 
-Attach with: tmux attach -t duo-add-auth
+Starting orchestrator with --auto-start...
+Stop with: agent-duo stop
+```
 
-$ agent-duo run
+The orchestrator terminal shows:
+
+```
 === Agent Duo Orchestrator ===
 Feature:        add-auth
 Work timeout:   600s
@@ -121,11 +126,13 @@ Codex PR:  https://github.com/user/myproject/pull/43
 ### Session Management
 
 ```bash
-agent-duo start <feature>      # Create worktrees, tmux session
-agent-duo run [options]        # Run orchestrator loop
-agent-duo status               # Show current state
-agent-duo stop                 # Stop servers, keep worktrees
-agent-duo cleanup [--full]     # Remove worktrees (--full: everything)
+agent-duo start <feature>              # Start with ttyd web terminals
+agent-duo start <feature> --auto-run   # Start and run orchestrator immediately
+agent-duo start <feature> --no-ttyd    # Start with single tmux session (no web terminals)
+agent-duo run [options]                # Run orchestrator loop (if not using --auto-run)
+agent-duo status                       # Show current state
+agent-duo stop                         # Stop servers, keep worktrees
+agent-duo cleanup [--full]             # Remove worktrees (--full: everything)
 ```
 
 ### Orchestrator Options

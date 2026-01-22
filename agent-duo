@@ -4,7 +4,7 @@
 # Usage: agent-duo <command> [options]
 #
 # Session Commands:
-#   start <feature>      Start session, creates worktrees
+#   start <feature> [--auto-run] [--no-ttyd]   Start session with web terminals
 #   run [options]        Run orchestrator loop with timeouts
 #   stop                 Stop ttyd servers, keep worktrees
 #   status               Show session state
@@ -44,6 +44,7 @@ DEFAULT_AGENT_A="claude"
 DEFAULT_AGENT_B="codex"
 
 # Ports for ttyd
+ORCHESTRATOR_PORT=7680
 CLAUDE_PORT=7681
 CODEX_PORT=7682
 
@@ -332,20 +333,31 @@ NOTIFY_EOF
 cmd_start() {
     local feature=""
     local ttyd_mode=true
+    local auto_run=false
+    local work_timeout=$DEFAULT_WORK_TIMEOUT
+    local review_timeout=$DEFAULT_REVIEW_TIMEOUT
+    local max_rounds=10
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --no-ttyd) ttyd_mode=false; shift ;;
+            --auto-run) auto_run=true; shift ;;
+            --work-timeout) work_timeout="$2"; shift 2 ;;
+            --review-timeout) review_timeout="$2"; shift 2 ;;
+            --max-rounds) max_rounds="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
             *) feature="$1"; shift ;;
         esac
     done
 
-    [ -z "$feature" ] && die "Usage: agent-duo start <feature> [--no-ttyd]"
+    [ -z "$feature" ] && die "Usage: agent-duo start <feature> [--no-ttyd] [--auto-run]"
 
     # Ensure we're in a git repo
     git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not a git repository"
+
+    # Ensure repo has at least one commit
+    git rev-parse HEAD >/dev/null 2>&1 || die "Repository has no commits. Create an initial commit first."
 
     local project_root
     project_root="$(git rev-parse --show-toplevel)"
@@ -374,8 +386,22 @@ cmd_start() {
     # Create branches and worktrees
     cd "$project_root"
 
+    # Detect main branch: try origin/HEAD, then common names, then current branch
     local main_branch
-    main_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')" || main_branch="main"
+    main_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')" || true
+    if [ -z "$main_branch" ]; then
+        # Try common branch names
+        for candidate in main master; do
+            if git rev-parse --verify "$candidate" >/dev/null 2>&1; then
+                main_branch="$candidate"
+                break
+            fi
+        done
+    fi
+    if [ -z "$main_branch" ]; then
+        # Fall back to current branch
+        main_branch="$(git rev-parse --abbrev-ref HEAD)"
+    fi
 
     if [ ! -d "$worktree_claude" ]; then
         info "Creating worktree for claude..."
@@ -416,7 +442,8 @@ cmd_start() {
     fi
 
     if $ttyd_mode; then
-        start_ttyd_mode "$feature" "$project_root" "$worktree_claude" "$worktree_codex" "$peer_sync"
+        start_ttyd_mode "$feature" "$project_root" "$worktree_claude" "$worktree_codex" "$peer_sync" \
+            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds"
     else
         start_tmux_mode "$feature" "$project_root" "$worktree_claude" "$worktree_codex" "$peer_sync"
     fi
@@ -483,6 +510,10 @@ start_ttyd_mode() {
     local worktree_claude="$3"
     local worktree_codex="$4"
     local peer_sync="$5"
+    local auto_run="${6:-false}"
+    local work_timeout="${7:-$DEFAULT_WORK_TIMEOUT}"
+    local review_timeout="${8:-$DEFAULT_REVIEW_TIMEOUT}"
+    local max_rounds="${9:-10}"
 
     local session_name="duo-${feature}"
 
@@ -490,14 +521,22 @@ start_ttyd_mode() {
     command -v ttyd >/dev/null 2>&1 || die "ttyd not found. Install with: brew install ttyd"
 
     # Kill existing sessions if any
+    tmux kill-session -t "${session_name}-orchestrator" 2>/dev/null || true
     tmux kill-session -t "${session_name}-claude" 2>/dev/null || true
     tmux kill-session -t "${session_name}-codex" 2>/dev/null || true
 
-    # Create tmux sessions for each agent
+    # Create tmux sessions for orchestrator and each agent
+    tmux new-session -d -s "${session_name}-orchestrator" -c "$project_root"
     tmux new-session -d -s "${session_name}-claude" -c "$worktree_claude"
     tmux new-session -d -s "${session_name}-codex" -c "$worktree_codex"
 
-    # Set environment variables
+    # Set environment variables for orchestrator
+    for var in "PEER_SYNC='$peer_sync'" "FEATURE='$feature'"; do
+        tmux send-keys -t "${session_name}-orchestrator" "export $var"
+        tmux send-keys -t "${session_name}-orchestrator" C-m
+    done
+
+    # Set environment variables for agents
     for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
         tmux send-keys -t "${session_name}-claude" "export $var"
         tmux send-keys -t "${session_name}-claude" C-m
@@ -509,8 +548,12 @@ start_ttyd_mode() {
     done
 
     # Start ttyd servers
+    local orchestrator_port=$ORCHESTRATOR_PORT
     local claude_port=$CLAUDE_PORT
     local codex_port=$CODEX_PORT
+
+    ttyd -p "$orchestrator_port" -W tmux attach -t "${session_name}-orchestrator" &
+    echo $! > "$peer_sync/pids/ttyd-orchestrator.pid"
 
     ttyd -p "$claude_port" -W tmux attach -t "${session_name}-claude" &
     echo $! > "$peer_sync/pids/ttyd-claude.pid"
@@ -521,9 +564,20 @@ start_ttyd_mode() {
     success "Started ttyd servers"
     echo ""
     echo "Web terminals:"
-    echo "  Claude: http://localhost:$claude_port"
-    echo "  Codex:  http://localhost:$codex_port"
+    echo "  Orchestrator: http://localhost:$orchestrator_port"
+    echo "  Claude:       http://localhost:$claude_port"
+    echo "  Codex:        http://localhost:$codex_port"
     echo ""
+
+    # If auto-run, start the orchestrator loop in the orchestrator session
+    if [ "$auto_run" = "true" ]; then
+        info "Starting orchestrator with --auto-start..."
+        tmux send-keys -t "${session_name}-orchestrator" \
+            "agent-duo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
+        tmux send-keys -t "${session_name}-orchestrator" C-m
+    else
+        echo "Start orchestrator with: agent-duo run --auto-start"
+    fi
     echo "Stop with: agent-duo stop"
 }
 
@@ -557,6 +611,7 @@ cmd_stop() {
     feature="$(get_feature 2>/dev/null)" || true
     if [ -n "$feature" ]; then
         tmux kill-session -t "duo-${feature}" 2>/dev/null && info "Killed tmux session: duo-${feature}" || true
+        tmux kill-session -t "duo-${feature}-orchestrator" 2>/dev/null && info "Killed tmux session: duo-${feature}-orchestrator" || true
         tmux kill-session -t "duo-${feature}-claude" 2>/dev/null && info "Killed tmux session: duo-${feature}-claude" || true
         tmux kill-session -t "duo-${feature}-codex" 2>/dev/null && info "Killed tmux session: duo-${feature}-codex" || true
     fi
@@ -1209,15 +1264,30 @@ USAGE
     agent-duo <command> [options]
 
 SESSION COMMANDS
-    start <feature> [--no-ttyd]
+    start <feature> [options]
         Start a new session for the given feature.
-        Creates worktrees, tmux session, and ttyd web terminals (unless --no-ttyd).
+        Creates worktrees, tmux sessions, and ttyd web terminals.
         Looks for task description in: <feature>.md, doc/<feature>.md,
         docs/<feature>.md, or **/<feature>.md (anywhere in project).
+
+        Options:
+          --auto-run               Start orchestrator immediately in its own terminal
+          --no-ttyd                Use single tmux session instead of web terminals
+          --work-timeout <secs>    Work phase timeout (default: 600, with --auto-run)
+          --review-timeout <secs>  Review phase timeout (default: 300, with --auto-run)
+          --max-rounds <n>         Maximum rounds (default: 10, with --auto-run)
+
+        With ttyd (default): Creates 3 web terminals at ports 7680-7682
+          - Orchestrator (7680): Main project root
+          - Claude (7681): Claude's worktree
+          - Codex (7682): Codex's worktree
+
+        With --no-ttyd: Creates single tmux session with 3 windows
 
     run [options]
         Run the orchestrator loop (work -> review -> work...).
         Automatically manages phase transitions and timeouts.
+        Not needed if using 'start --auto-run'.
 
         Options:
           --work-timeout <secs>    Work phase timeout (default: 600)
@@ -1270,14 +1340,17 @@ ENVIRONMENT VARIABLES (set in agent sessions)
     FEATURE         Feature name
 
 EXAMPLES
-    # Start a session and run orchestrator
+    # Recommended: start with auto-run (opens 3 web terminals, starts everything)
+    agent-duo start auth --auto-run
+
+    # Alternative: start manually then run orchestrator
     agent-duo start auth
     agent-duo run --auto-start
 
-    # Or start manually then orchestrate
-    agent-duo start auth
-    # ... manually start agents in tmux windows ...
-    agent-duo run
+    # Use tmux instead of web terminals
+    agent-duo start auth --no-ttyd
+    tmux attach -t duo-auth
+    # Then run: agent-duo run --auto-start
 
     # Nudge a stuck agent
     agent-duo nudge claude "Please continue with the implementation."
