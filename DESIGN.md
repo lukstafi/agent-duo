@@ -210,6 +210,18 @@ Key skill behaviors:
 - **Divergence**: Maintain distinct approach from peer
 - **Interrupts**: If interrupted, gracefully yield and continue next round
 
+## Completion Hooks
+
+Agents don't reliably execute signaling commands from skill instructions. Instead, `agent-duo setup` configures completion hooks:
+
+- **Claude**: `Stop` hook in `~/.claude/settings.json`
+- **Codex**: `notify` hook in `~/.codex/config.toml`
+
+Both hooks run `~/.local/bin/agent-duo-notify` which:
+1. Reads the current phase from `$PEER_SYNC/phase`
+2. Signals `done` (work phase) or `review-done` (review phase)
+3. Skips if already in a terminal state
+
 ## Environment Variables
 
 Set by orchestrator in each agent's tmux/ttyd session:
@@ -291,6 +303,7 @@ The agent-duo system was bootstrapped by having Claude and Codex implement it co
 3. **Cross-worktree access**: Codex needs `--yolo` (not `--full-auto`) for unrestricted access
 4. **Nudging agents**: Send "Continue." rather than empty Enter to unstick agents
 5. **PEER_SYNC paths**: Use absolute paths and symlinks to avoid confusion
+6. **Agents don't reliably run signal commands**: Neither Claude nor Codex reliably execute bash commands from skill instructions. Use completion hooks instead (`agent-duo setup` configures both)
 
 ### Active Worktrees (from bootstrap)
 

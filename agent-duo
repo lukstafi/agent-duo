@@ -229,6 +229,99 @@ cmd_setup() {
     install_skill "$templates_dir/duo-review.md" "$codex_skills/\$duo-review.md" "\$duo-review"
     success "Installed Codex skills to $codex_skills"
 
+    # Install shared notify hook script for both agents
+    # Called when agent completes a turn to auto-signal status
+    local notify_script="$install_dir/agent-duo-notify"
+    cat > "$notify_script" << 'NOTIFY_EOF'
+#!/bin/bash
+# Called by agent hooks when they complete a turn
+# Signals the appropriate status based on current phase
+# Usage: agent-duo-notify <agent-name>
+#   or via environment: MY_NAME=<agent-name> agent-duo-notify
+
+agent="${1:-$MY_NAME}"
+[ -z "$agent" ] && exit 0
+
+# Need PEER_SYNC to be set
+[ -z "$PEER_SYNC" ] && exit 0
+[ ! -d "$PEER_SYNC" ] && exit 0
+
+# Read current phase
+phase="$(cat "$PEER_SYNC/phase" 2>/dev/null)" || exit 0
+
+# Read current status
+current_status="$(cut -d'|' -f1 < "$PEER_SYNC/${agent}.status" 2>/dev/null)"
+
+# Determine what status to signal based on phase
+case "$phase" in
+    work)
+        # Don't override if already done or beyond
+        case "$current_status" in
+            done|review-done|pr-created) exit 0 ;;
+        esac
+        agent-duo signal "$agent" done "completed via hook"
+        ;;
+    review)
+        # Don't override if already review-done or beyond
+        case "$current_status" in
+            review-done|pr-created) exit 0 ;;
+        esac
+        agent-duo signal "$agent" review-done "completed via hook"
+        ;;
+esac
+NOTIFY_EOF
+    chmod +x "$notify_script"
+    success "Installed notify hook script to $notify_script"
+
+    # Configure Codex to use the notify hook
+    local codex_config="$HOME/.codex/config.toml"
+    if [ -f "$codex_config" ]; then
+        if grep -q "^notify" "$codex_config"; then
+            warn "Codex config already has 'notify' setting - not overwriting"
+            warn "To enable auto-signaling, set: notify = [\"$notify_script\"]"
+        else
+            echo "" >> "$codex_config"
+            echo "# Agent-duo notify hook for auto-signaling completion" >> "$codex_config"
+            echo "notify = [\"$notify_script\"]" >> "$codex_config"
+            success "Added notify hook to Codex config"
+        fi
+    else
+        mkdir -p "$(dirname "$codex_config")"
+        echo "# Agent-duo notify hook for auto-signaling completion" > "$codex_config"
+        echo "notify = [\"$notify_script\"]" >> "$codex_config"
+        success "Created Codex config with notify hook"
+    fi
+
+    # Configure Claude to use the Stop hook
+    local claude_settings="$HOME/.claude/settings.json"
+    local hook_config="{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$notify_script\"}]}]}"
+
+    if [ -f "$claude_settings" ]; then
+        # Check if hooks already configured
+        if grep -q '"hooks"' "$claude_settings"; then
+            warn "Claude settings already has 'hooks' - not overwriting"
+            warn "To enable auto-signaling, add Stop hook: $notify_script"
+        else
+            # Add hooks to existing settings using a temp file approach
+            # Remove trailing } and add hooks
+            local tmp_settings
+            tmp_settings="$(mktemp)"
+            # Use Python/jq if available, otherwise simple sed
+            if command -v jq >/dev/null 2>&1; then
+                jq --arg cmd "$notify_script" '.hooks = {"Stop":[{"hooks":[{"type":"command","command":$cmd}]}]}' "$claude_settings" > "$tmp_settings"
+                mv "$tmp_settings" "$claude_settings"
+                success "Added Stop hook to Claude settings"
+            else
+                warn "jq not found - please manually add hooks to $claude_settings:"
+                echo "  \"hooks\": $hook_config"
+            fi
+        fi
+    else
+        mkdir -p "$(dirname "$claude_settings")"
+        echo "{\"hooks\":$hook_config}" > "$claude_settings"
+        success "Created Claude settings with Stop hook"
+    fi
+
     success "Setup complete!"
 }
 
