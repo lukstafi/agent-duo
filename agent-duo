@@ -142,6 +142,33 @@ get_agent_port() {
     esac
 }
 
+# Find task file for a feature
+# Searches in order: <feature>.md, doc/<feature>.md, docs/<feature>.md, **/<feature>.md
+find_task_file() {
+    local project_root="$1"
+    local feature="$2"
+
+    # Check standard locations first
+    for path in "$project_root/$feature.md" \
+                "$project_root/doc/$feature.md" \
+                "$project_root/docs/$feature.md"; do
+        if [ -f "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+
+    # Fall back to searching anywhere in the project
+    local found
+    found="$(find "$project_root" -name "$feature.md" -type f 2>/dev/null | head -1)"
+    if [ -n "$found" ]; then
+        echo "$found"
+        return 0
+    fi
+
+    return 1
+}
+
 #------------------------------------------------------------------------------
 # Command: setup
 #------------------------------------------------------------------------------
@@ -211,18 +238,18 @@ cmd_setup() {
 
 cmd_start() {
     local feature=""
-    local ttyd_mode=false
+    local ttyd_mode=true
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --ttyd) ttyd_mode=true; shift ;;
+            --no-ttyd) ttyd_mode=false; shift ;;
             -*) die "Unknown option: $1" ;;
             *) feature="$1"; shift ;;
         esac
     done
 
-    [ -z "$feature" ] && die "Usage: agent-duo start <feature> [--ttyd]"
+    [ -z "$feature" ] && die "Usage: agent-duo start <feature> [--no-ttyd]"
 
     # Ensure we're in a git repo
     git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not a git repository"
@@ -233,9 +260,12 @@ cmd_start() {
     project_name="$(basename "$project_root")"
 
     # Check for task file
-    local task_file="$project_root/$feature.md"
-    if [ ! -f "$task_file" ]; then
-        warn "Task file not found: $task_file"
+    local task_file
+    if task_file="$(find_task_file "$project_root" "$feature")"; then
+        info "Found task file: $task_file"
+    else
+        warn "Task file not found: $feature.md"
+        warn "Searched: $feature.md, doc/$feature.md, docs/$feature.md, **/$feature.md"
         warn "Create it with the task description, or the agents won't know what to do."
     fi
 
@@ -843,8 +873,8 @@ cmd_run() {
         sleep 3
 
         # Send initial task
-        local task_file="$root/$feature.md"
-        if [ -f "$task_file" ]; then
+        local task_file
+        if task_file="$(find_task_file "$root" "$feature")"; then
             info "Sending task to agents..."
             local task_content
             task_content="$(cat "$task_file" | head -c 4000)"
@@ -1086,10 +1116,11 @@ USAGE
     agent-duo <command> [options]
 
 SESSION COMMANDS
-    start <feature> [--ttyd]
+    start <feature> [--no-ttyd]
         Start a new session for the given feature.
-        Creates worktrees and tmux session (or ttyd if --ttyd).
-        Looks for <feature>.md as the task description.
+        Creates worktrees, tmux session, and ttyd web terminals (unless --no-ttyd).
+        Looks for task description in: <feature>.md, doc/<feature>.md,
+        docs/<feature>.md, or **/<feature>.md (anywhere in project).
 
     run [options]
         Run the orchestrator loop (work -> review -> work...).

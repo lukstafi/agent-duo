@@ -172,7 +172,7 @@ Each round consists of:
 - `git` with worktree support
 - `tmux`
 - `gh` CLI (for PR creation)
-- Optional: `ttyd` for web terminals (`--ttyd` mode)
+- `ttyd` for web terminals (use `--no-ttyd` to disable)
 
 ## License
 
