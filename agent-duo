@@ -1133,6 +1133,7 @@ cmd_run() {
                 local claude_msg
                 claude_msg="$(generate_round1_message "claude" "codex" "$feature" "$task_content" "$worktree_codex" "$peer_sync")"
                 tmux send-keys -t "$claude_session" "$claude_msg"
+                sleep 0.1
                 tmux send-keys -t "$claude_session" C-m
             fi
             if ! has_pr "codex" "$peer_sync"; then
@@ -1141,6 +1142,7 @@ cmd_run() {
                 local codex_msg
                 codex_msg="$(generate_round1_message "codex" "claude" "$feature" "$task_content" "$worktree_claude" "$peer_sync")"
                 tmux send-keys -t "$codex_session" "$codex_msg"
+                sleep 0.1
                 tmux send-keys -t "$codex_session" C-m
             fi
         else
