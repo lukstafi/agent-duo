@@ -1378,6 +1378,13 @@ cmd_run() {
         done
         echo ""
 
+        # Check if both have PRs after review phase (before starting next round)
+        if has_pr "claude" "$peer_sync" && has_pr "codex" "$peer_sync"; then
+            echo "complete" > "$peer_sync/session"
+            success "Both PRs created - session complete!"
+            break
+        fi
+
         round=$((round + 1))
     done
 
