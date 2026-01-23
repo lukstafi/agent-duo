@@ -47,6 +47,8 @@ agent-duo signal "$MY_NAME" done "brief summary"
 
 ## When Ready for Final PR
 
+When your solution is complete and tested, create your PR:
 ```bash
-agent-duo pr "$MY_NAME"
+agent-duo pr "$MY_NAME"   # recommended: handles commit, push, and orchestrator sync
+# or: gh pr create ...    # also works, orchestrator will detect it
 ```

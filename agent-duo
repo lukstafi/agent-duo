@@ -992,11 +992,32 @@ get_agent_status() {
     fi
 }
 
-# Check if agent has created a PR
+# Check if agent has created a PR (from .pr file or by detecting on GitHub)
 has_pr() {
     local agent="$1"
     local peer_sync="$2"
-    [ -f "$peer_sync/${agent}.pr" ]
+
+    # Fast path: check for .pr file first
+    if [ -f "$peer_sync/${agent}.pr" ]; then
+        return 0
+    fi
+
+    # Slow path: check GitHub for PR on agent's branch
+    local feature
+    feature="$(cat "$peer_sync/feature" 2>/dev/null)" || return 1
+    local branch="${feature}-${agent}"
+
+    # Check if there's an open PR for this branch
+    local pr_url
+    pr_url="$(gh pr view "$branch" --json url -q '.url' 2>/dev/null)" || return 1
+
+    if [ -n "$pr_url" ]; then
+        # Cache the result in the .pr file
+        echo "$pr_url" > "$peer_sync/${agent}.pr"
+        return 0
+    fi
+
+    return 1
 }
 
 # Send interrupt to agent via tmux
@@ -1111,9 +1132,10 @@ The orchestrator will then trigger the review phase.
 
 ### When Ready to Submit Final PR
 
-If your solution is complete:
+When your solution is complete and tested, create your PR:
 \`\`\`bash
-agent-duo pr "$agent"
+agent-duo pr "$agent"   # recommended: handles commit, push, and orchestrator sync
+# or: gh pr create ...  # also works, orchestrator will detect it
 \`\`\`
 EOF
 }
