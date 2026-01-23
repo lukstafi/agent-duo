@@ -43,10 +43,8 @@ NC='\033[0m' # No Color
 DEFAULT_AGENT_A="claude"
 DEFAULT_AGENT_B="codex"
 
-# Ports for ttyd
-ORCHESTRATOR_PORT=7680
-CLAUDE_PORT=7681
-CODEX_PORT=7682
+# Default base port for ttyd (actual ports allocated dynamically)
+DEFAULT_BASE_PORT=7680
 
 # Commands to launch each agent
 CLAUDE_CMD="claude --dangerously-skip-permissions"
@@ -133,14 +131,83 @@ get_agent_cmd() {
     esac
 }
 
-# Get agent port
+# Check if a port is available
+is_port_available() {
+    local port="$1"
+    ! nc -z localhost "$port" 2>/dev/null
+}
+
+# Find next available port starting from base
+find_available_port() {
+    local base="$1"
+    local port="$base"
+    local max_attempts=100
+    local attempt=0
+
+    while [ "$attempt" -lt "$max_attempts" ]; do
+        if is_port_available "$port"; then
+            echo "$port"
+            return 0
+        fi
+        port=$((port + 1))
+        attempt=$((attempt + 1))
+    done
+
+    return 1
+}
+
+# Allocate ports for a session and store in .peer-sync/ports
+allocate_ports() {
+    local peer_sync="$1"
+    local ports_file="$peer_sync/ports"
+
+    # If ports already allocated, return
+    if [ -f "$ports_file" ]; then
+        return 0
+    fi
+
+    local base=$DEFAULT_BASE_PORT
+    local orchestrator_port claude_port codex_port
+
+    orchestrator_port="$(find_available_port "$base")" || die "Could not find available port for orchestrator"
+    claude_port="$(find_available_port "$((orchestrator_port + 1))")" || die "Could not find available port for claude"
+    codex_port="$(find_available_port "$((claude_port + 1))")" || die "Could not find available port for codex"
+
+    cat > "$ports_file" << EOF
+ORCHESTRATOR_PORT=$orchestrator_port
+CLAUDE_PORT=$claude_port
+CODEX_PORT=$codex_port
+EOF
+}
+
+# Get allocated ports from .peer-sync/ports
+get_ports() {
+    local peer_sync="$1"
+    local ports_file="$peer_sync/ports"
+
+    if [ -f "$ports_file" ]; then
+        # shellcheck source=/dev/null
+        source "$ports_file"
+    else
+        die "Ports not allocated. Run 'agent-duo start' first."
+    fi
+}
+
+# Get agent port (for custom agents, finds a new available port)
 get_agent_port() {
     local agent="$1"
-    case "$agent" in
-        claude) echo "$CLAUDE_PORT" ;;
-        codex) echo "$CODEX_PORT" ;;
-        *) echo "$((7680 + RANDOM % 100))" ;;
-    esac
+    local peer_sync="$2"
+
+    if [ -n "$peer_sync" ] && [ -f "$peer_sync/ports" ]; then
+        get_ports "$peer_sync"
+        case "$agent" in
+            claude) echo "$CLAUDE_PORT" ;;
+            codex) echo "$CODEX_PORT" ;;
+            *) find_available_port "$DEFAULT_BASE_PORT" ;;
+        esac
+    else
+        find_available_port "$DEFAULT_BASE_PORT"
+    fi
 }
 
 # Find task file for a feature
@@ -548,7 +615,9 @@ start_ttyd_mode() {
         tmux send-keys -t "${session_name}-codex" C-m
     done
 
-    # Start ttyd servers
+    # Allocate and load ports
+    allocate_ports "$peer_sync"
+    get_ports "$peer_sync"
     local orchestrator_port=$ORCHESTRATOR_PORT
     local claude_port=$CLAUDE_PORT
     local codex_port=$CODEX_PORT
@@ -607,12 +676,16 @@ cmd_stop() {
         done
     fi
 
-    # Fallback: kill any ttyd processes for duo- sessions (in case PID files are missing)
-    pkill -f "ttyd.*duo-" 2>/dev/null && info "Killed remaining ttyd processes" || true
-
-    # Kill tmux sessions with duo- prefix
+    # Get feature name for session-specific cleanup
     local feature
     feature="$(get_feature 2>/dev/null)" || true
+
+    # Fallback: kill ttyd processes for THIS session only (in case PID files are missing)
+    if [ -n "$feature" ]; then
+        pkill -f "ttyd.*duo-${feature}-" 2>/dev/null && info "Killed remaining ttyd processes for duo-${feature}" || true
+    fi
+
+    # Kill tmux sessions for this feature
     if [ -n "$feature" ]; then
         tmux kill-session -t "duo-${feature}" 2>/dev/null && info "Killed tmux session: duo-${feature}" || true
         tmux kill-session -t "duo-${feature}-orchestrator" 2>/dev/null && info "Killed tmux session: duo-${feature}-orchestrator" || true
@@ -650,6 +723,17 @@ cmd_status() {
 
     if [ -f "$peer_sync/round" ]; then
         echo "Round:    $(cat "$peer_sync/round")"
+    fi
+
+    # Show allocated ports if available
+    if [ -f "$peer_sync/ports" ]; then
+        # shellcheck source=/dev/null
+        source "$peer_sync/ports"
+        echo ""
+        echo "--- Web Terminals ---"
+        echo "Orchestrator: http://localhost:$ORCHESTRATOR_PORT"
+        echo "Claude:       http://localhost:$CLAUDE_PORT"
+        echo "Codex:        http://localhost:$CODEX_PORT"
     fi
 
     echo ""
@@ -1391,10 +1475,11 @@ SESSION COMMANDS
           --review-timeout <secs>  Review phase timeout (default: 300, with --auto-run)
           --max-rounds <n>         Maximum rounds (default: 10, with --auto-run)
 
-        With ttyd (default): Creates 3 web terminals at ports 7680-7682
-          - Orchestrator (7680): Main project root
-          - Claude (7681): Claude's worktree
-          - Codex (7682): Codex's worktree
+        With ttyd (default): Creates 3 web terminals (ports allocated dynamically)
+          - Orchestrator: Main project root
+          - Claude: Claude's worktree
+          - Codex: Codex's worktree
+          Port assignments are stored in .peer-sync/ports for the session.
 
         With --no-ttyd: Creates single tmux session with 3 windows
 
