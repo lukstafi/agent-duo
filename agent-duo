@@ -503,6 +503,17 @@ cmd_start() {
     ln -sfn "$peer_sync" "$worktree_claude/.peer-sync"
     ln -sfn "$peer_sync" "$worktree_codex/.peer-sync"
 
+    # Ensure .peer-sync is excluded from git (using .git/info/exclude to avoid modifying tracked files)
+    local git_exclude="$project_root/.git/info/exclude"
+    if [ -f "$git_exclude" ]; then
+        if ! grep -qxF ".peer-sync" "$git_exclude"; then
+            echo ".peer-sync" >> "$git_exclude"
+        fi
+    else
+        mkdir -p "$(dirname "$git_exclude")"
+        echo ".peer-sync" > "$git_exclude"
+    fi
+
     # Copy task file to worktrees if it exists
     if [ -f "$task_file" ]; then
         cp "$task_file" "$worktree_claude/"
