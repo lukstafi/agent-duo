@@ -1004,10 +1004,10 @@ Implement your solution independently. Your peer works in parallel on the same t
 
 ### Guidelines
 
-1. **Diverge, don't converge**: Produce an *alternative* solution, not a copy
+1. **Diverge to explore the search space**: Produce an *alternative* solution, not a copy
 2. **Different tradeoffs are good**: If peer chose approach A, consider approach B
 3. **Read peer's code for insight, not imitation**
-4. **Focus on your implementation**: Make progress on your own solution
+4. **Focus on your implementation**: Make progress on your own solution, convergence is fine if it arises organically from a confident consensus
 
 ### Checking Peer's Progress (Optional)
 

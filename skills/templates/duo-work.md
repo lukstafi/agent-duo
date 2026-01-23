@@ -28,9 +28,9 @@ Stop any review activity. Your task is to continue developing your implementatio
 
 ## Guidelines
 
-- **Diverge, don't converge**: Maintain your *alternative* approach
+- **Diverge to explore the search space**: Maintain your *alternative* approach
 - **Consider peer feedback**: Address valid concerns while keeping your distinct solution
-- **Different tradeoffs are good**: Your approach has merit even if different
+- **Stay goal focused**: Convergence is fine if it arises organically from a confident consensus
 
 ## Checking Peer's Progress
 
