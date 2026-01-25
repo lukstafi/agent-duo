@@ -238,13 +238,15 @@ Key skill behaviors:
 
 Agents don't reliably execute signaling commands from skill instructions. Instead, `agent-duo setup` configures completion hooks:
 
-- **Claude**: `Stop` hook in `~/.claude/settings.json`
-- **Codex**: `notify` hook in `~/.codex/config.toml`
+- **Claude**: `Stop` hook in `~/.claude/settings.json` with command `agent-duo-notify claude`
+- **Codex**: `notify` hook in `~/.codex/config.toml` with args `["agent-duo-notify", "codex"]`
 
-Both hooks run `~/.local/bin/agent-duo-notify` which:
-1. Reads the current phase from `$PEER_SYNC/phase`
-2. Signals `done` (work phase) or `review-done` (review phase)
-3. Skips if already in a terminal state
+Both hooks run `~/.local/bin/agent-duo-notify <agent-name>` which:
+1. Receives agent name as `$1` (required - hooks don't inherit shell environment variables)
+2. Discovers `PEER_SYNC` from `$PWD/.peer-sync` symlink (present in worktrees)
+3. Reads the current phase from `$PEER_SYNC/phase`
+4. Signals `done` (work phase), `review-done` (review phase), or `clarify-done` (clarify phase)
+5. Skips if already in a terminal state
 
 ## Environment Variables
 
@@ -328,6 +330,7 @@ The agent-duo system was bootstrapped by having Claude and Codex implement it co
 4. **Nudging agents**: Send "Continue." rather than empty Enter to unstick agents
 5. **PEER_SYNC paths**: Use absolute paths and symlinks to avoid confusion
 6. **Agents don't reliably run signal commands**: Neither Claude nor Codex reliably execute bash commands from skill instructions. Use completion hooks instead (`agent-duo setup` configures both)
+7. **Hook environment isolation**: Agent hooks (Claude Stop, Codex notify) run as separate processes and don't inherit shell environment variables set via `export`. Pass context via command arguments and discover paths from `$PWD`
 
 ### Active Worktrees (from bootstrap)
 

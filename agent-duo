@@ -427,6 +427,14 @@ cmd_setup() {
         success "agent-duo already installed at $install_path"
     fi
 
+    # Copy skills/templates to install dir so setup works from installed location
+    local installed_templates="$install_dir/skills/templates"
+    if [ "$templates_dir" != "$installed_templates" ]; then
+        mkdir -p "$installed_templates"
+        cp -r "$templates_dir"/* "$installed_templates/"
+        success "Installed skill templates to $installed_templates"
+    fi
+
     # Check if ~/.local/bin is in PATH
     if [[ ":$PATH:" != *":$install_dir:"* ]]; then
         warn "Add $install_dir to your PATH:"
@@ -460,13 +468,20 @@ cmd_setup() {
 # Called by agent hooks when they complete a turn
 # Signals the appropriate status based on current phase
 # Usage: agent-duo-notify <agent-name>
-#   or via environment: MY_NAME=<agent-name> agent-duo-notify
+#   Agent name is required as $1 (passed via hook configuration)
+#   PEER_SYNC is discovered from $PWD/.peer-sync symlink
 
-agent="${1:-$MY_NAME}"
+agent="$1"
 [ -z "$agent" ] && exit 0
 
-# Need PEER_SYNC to be set
-[ -z "$PEER_SYNC" ] && exit 0
+# Discover PEER_SYNC from working directory (worktrees have .peer-sync symlink)
+if [ -z "$PEER_SYNC" ]; then
+    if [ -d "$PWD/.peer-sync" ]; then
+        PEER_SYNC="$PWD/.peer-sync"
+    else
+        exit 0
+    fi
+fi
 [ ! -d "$PEER_SYNC" ] && exit 0
 
 # Read current phase
@@ -503,34 +518,34 @@ NOTIFY_EOF
     chmod +x "$notify_script"
     success "Installed notify hook script to $notify_script"
 
-    # Configure Codex to use the notify hook
+    # Configure Codex to use the notify hook (with "codex" as agent name argument)
     local codex_config="$HOME/.codex/config.toml"
     if [ -f "$codex_config" ]; then
         if grep -q "^notify" "$codex_config"; then
             warn "Codex config already has 'notify' setting - not overwriting"
-            warn "To enable auto-signaling, set: notify = [\"$notify_script\"]"
+            warn "To enable auto-signaling, set: notify = [\"$notify_script\", \"codex\"]"
         else
             echo "" >> "$codex_config"
             echo "# Agent-duo notify hook for auto-signaling completion" >> "$codex_config"
-            echo "notify = [\"$notify_script\"]" >> "$codex_config"
+            echo "notify = [\"$notify_script\", \"codex\"]" >> "$codex_config"
             success "Added notify hook to Codex config"
         fi
     else
         mkdir -p "$(dirname "$codex_config")"
         echo "# Agent-duo notify hook for auto-signaling completion" > "$codex_config"
-        echo "notify = [\"$notify_script\"]" >> "$codex_config"
+        echo "notify = [\"$notify_script\", \"codex\"]" >> "$codex_config"
         success "Created Codex config with notify hook"
     fi
 
-    # Configure Claude to use the Stop hook
+    # Configure Claude to use the Stop hook (with "claude" as agent name argument)
     local claude_settings="$HOME/.claude/settings.json"
-    local hook_config="{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$notify_script\"}]}]}"
+    local hook_config="{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$notify_script claude\"}]}]}"
 
     if [ -f "$claude_settings" ]; then
         # Check if hooks already configured
         if grep -q '"hooks"' "$claude_settings"; then
             warn "Claude settings already has 'hooks' - not overwriting"
-            warn "To enable auto-signaling, add Stop hook: $notify_script"
+            warn "To enable auto-signaling, add Stop hook: $notify_script claude"
         else
             # Add hooks to existing settings using a temp file approach
             # Remove trailing } and add hooks
@@ -538,7 +553,7 @@ NOTIFY_EOF
             tmp_settings="$(mktemp)"
             # Use Python/jq if available, otherwise simple sed
             if command -v jq >/dev/null 2>&1; then
-                jq --arg cmd "$notify_script" '.hooks = {"Stop":[{"hooks":[{"type":"command","command":$cmd}]}]}' "$claude_settings" > "$tmp_settings"
+                jq --arg cmd "$notify_script claude" '.hooks = {"Stop":[{"hooks":[{"type":"command","command":$cmd}]}]}' "$claude_settings" > "$tmp_settings"
                 mv "$tmp_settings" "$claude_settings"
                 success "Added Stop hook to Claude settings"
             else
