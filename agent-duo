@@ -6,6 +6,7 @@
 # Session Commands:
 #   start <feature> [--auto-run] [--no-ttyd] [--clarify]  Start session
 #   run [options]        Run orchestrator loop with timeouts
+#                        --on-tui-exit=pause|quit|ignore  TUI exit behavior
 #   stop                 Stop ttyd servers, keep worktrees
 #   restart [--auto-run] Restart session after system restart/crash
 #   status               Show session state
@@ -1365,6 +1366,7 @@ cmd_run() {
     local max_rounds=10
     local auto_start=false
     local enable_clarify=""  # empty means use session default
+    local tui_exit_behavior=$DEFAULT_TUI_EXIT_BEHAVIOR
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -1376,6 +1378,7 @@ cmd_run() {
             --poll) poll_interval="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --auto-start) auto_start=true; shift ;;
+            --on-tui-exit) tui_exit_behavior="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
             *) die "Unknown argument: $1" ;;
         esac
@@ -1492,6 +1495,14 @@ cmd_run() {
 
             if $claude_clarify_done && $codex_clarify_done; then
                 break
+            fi
+
+            # Check if agent TUIs have exited unexpectedly
+            if ! $claude_clarify_done; then
+                check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+            fi
+            if ! $codex_clarify_done; then
+                check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
             fi
 
             # Check timeout
@@ -1643,6 +1654,14 @@ cmd_run() {
                 break
             fi
 
+            # Check if agent TUIs have exited unexpectedly
+            if ! $claude_done; then
+                check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+            fi
+            if ! $codex_done; then
+                check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+            fi
+
             # Check timeout
             if [ "$elapsed" -ge "$work_timeout" ]; then
                 warn "Work phase timeout (${work_timeout}s)"
@@ -1713,6 +1732,14 @@ cmd_run() {
 
             if $claude_done && $codex_done; then
                 break
+            fi
+
+            # Check if agent TUIs have exited unexpectedly
+            if ! $claude_done; then
+                check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+            fi
+            if ! $codex_done; then
+                check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
             fi
 
             # Check timeout

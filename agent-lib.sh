@@ -354,6 +354,7 @@ DEFAULT_WORK_TIMEOUT=600    # 10 minutes
 DEFAULT_REVIEW_TIMEOUT=300  # 5 minutes
 DEFAULT_CLARIFY_TIMEOUT=300 # 5 minutes
 DEFAULT_POLL_INTERVAL=10    # Check every 10 seconds
+DEFAULT_TUI_EXIT_BEHAVIOR="pause"  # What to do on TUI exit: pause, quit, or ignore
 
 # Get agent status (just the status part, not timestamp/message)
 get_agent_status() {
@@ -422,6 +423,55 @@ interrupt_agent() {
 
     # Update status
     atomic_write "$peer_sync/${agent}.status" "interrupted|$(date +%s)|timed out by orchestrator"
+}
+
+# Check if agent TUI has exited and handle according to behavior setting
+# Returns 0 if TUI is running, 1 if TUI exited (and handled)
+# Sets global TUI_EXIT_AGENT if an exit was detected
+check_tui_health() {
+    local agent="$1"
+    local session="$2"
+    local peer_sync="$3"
+    local behavior="${4:-$DEFAULT_TUI_EXIT_BEHAVIOR}"
+
+    # Check if TUI is still running
+    if agent_tui_is_running "$session" "$agent"; then
+        return 0  # TUI is running, all good
+    fi
+
+    # TUI has exited - handle according to behavior
+    warn "Agent $agent TUI has exited unexpectedly!"
+    atomic_write "$peer_sync/${agent}.status" "tui-exited|$(date +%s)|TUI process exited"
+
+    case "$behavior" in
+        ignore)
+            # Just warn and continue waiting (will eventually timeout)
+            warn "Ignoring TUI exit for $agent (--on-tui-exit=ignore)"
+            return 0
+            ;;
+        quit)
+            # Exit the orchestrator
+            echo ""
+            warn "Agent $agent TUI exited. Stopping orchestrator (--on-tui-exit=quit)"
+            echo ""
+            info "To recover, run: agent-duo restart --auto-run"
+            exit 1
+            ;;
+        pause|*)
+            # Default: pause and wait for user intervention
+            echo ""
+            warn "Agent $agent TUI has exited. Orchestrator paused."
+            echo ""
+            info "Options to recover:"
+            echo "  1. Run 'agent-duo restart' to restart the agent TUI"
+            echo "  2. Press Enter to continue waiting (will timeout eventually)"
+            echo "  3. Press Ctrl-C to stop the orchestrator"
+            echo ""
+            read -r -p "Press Enter to continue or Ctrl-C to stop: " || true
+            # After user presses Enter, return and continue polling
+            return 0
+            ;;
+    esac
 }
 
 # Send a nudge message to agent
