@@ -7,6 +7,7 @@
 #   start <feature> [--auto-run] [--no-ttyd]   Start session with web terminals
 #   run [options]        Run orchestrator loop with timeouts
 #   stop                 Stop ttyd servers, keep worktrees
+#   restart [--auto-run] Restart session after system restart/crash
 #   status               Show session state
 #   pr <agent>           Create PR for agent's solution
 #   cleanup [--full]     Remove worktrees (--full: also state)
@@ -207,6 +208,145 @@ get_agent_port() {
         esac
     else
         find_available_port "$DEFAULT_BASE_PORT"
+    fi
+}
+
+# Check if a tmux session exists
+tmux_session_exists() {
+    local session="$1"
+    tmux has-session -t "$session" 2>/dev/null
+}
+
+# Check if a ttyd process is running and serving a specific tmux session
+ttyd_is_running() {
+    local pidfile="$1"
+    if [ -f "$pidfile" ]; then
+        local pid
+        pid="$(cat "$pidfile")"
+        if kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Check if a port is in use (opposite of is_port_available)
+is_port_in_use() {
+    local port="$1"
+    nc -z localhost "$port" 2>/dev/null
+}
+
+# Check if an agent TUI is running in the tmux session
+# by checking if there's an active process beyond just the shell
+agent_tui_is_running() {
+    local session="$1"
+    local agent="$2"
+
+    # Capture the pane's current command
+    local pane_cmd
+    pane_cmd="$(tmux display-message -t "$session" -p '#{pane_current_command}' 2>/dev/null)" || return 1
+
+    # The TUI is running if it's not just bash/zsh
+    case "$pane_cmd" in
+        bash|zsh|sh|-bash|-zsh|-sh) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+# Restart ttyd for a specific session
+# Returns 0 on success, 1 on failure
+restart_ttyd_for_session() {
+    local name="$1"        # e.g., "orchestrator", "claude", "codex"
+    local port="$2"
+    local tmux_session="$3"
+    local pidfile="$4"
+
+    # Check if port is already in use by something else
+    if is_port_in_use "$port"; then
+        # Check if it's our ttyd process
+        if ttyd_is_running "$pidfile"; then
+            info "$name ttyd already running on port $port"
+            return 0
+        else
+            # Port occupied by something else
+            warn "Port $port is occupied but not by our ttyd process"
+            return 1
+        fi
+    fi
+
+    # Check if tmux session exists
+    if ! tmux_session_exists "$tmux_session"; then
+        warn "tmux session $tmux_session does not exist - cannot start ttyd"
+        return 1
+    fi
+
+    # Start ttyd
+    info "Starting ttyd for $name on port $port..."
+    ttyd -p "$port" -W tmux attach -t "$tmux_session" &
+    echo $! > "$pidfile"
+    sleep 0.5
+
+    # Verify it started
+    if ttyd_is_running "$pidfile"; then
+        success "Started ttyd for $name on port $port"
+        return 0
+    else
+        warn "Failed to start ttyd for $name"
+        return 1
+    fi
+}
+
+# Restart an agent TUI in its tmux session
+restart_agent_tui() {
+    local agent="$1"
+    local session="$2"
+    local worktree="$3"
+    local peer_sync="$4"
+    local peer_worktree="$5"
+    local feature="$6"
+
+    # Check if tmux session exists
+    if ! tmux_session_exists "$session"; then
+        warn "tmux session $session does not exist"
+        return 1
+    fi
+
+    # Check if TUI is already running
+    if agent_tui_is_running "$session" "$agent"; then
+        info "$agent TUI already running"
+        return 0
+    fi
+
+    info "Starting $agent TUI..."
+
+    # Re-export environment variables (in case session was recreated)
+    local peer_name
+    case "$agent" in
+        claude) peer_name="codex" ;;
+        codex) peer_name="claude" ;;
+        *) peer_name="unknown" ;;
+    esac
+
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='$agent'" "PEER_NAME='$peer_name'" "PEER_WORKTREE='$peer_worktree'" "FEATURE='$feature'"; do
+        tmux send-keys -t "$session" "export $var"
+        tmux send-keys -t "$session" C-m
+    done
+
+    # Start the agent CLI
+    local agent_cmd
+    agent_cmd="$(get_agent_cmd "$agent")"
+    tmux send-keys -t "$session" "$agent_cmd"
+    tmux send-keys -t "$session" C-m
+
+    sleep 2
+
+    # Verify it started
+    if agent_tui_is_running "$session" "$agent"; then
+        success "Started $agent TUI"
+        return 0
+    else
+        warn "Failed to start $agent TUI (may still be initializing)"
+        return 0  # Don't treat as failure - CLI may take time to start
     fi
 }
 
@@ -705,6 +845,244 @@ cmd_stop() {
     fi
 
     success "Stopped"
+}
+
+#------------------------------------------------------------------------------
+# Command: restart
+#------------------------------------------------------------------------------
+
+cmd_restart() {
+    local auto_run=false
+    local work_timeout=$DEFAULT_WORK_TIMEOUT
+    local review_timeout=$DEFAULT_REVIEW_TIMEOUT
+    local max_rounds=10
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --auto-run) auto_run=true; shift ;;
+            --work-timeout) work_timeout="$2"; shift 2 ;;
+            --review-timeout) review_timeout="$2"; shift 2 ;;
+            --max-rounds) max_rounds="$2"; shift 2 ;;
+            -*) die "Unknown option: $1" ;;
+            *) die "Unknown argument: $1" ;;
+        esac
+    done
+
+    local root
+    root="$(get_project_root 2>/dev/null)" || die "Not in an agent-duo session (no .peer-sync found)"
+    local peer_sync="$root/.peer-sync"
+
+    # Check we have an active session
+    [ -f "$peer_sync/feature" ] || die "No active session (missing .peer-sync/feature)"
+    [ -f "$peer_sync/ports" ] || die "No port allocations found. Was this a ttyd session?"
+
+    local feature
+    feature="$(get_feature)"
+    local project_name
+    project_name="$(basename "$root")"
+    local parent_dir
+    parent_dir="$(dirname "$root")"
+
+    # Calculate paths
+    local worktree_claude="$parent_dir/${project_name}-${feature}-claude"
+    local worktree_codex="$parent_dir/${project_name}-${feature}-codex"
+    local session_name="duo-${feature}"
+
+    # Load ports
+    get_ports "$peer_sync"
+    local orchestrator_port=$ORCHESTRATOR_PORT
+    local claude_port=$CLAUDE_PORT
+    local codex_port=$CODEX_PORT
+
+    echo ""
+    echo "=== Agent Duo Restart ==="
+    echo ""
+    echo "Feature:  $feature"
+    echo "Project:  $project_name"
+    echo ""
+
+    # Ensure pids directory exists
+    mkdir -p "$peer_sync/pids"
+
+    local errors=0
+    local restarted=0
+
+    #---------------------------------------------------------------------------
+    # Phase 1: Check and restart tmux sessions
+    #---------------------------------------------------------------------------
+    info "Checking tmux sessions..."
+
+    # Check orchestrator tmux session
+    if ! tmux_session_exists "${session_name}-orchestrator"; then
+        info "Creating tmux session: ${session_name}-orchestrator"
+        tmux new-session -d -s "${session_name}-orchestrator" -c "$root"
+        for var in "PEER_SYNC='$peer_sync'" "FEATURE='$feature'"; do
+            tmux send-keys -t "${session_name}-orchestrator" "export $var"
+            tmux send-keys -t "${session_name}-orchestrator" C-m
+        done
+        restarted=$((restarted + 1))
+    else
+        success "  orchestrator tmux session: OK"
+    fi
+
+    # Check claude tmux session
+    if ! tmux_session_exists "${session_name}-claude"; then
+        if [ ! -d "$worktree_claude" ]; then
+            warn "  claude worktree missing: $worktree_claude"
+            errors=$((errors + 1))
+        else
+            info "Creating tmux session: ${session_name}-claude"
+            tmux new-session -d -s "${session_name}-claude" -c "$worktree_claude"
+            for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
+                tmux send-keys -t "${session_name}-claude" "export $var"
+                tmux send-keys -t "${session_name}-claude" C-m
+            done
+            restarted=$((restarted + 1))
+        fi
+    else
+        success "  claude tmux session: OK"
+    fi
+
+    # Check codex tmux session
+    if ! tmux_session_exists "${session_name}-codex"; then
+        if [ ! -d "$worktree_codex" ]; then
+            warn "  codex worktree missing: $worktree_codex"
+            errors=$((errors + 1))
+        else
+            info "Creating tmux session: ${session_name}-codex"
+            tmux new-session -d -s "${session_name}-codex" -c "$worktree_codex"
+            for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'"; do
+                tmux send-keys -t "${session_name}-codex" "export $var"
+                tmux send-keys -t "${session_name}-codex" C-m
+            done
+            restarted=$((restarted + 1))
+        fi
+    else
+        success "  codex tmux session: OK"
+    fi
+
+    #---------------------------------------------------------------------------
+    # Phase 2: Check and restart ttyd servers
+    #---------------------------------------------------------------------------
+    echo ""
+    info "Checking ttyd servers..."
+
+    # Check orchestrator ttyd
+    if ! restart_ttyd_for_session "orchestrator" "$orchestrator_port" \
+            "${session_name}-orchestrator" "$peer_sync/pids/ttyd-orchestrator.pid"; then
+        errors=$((errors + 1))
+    elif [ $? -eq 0 ] && ! is_port_in_use "$orchestrator_port" 2>/dev/null; then
+        # Verify port came up
+        sleep 0.5
+        is_port_in_use "$orchestrator_port" || errors=$((errors + 1))
+    fi
+
+    # Check claude ttyd
+    if ! restart_ttyd_for_session "claude" "$claude_port" \
+            "${session_name}-claude" "$peer_sync/pids/ttyd-claude.pid"; then
+        errors=$((errors + 1))
+    fi
+
+    # Check codex ttyd
+    if ! restart_ttyd_for_session "codex" "$codex_port" \
+            "${session_name}-codex" "$peer_sync/pids/ttyd-codex.pid"; then
+        errors=$((errors + 1))
+    fi
+
+    #---------------------------------------------------------------------------
+    # Phase 3: Check and restart agent TUIs
+    #---------------------------------------------------------------------------
+    echo ""
+    info "Checking agent TUIs..."
+
+    # Check claude TUI
+    if ! restart_agent_tui "claude" "${session_name}-claude" \
+            "$worktree_claude" "$peer_sync" "$worktree_codex" "$feature"; then
+        errors=$((errors + 1))
+    fi
+
+    # Check codex TUI
+    if ! restart_agent_tui "codex" "${session_name}-codex" \
+            "$worktree_codex" "$peer_sync" "$worktree_claude" "$feature"; then
+        errors=$((errors + 1))
+    fi
+
+    #---------------------------------------------------------------------------
+    # Phase 4: Check orchestration state and optionally restart orchestrator
+    #---------------------------------------------------------------------------
+    echo ""
+    info "Checking orchestration state..."
+
+    local session_state
+    session_state="$(cat "$peer_sync/session" 2>/dev/null)" || session_state="unknown"
+    local phase
+    phase="$(cat "$peer_sync/phase" 2>/dev/null)" || phase="unknown"
+    local round
+    round="$(cat "$peer_sync/round" 2>/dev/null)" || round="1"
+
+    echo "  Session: $session_state"
+    echo "  Phase:   $phase"
+    echo "  Round:   $round"
+
+    # Check if both agents have PRs (terminal state)
+    local claude_has_pr=false
+    local codex_has_pr=false
+    [ -f "$peer_sync/claude.pr" ] && claude_has_pr=true
+    [ -f "$peer_sync/codex.pr" ] && codex_has_pr=true
+
+    if [ "$session_state" = "complete" ] || ($claude_has_pr && $codex_has_pr); then
+        echo ""
+        success "Session is in terminal state (complete). No orchestrator restart needed."
+        if [ -f "$peer_sync/claude.pr" ]; then
+            echo "  Claude PR: $(cat "$peer_sync/claude.pr")"
+        fi
+        if [ -f "$peer_sync/codex.pr" ]; then
+            echo "  Codex PR:  $(cat "$peer_sync/codex.pr")"
+        fi
+    elif [ "$auto_run" = "true" ]; then
+        echo ""
+        info "Restarting orchestrator loop..."
+
+        # Determine if orchestrator is already running
+        local orchestrator_running=false
+        if agent_tui_is_running "${session_name}-orchestrator" "orchestrator"; then
+            orchestrator_running=true
+        fi
+
+        if ! $orchestrator_running; then
+            tmux send-keys -t "${session_name}-orchestrator" \
+                "agent-duo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
+            tmux send-keys -t "${session_name}-orchestrator" C-m
+            success "Started orchestrator loop"
+        else
+            info "Orchestrator appears to already be running"
+        fi
+    else
+        echo ""
+        info "Session is not complete. To restart the orchestrator loop:"
+        echo "  agent-duo restart --auto-run"
+        echo "Or manually in the orchestrator terminal:"
+        echo "  agent-duo run --auto-start"
+    fi
+
+    #---------------------------------------------------------------------------
+    # Summary
+    #---------------------------------------------------------------------------
+    echo ""
+    echo "--- Web Terminals ---"
+    echo "Orchestrator: http://localhost:$orchestrator_port"
+    echo "Claude:       http://localhost:$claude_port"
+    echo "Codex:        http://localhost:$codex_port"
+    echo ""
+
+    if [ "$errors" -gt 0 ]; then
+        warn "Restart completed with $errors error(s)"
+        return 1
+    else
+        success "Restart complete!"
+        return 0
+    fi
 }
 
 #------------------------------------------------------------------------------
@@ -1538,6 +1916,20 @@ SESSION COMMANDS
     stop
         Stop ttyd servers and tmux sessions, keep worktrees.
 
+    restart [options]
+        Restart a session after system restart or crash (DWIM behavior).
+        - If healthy: no-op
+        - If tmux sessions missing: recreates them
+        - If ttyd down: restarts it (errors if port occupied by other process)
+        - If agent TUIs not running: restarts them
+        - If orchestration incomplete: optionally restarts orchestrator
+
+        Options:
+          --auto-run               Also restart the orchestrator loop
+          --work-timeout <secs>    Work phase timeout (default: 600)
+          --review-timeout <secs>  Review phase timeout (default: 300)
+          --max-rounds <n>         Maximum rounds (default: 10)
+
     status
         Show current session state, agent statuses, and PRs.
 
@@ -1591,6 +1983,9 @@ EXAMPLES
     tmux attach -t duo-auth
     # Then run: agent-duo run --auto-start
 
+    # Recover after system restart
+    agent-duo restart --auto-run
+
     # Nudge a stuck agent
     agent-duo nudge claude "Please continue with the implementation."
 
@@ -1617,6 +2012,7 @@ main() {
         start)       cmd_start "$@" ;;
         run)         cmd_run "$@" ;;
         stop)        cmd_stop "$@" ;;
+        restart)     cmd_restart "$@" ;;
         status)      cmd_status "$@" ;;
         pr)          cmd_pr "$@" ;;
         cleanup)     cmd_cleanup "$@" ;;
