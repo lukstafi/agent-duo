@@ -39,8 +39,10 @@ Agent Duo coordinates two AI coding agents working in parallel on the same task,
 
 ```bash
 agent-duo start <feature>      # Start session, creates worktrees
+agent-duo start <f> --clarify  # Start with clarify phase before work
 agent-duo stop                 # Stop ttyd servers, keep worktrees
 agent-duo status               # Show session state
+agent-duo confirm              # Confirm clarify phase, proceed to work
 agent-duo pr <agent>           # Create PR for agent's solution
 agent-duo cleanup [--full]     # Remove worktrees (--full: also state)
 agent-duo setup                # Install agent-duo to PATH and skills
@@ -73,8 +75,8 @@ Given project directory `myapp` and feature `auth`:
 
 | Concept | Who sets | Values | Purpose |
 |---------|----------|--------|---------|
-| **Phase** | Orchestrator | `work`, `review` | Current stage of the round |
-| **Agent Status** | Agent | `working`, `done`, `reviewing`, `review-done`, `interrupted`, `error` | What agent is doing |
+| **Phase** | Orchestrator | `clarify`, `work`, `review` | Current stage of the round |
+| **Agent Status** | Agent | `clarifying`, `clarify-done`, `working`, `done`, `reviewing`, `review-done`, `interrupted`, `error` | What agent is doing |
 | **Session State** | Orchestrator | `active`, `complete` | Overall progress |
 
 ### State Files (in `.peer-sync/`)
@@ -82,9 +84,13 @@ Given project directory `myapp` and feature `auth`:
 ```
 .peer-sync/
 ├── session          # "active" or "complete"
-├── phase            # "work" or "review"
+├── phase            # "clarify", "work", or "review"
 ├── round            # Current round number (1, 2, 3...)
 ├── feature          # Feature name for this session
+├── clarify-mode     # "true" or "false" - whether clarify phase is enabled
+├── clarify-confirmed # Present when user confirms clarify phase
+├── clarify-claude.md # Claude's approach and questions (clarify phase)
+├── clarify-codex.md  # Codex's approach and questions (clarify phase)
 ├── claude.status    # Agent status: "working|1705847123|implementing API"
 ├── codex.status     # Format: status|epoch|message
 └── reviews/         # Review files from each round
@@ -94,6 +100,21 @@ Given project directory `myapp` and feature `auth`:
 ### Flow
 
 ```
+┌─────────────────────────────────────────────────────────────────┐
+│ CLARIFY PHASE (optional, --clarify flag)                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. Orchestrator sets phase=clarify                             │
+│  2. Agents propose approach and questions (status: clarifying)  │
+│     - Write to .peer-sync/clarify-{agent}.md                    │
+│  3. Agents signal completion (status: clarify-done)             │
+│  4. Orchestrator emails results to user                         │
+│  5. User reviews approaches in terminals                        │
+│  6. User responds to agents if needed (back-and-forth)          │
+│  7. User runs 'agent-duo confirm' to proceed                    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
 ┌─────────────────────────────────────────────────────────────────┐
 │ Round N                                                         │
 ├─────────────────────────────────────────────────────────────────┤
@@ -136,6 +157,8 @@ This allows graceful handling of slow agents without losing progress.
 
 | Status | Meaning | Set by |
 |--------|---------|--------|
+| `clarifying` | Proposing approach and questions | Agent (start of clarify phase) |
+| `clarify-done` | Finished clarify phase | Agent |
 | `working` | Actively implementing | Agent (start of work phase) |
 | `done` | Finished work phase | Agent |
 | `reviewing` | Reading peer's changes | Agent (start of review phase) |
@@ -201,10 +224,11 @@ agent-duo start myfeature --ttyd
 ## Skills
 
 Skills provide phase-specific instructions to agents. Installed to:
-- Claude: `~/.claude/commands/duo-work.md`, `duo-review.md`
-- Codex: `~/.codex/skills/duo-work.md`, `duo-review.md`
+- Claude: `~/.claude/commands/duo-work.md`, `duo-review.md`, `duo-clarify.md`
+- Codex: `~/.codex/skills/duo-work.md`, `duo-review.md`, `duo-clarify.md`
 
 Key skill behaviors:
+- **Clarify phase**: Propose high-level approach, ask clarifying questions, signal `clarify-done`
 - **Work phase**: Implement solution, signal `done` when ready
 - **Review phase**: Read peer's worktree via git, write review, signal `review-done`
 - **Divergence**: Maintain distinct approach from peer
