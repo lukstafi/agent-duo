@@ -1,0 +1,53 @@
+---
+name: solo-coder-work
+description: Solo mode - coder work phase instructions for implementing the solution
+metadata:
+  short-description: Continue coding work in solo collaboration
+---
+
+# Agent Solo - Coder Work Phase (Round 2+)
+
+**PHASE CHANGE: You are now in the WORK phase.**
+
+You are the **CODER** in a solo workflow. A reviewer will examine your work.
+
+## First Things First
+
+1. Check reviewer feedback from the previous round:
+   ```bash
+   ROUND=$(cat "$PEER_SYNC/round")
+   PREV_ROUND=$((ROUND - 1))
+   REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-review.md"
+   [ -f "$REVIEW" ] && cat "$REVIEW"
+   ```
+
+2. Check current phase:
+   ```bash
+   agent-solo phase
+   ```
+
+## Your Task
+
+Implement the solution, addressing any feedback from the reviewer.
+
+## Guidelines
+
+- **Address reviewer feedback**: Fix issues mentioned in the review
+- **Follow best practices**: Write clean, tested code
+- **Stay focused**: Implement the requested feature
+
+## When Done
+
+Signal completion and **STOP**:
+```bash
+agent-solo signal coder done "brief summary of what you did"
+```
+
+The reviewer will examine your work next.
+
+## When Ready for Final PR
+
+When the reviewer approves your solution:
+```bash
+agent-solo pr   # handles commit, push, and PR creation
+```

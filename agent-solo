@@ -1,0 +1,1577 @@
+#!/bin/bash
+# agent-solo - Coordinate a coder/reviewer AI workflow in a single worktree
+#
+# Usage: agent-solo <command> [options]
+#
+# Session Commands:
+#   start <feature> [--auto-run] [--no-ttyd] [--clarify]  Start session
+#   run [options]        Run orchestrator loop with timeouts
+#   stop                 Stop ttyd servers, keep worktree
+#   restart [--auto-run] Restart session after system restart/crash
+#   status               Show session state
+#   confirm              Confirm clarify phase completion (proceed to work)
+#   pr                   Create PR for coder's solution
+#   cleanup [--full]     Remove worktree (--full: also state)
+#   setup                Install agent-solo to PATH and skills
+#
+# Control Commands:
+#   nudge <agent> [msg]  Send message to agent terminal (coder or reviewer)
+#   interrupt <agent>    Interrupt agent (Esc + Ctrl-C)
+#
+# Agent Commands:
+#   signal <agent> <status> [message]   Signal status change
+#   peer-status                         Read peer's status
+#   phase                               Read current phase
+
+set -e
+
+# Determine script location (resolves symlinks)
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [ -L "$SCRIPT_PATH" ]; do
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    [[ $SCRIPT_PATH != /* ]] && SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+
+# Source shared library
+if [ -f "$SCRIPT_DIR/agent-lib.sh" ]; then
+    # shellcheck source=agent-lib.sh
+    source "$SCRIPT_DIR/agent-lib.sh"
+elif [ -f "$HOME/.local/bin/agent-lib.sh" ]; then
+    # shellcheck source=agent-lib.sh
+    source "$HOME/.local/bin/agent-lib.sh"
+else
+    echo "Error: agent-lib.sh not found" >&2
+    exit 1
+fi
+
+# Default agents for solo mode (coder does implementation, reviewer reviews)
+DEFAULT_CODER="claude"
+DEFAULT_REVIEWER="codex"
+
+# Allocate ports for a solo session (3 ports: orchestrator, coder, reviewer)
+allocate_ports_solo() {
+    local peer_sync="$1"
+    local ports_file="$peer_sync/ports"
+
+    # If ports already allocated, return
+    if [ -f "$ports_file" ]; then
+        return 0
+    fi
+
+    local base=$DEFAULT_BASE_PORT
+    local orchestrator_port coder_port reviewer_port
+
+    orchestrator_port="$(find_available_port "$base")" || die "Could not find available port for orchestrator"
+    coder_port="$(find_available_port "$((orchestrator_port + 1))")" || die "Could not find available port for coder"
+    reviewer_port="$(find_available_port "$((coder_port + 1))")" || die "Could not find available port for reviewer"
+
+    cat > "$ports_file" << EOF
+ORCHESTRATOR_PORT=$orchestrator_port
+CODER_PORT=$coder_port
+REVIEWER_PORT=$reviewer_port
+EOF
+}
+
+#------------------------------------------------------------------------------
+# Command: setup
+#------------------------------------------------------------------------------
+
+cmd_setup() {
+    info "Installing agent-solo..."
+
+    local templates_dir="$SCRIPT_DIR/skills/templates"
+
+    if [ ! -d "$templates_dir" ]; then
+        die "Skills templates not found at $templates_dir"
+    fi
+
+    # Install CLI to ~/.local/bin
+    local install_dir="$HOME/.local/bin"
+    mkdir -p "$install_dir"
+
+    local install_path="$install_dir/agent-solo"
+    if [ "$SCRIPT_DIR/agent-solo" != "$install_path" ]; then
+        cp "$SCRIPT_DIR/agent-solo" "$install_path"
+        chmod +x "$install_path"
+        success "Installed agent-solo to $install_path"
+    else
+        success "agent-solo already installed at $install_path"
+    fi
+
+    # Install shared library
+    local lib_path="$install_dir/agent-lib.sh"
+    if [ -f "$SCRIPT_DIR/agent-lib.sh" ]; then
+        cp "$SCRIPT_DIR/agent-lib.sh" "$lib_path"
+        success "Installed agent-lib.sh to $lib_path"
+    fi
+
+    # Copy skills/templates to install dir so setup works from installed location
+    local installed_templates="$install_dir/skills/templates"
+    if [ "$templates_dir" != "$installed_templates" ]; then
+        mkdir -p "$installed_templates"
+        cp -r "$templates_dir"/* "$installed_templates/"
+        success "Installed skill templates to $installed_templates"
+    fi
+
+    # Check if ~/.local/bin is in PATH
+    if [[ ":$PATH:" != *":$install_dir:"* ]]; then
+        warn "Add $install_dir to your PATH:"
+        echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+    fi
+
+    # Install Claude skills (uses /command syntax)
+    local claude_skills="$HOME/.claude/commands"
+    mkdir -p "$claude_skills"
+
+    install_skill "$templates_dir/solo-coder-work.md" "$claude_skills/solo-coder-work.md" "/solo-coder-work"
+    install_skill "$templates_dir/solo-coder-clarify.md" "$claude_skills/solo-coder-clarify.md" "/solo-coder-clarify"
+    install_skill "$templates_dir/solo-reviewer-work.md" "$claude_skills/solo-reviewer-work.md" "/solo-reviewer-work"
+    install_skill "$templates_dir/solo-reviewer-clarify.md" "$claude_skills/solo-reviewer-clarify.md" "/solo-reviewer-clarify"
+    success "Installed Claude solo skills to $claude_skills"
+
+    # Install Codex skills (uses $command syntax)
+    local codex_skills="$HOME/.codex/skills"
+    mkdir -p "$codex_skills/solo-coder-work" "$codex_skills/solo-coder-clarify"
+    mkdir -p "$codex_skills/solo-reviewer-work" "$codex_skills/solo-reviewer-clarify"
+
+    install_skill "$templates_dir/solo-coder-work.md" "$codex_skills/solo-coder-work/SKILL.md" "\$solo-coder-work"
+    install_skill "$templates_dir/solo-coder-clarify.md" "$codex_skills/solo-coder-clarify/SKILL.md" "\$solo-coder-clarify"
+    install_skill "$templates_dir/solo-reviewer-work.md" "$codex_skills/solo-reviewer-work/SKILL.md" "\$solo-reviewer-work"
+    install_skill "$templates_dir/solo-reviewer-clarify.md" "$codex_skills/solo-reviewer-clarify/SKILL.md" "\$solo-reviewer-clarify"
+    success "Installed Codex solo skills to $codex_skills"
+
+    # Install shared notify hook script (reuses agent-duo-notify if present, or creates solo version)
+    local notify_script="$install_dir/agent-solo-notify"
+    cat > "$notify_script" << 'NOTIFY_EOF'
+#!/bin/bash
+# Called by agent hooks when they complete a turn (solo mode)
+# Signals the appropriate status based on current phase
+# Usage: agent-solo-notify <agent-name>
+#   Agent name (coder or reviewer) is required as $1
+#   PEER_SYNC is discovered from $PWD/.peer-sync symlink
+
+agent="$1"
+[ -z "$agent" ] && exit 0
+
+# Discover PEER_SYNC from working directory (worktrees have .peer-sync symlink)
+if [ -z "$PEER_SYNC" ]; then
+    if [ -d "$PWD/.peer-sync" ]; then
+        PEER_SYNC="$PWD/.peer-sync"
+    else
+        exit 0
+    fi
+fi
+[ ! -d "$PEER_SYNC" ] && exit 0
+
+# Check mode
+mode="$(cat "$PEER_SYNC/mode" 2>/dev/null)" || mode="duo"
+[ "$mode" != "solo" ] && exit 0
+
+# Read current phase
+phase="$(cat "$PEER_SYNC/phase" 2>/dev/null)" || exit 0
+
+# Read current status
+current_status="$(cut -d'|' -f1 < "$PEER_SYNC/${agent}.status" 2>/dev/null)"
+
+# Determine what status to signal based on phase and role
+case "$phase" in
+    clarify)
+        case "$current_status" in
+            clarify-done|done|review-done|pr-created) exit 0 ;;
+        esac
+        agent-solo signal "$agent" clarify-done "completed via hook"
+        ;;
+    work)
+        # Only coder works in work phase
+        if [ "$agent" = "coder" ]; then
+            case "$current_status" in
+                done|review-done|pr-created) exit 0 ;;
+            esac
+            agent-solo signal "$agent" done "completed via hook"
+        fi
+        ;;
+    review)
+        # Only reviewer works in review phase
+        if [ "$agent" = "reviewer" ]; then
+            case "$current_status" in
+                review-done|pr-created) exit 0 ;;
+            esac
+            agent-solo signal "$agent" review-done "completed via hook"
+        fi
+        ;;
+esac
+NOTIFY_EOF
+    chmod +x "$notify_script"
+    success "Installed solo notify hook script to $notify_script"
+
+    success "Setup complete!"
+    echo ""
+    echo "Note: To enable auto-signaling, configure agent hooks to call:"
+    echo "  $notify_script coder    (for the coder agent)"
+    echo "  $notify_script reviewer (for the reviewer agent)"
+}
+
+#------------------------------------------------------------------------------
+# Command: start
+#------------------------------------------------------------------------------
+
+cmd_start() {
+    local feature=""
+    local ttyd_mode=true
+    local auto_run=false
+    local clarify_mode=false
+    local work_timeout=$DEFAULT_WORK_TIMEOUT
+    local review_timeout=$DEFAULT_REVIEW_TIMEOUT
+    local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
+    local max_rounds=10
+    local codex_thinking=$DEFAULT_CODEX_THINKING
+    local coder=$DEFAULT_CODER
+    local reviewer=$DEFAULT_REVIEWER
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --no-ttyd) ttyd_mode=false; shift ;;
+            --auto-run) auto_run=true; shift ;;
+            --clarify) clarify_mode=true; shift ;;
+            --work-timeout) work_timeout="$2"; shift 2 ;;
+            --review-timeout) review_timeout="$2"; shift 2 ;;
+            --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
+            --max-rounds) max_rounds="$2"; shift 2 ;;
+            --codex-thinking) codex_thinking="$2"; shift 2 ;;
+            --coder) coder="$2"; shift 2 ;;
+            --reviewer) reviewer="$2"; shift 2 ;;
+            -*) die "Unknown option: $1" ;;
+            *) feature="$1"; shift ;;
+        esac
+    done
+
+    [ -z "$feature" ] && die "Usage: agent-solo start <feature> [--no-ttyd] [--auto-run] [--clarify] [--coder <agent>] [--reviewer <agent>]"
+
+    # Validate codex thinking effort
+    case "$codex_thinking" in
+        low|medium|high) ;;
+        *) die "Invalid --codex-thinking value: $codex_thinking (valid: low, medium, high)" ;;
+    esac
+
+    # Ensure we're in a git repo
+    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not a git repository"
+
+    # Ensure repo has at least one commit
+    git rev-parse HEAD >/dev/null 2>&1 || die "Repository has no commits. Create an initial commit first."
+
+    local project_root
+    project_root="$(git rev-parse --show-toplevel)"
+    local project_name
+    project_name="$(basename "$project_root")"
+
+    # Check for task file
+    local task_file
+    if task_file="$(find_task_file "$project_root" "$feature")"; then
+        info "Found task file: $task_file"
+    else
+        warn "Task file not found: $feature.md"
+        warn "Searched: $feature.md, doc/$feature.md, docs/$feature.md, **/$feature.md"
+        warn "Create it with the task description, or the agents won't know what to do."
+    fi
+
+    info "Starting Agent Solo session: $feature"
+    info "Project: $project_name"
+    info "Coder: $coder, Reviewer: $reviewer"
+
+    # Set up worktree path (single worktree, sibling of project root)
+    local parent_dir
+    parent_dir="$(dirname "$project_root")"
+    local worktree="$parent_dir/${project_name}-${feature}"
+
+    # Create branch and worktree
+    cd "$project_root"
+
+    # Detect main branch
+    local main_branch
+    main_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')" || true
+    if [ -z "$main_branch" ]; then
+        for candidate in main master; do
+            if git rev-parse --verify "$candidate" >/dev/null 2>&1; then
+                main_branch="$candidate"
+                break
+            fi
+        done
+    fi
+    if [ -z "$main_branch" ]; then
+        main_branch="$(git rev-parse --abbrev-ref HEAD)"
+    fi
+
+    if [ ! -d "$worktree" ]; then
+        info "Creating worktree..."
+        git worktree add -b "${feature}" "$worktree" "$main_branch" 2>/dev/null || \
+            git worktree add "$worktree" "${feature}"
+    else
+        warn "Worktree already exists: $worktree"
+    fi
+
+    # Initialize .peer-sync
+    local peer_sync="$project_root/.peer-sync"
+    mkdir -p "$peer_sync/reviews"
+    mkdir -p "$peer_sync/pids"
+
+    echo "active" > "$peer_sync/session"
+    echo "solo" > "$peer_sync/mode"
+    echo "$coder" > "$peer_sync/coder-agent"
+    echo "$reviewer" > "$peer_sync/reviewer-agent"
+    if $clarify_mode; then
+        echo "clarify" > "$peer_sync/phase"
+        echo "true" > "$peer_sync/clarify-mode"
+        echo "clarifying|$(date +%s)|starting" > "$peer_sync/coder.status"
+        echo "waiting|$(date +%s)|waiting for coder" > "$peer_sync/reviewer.status"
+    else
+        echo "work" > "$peer_sync/phase"
+        echo "false" > "$peer_sync/clarify-mode"
+        echo "working|$(date +%s)|starting" > "$peer_sync/coder.status"
+        echo "waiting|$(date +%s)|waiting for coder" > "$peer_sync/reviewer.status"
+    fi
+    echo "1" > "$peer_sync/round"
+    echo "$feature" > "$peer_sync/feature"
+    echo "$codex_thinking" > "$peer_sync/codex-thinking"
+
+    # Create symlink in worktree
+    ln -sfn "$peer_sync" "$worktree/.peer-sync"
+
+    # Ensure .peer-sync is excluded from git
+    local git_exclude="$project_root/.git/info/exclude"
+    if [ -f "$git_exclude" ]; then
+        if ! grep -qxF ".peer-sync" "$git_exclude"; then
+            echo ".peer-sync" >> "$git_exclude"
+        fi
+    else
+        mkdir -p "$(dirname "$git_exclude")"
+        echo ".peer-sync" > "$git_exclude"
+    fi
+
+    # Copy task file to worktree if it exists
+    if [ -f "$task_file" ]; then
+        cp "$task_file" "$worktree/"
+    fi
+
+    if $ttyd_mode; then
+        start_ttyd_mode_solo "$feature" "$project_root" "$worktree" "$peer_sync" \
+            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" "$clarify_mode" "$clarify_timeout" "$coder" "$reviewer"
+    else
+        start_tmux_mode_solo "$feature" "$project_root" "$worktree" "$peer_sync" "$codex_thinking" "$clarify_mode" "$coder" "$reviewer"
+    fi
+}
+
+start_tmux_mode_solo() {
+    local feature="$1"
+    local project_root="$2"
+    local worktree="$3"
+    local peer_sync="$4"
+    local codex_thinking="${5:-$DEFAULT_CODEX_THINKING}"
+    local clarify_mode="${6:-false}"
+    local coder="${7:-$DEFAULT_CODER}"
+    local reviewer="${8:-$DEFAULT_REVIEWER}"
+
+    local session_name="solo-${feature}"
+
+    # Kill existing session if any
+    tmux kill-session -t "$session_name" 2>/dev/null || true
+
+    # Create new tmux session with orchestrator window
+    tmux new-session -d -s "$session_name" -n "orchestrator" -c "$project_root"
+
+    # Create coder window (in shared worktree)
+    tmux new-window -t "$session_name" -n "coder" -c "$worktree"
+    tmux send-keys -t "$session_name:coder" "export PEER_SYNC='$peer_sync'"
+    tmux send-keys -t "$session_name:coder" C-m
+    tmux send-keys -t "$session_name:coder" "export MY_NAME='coder'"
+    tmux send-keys -t "$session_name:coder" C-m
+    tmux send-keys -t "$session_name:coder" "export MY_ROLE='coder'"
+    tmux send-keys -t "$session_name:coder" C-m
+    tmux send-keys -t "$session_name:coder" "export PEER_NAME='reviewer'"
+    tmux send-keys -t "$session_name:coder" C-m
+    tmux send-keys -t "$session_name:coder" "export FEATURE='$feature'"
+    tmux send-keys -t "$session_name:coder" C-m
+    tmux send-keys -t "$session_name:coder" "export WORKTREE='$worktree'"
+    tmux send-keys -t "$session_name:coder" C-m
+
+    # Create reviewer window (in same shared worktree)
+    tmux new-window -t "$session_name" -n "reviewer" -c "$worktree"
+    tmux send-keys -t "$session_name:reviewer" "export PEER_SYNC='$peer_sync'"
+    tmux send-keys -t "$session_name:reviewer" C-m
+    tmux send-keys -t "$session_name:reviewer" "export MY_NAME='reviewer'"
+    tmux send-keys -t "$session_name:reviewer" C-m
+    tmux send-keys -t "$session_name:reviewer" "export MY_ROLE='reviewer'"
+    tmux send-keys -t "$session_name:reviewer" C-m
+    tmux send-keys -t "$session_name:reviewer" "export PEER_NAME='coder'"
+    tmux send-keys -t "$session_name:reviewer" C-m
+    tmux send-keys -t "$session_name:reviewer" "export FEATURE='$feature'"
+    tmux send-keys -t "$session_name:reviewer" C-m
+    tmux send-keys -t "$session_name:reviewer" "export WORKTREE='$worktree'"
+    tmux send-keys -t "$session_name:reviewer" C-m
+
+    success "Created tmux session: $session_name"
+    echo ""
+    echo "Windows:"
+    echo "  0: orchestrator  - Main project root"
+    echo "  1: coder         - $worktree (coder: $coder)"
+    echo "  2: reviewer      - $worktree (reviewer: $reviewer)"
+    echo ""
+    echo "Attach with: tmux attach -t $session_name"
+    echo ""
+    echo "To start agents, in each window run their CLI:"
+    echo "  coder window:    $(get_agent_cmd "$coder" "$codex_thinking")"
+    echo "  reviewer window: $(get_agent_cmd "$reviewer" "$codex_thinking")"
+    if [ "$clarify_mode" = "true" ]; then
+        echo ""
+        echo "Clarify mode enabled. After coder submits approach and reviewer comments:"
+        echo "  1. Review in .peer-sync/clarify-coder.md and clarify-reviewer.md"
+        echo "  2. Respond to agents in their terminals (back-and-forth OK)"
+        echo "  3. Press Enter in the orchestrator to proceed to work phase"
+    fi
+}
+
+start_ttyd_mode_solo() {
+    local feature="$1"
+    local project_root="$2"
+    local worktree="$3"
+    local peer_sync="$4"
+    local auto_run="${5:-false}"
+    local work_timeout="${6:-$DEFAULT_WORK_TIMEOUT}"
+    local review_timeout="${7:-$DEFAULT_REVIEW_TIMEOUT}"
+    local max_rounds="${8:-10}"
+    local codex_thinking="${9:-$DEFAULT_CODEX_THINKING}"
+    local clarify_mode="${10:-false}"
+    local clarify_timeout="${11:-$DEFAULT_CLARIFY_TIMEOUT}"
+    local coder="${12:-$DEFAULT_CODER}"
+    local reviewer="${13:-$DEFAULT_REVIEWER}"
+
+    local session_name="solo-${feature}"
+
+    # Check ttyd is installed
+    command -v ttyd >/dev/null 2>&1 || die "ttyd not found. Install with: brew install ttyd"
+
+    # Kill existing sessions if any
+    tmux kill-session -t "${session_name}-orchestrator" 2>/dev/null || true
+    tmux kill-session -t "${session_name}-coder" 2>/dev/null || true
+    tmux kill-session -t "${session_name}-reviewer" 2>/dev/null || true
+
+    # Create tmux sessions for orchestrator and each agent (both in same worktree)
+    tmux new-session -d -s "${session_name}-orchestrator" -c "$project_root"
+    tmux new-session -d -s "${session_name}-coder" -c "$worktree"
+    tmux new-session -d -s "${session_name}-reviewer" -c "$worktree"
+
+    # Set environment variables for orchestrator
+    for var in "PEER_SYNC='$peer_sync'" "FEATURE='$feature'"; do
+        tmux send-keys -t "${session_name}-orchestrator" "export $var"
+        tmux send-keys -t "${session_name}-orchestrator" C-m
+    done
+
+    # Set environment variables for coder
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='coder'" "MY_ROLE='coder'" "PEER_NAME='reviewer'" "FEATURE='$feature'" "WORKTREE='$worktree'"; do
+        tmux send-keys -t "${session_name}-coder" "export $var"
+        tmux send-keys -t "${session_name}-coder" C-m
+    done
+
+    # Set environment variables for reviewer
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='reviewer'" "MY_ROLE='reviewer'" "PEER_NAME='coder'" "FEATURE='$feature'" "WORKTREE='$worktree'"; do
+        tmux send-keys -t "${session_name}-reviewer" "export $var"
+        tmux send-keys -t "${session_name}-reviewer" C-m
+    done
+
+    # Allocate and load ports
+    allocate_ports_solo "$peer_sync"
+    get_ports "$peer_sync"
+    local orchestrator_port=$ORCHESTRATOR_PORT
+    local coder_port=$CODER_PORT
+    local reviewer_port=$REVIEWER_PORT
+
+    ttyd -p "$orchestrator_port" -W tmux attach -t "${session_name}-orchestrator" &
+    echo $! > "$peer_sync/pids/ttyd-orchestrator.pid"
+
+    ttyd -p "$coder_port" -W tmux attach -t "${session_name}-coder" &
+    echo $! > "$peer_sync/pids/ttyd-coder.pid"
+
+    ttyd -p "$reviewer_port" -W tmux attach -t "${session_name}-reviewer" &
+    echo $! > "$peer_sync/pids/ttyd-reviewer.pid"
+
+    success "Started ttyd servers"
+    echo ""
+    echo "Web terminals:"
+    echo "  Orchestrator: http://localhost:$orchestrator_port"
+    echo "  Coder ($coder):       http://localhost:$coder_port"
+    echo "  Reviewer ($reviewer): http://localhost:$reviewer_port"
+    echo ""
+
+    # If auto-run, start the orchestrator loop in the orchestrator session
+    if [ "$auto_run" = "true" ]; then
+        info "Starting orchestrator with --auto-start..."
+        local run_cmd="agent-solo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
+        if [ "$clarify_mode" = "true" ]; then
+            run_cmd="$run_cmd --clarify-timeout $clarify_timeout"
+        fi
+        tmux send-keys -t "${session_name}-orchestrator" "$run_cmd"
+        tmux send-keys -t "${session_name}-orchestrator" C-m
+    else
+        echo "Start orchestrator with: agent-solo run --auto-start"
+    fi
+    echo "Stop with: agent-solo stop"
+    if [ "$clarify_mode" = "true" ]; then
+        echo ""
+        echo "Clarify mode enabled. Coder proposes approach, reviewer comments."
+        echo "  1. Review in orchestrator or read .peer-sync/clarify-*.md"
+        echo "  2. Respond to agents in their terminals (back-and-forth OK)"
+        echo "  3. Press Enter in the orchestrator to proceed to work phase"
+    fi
+}
+
+#------------------------------------------------------------------------------
+# Command: stop
+#------------------------------------------------------------------------------
+
+cmd_stop() {
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+
+    info "Stopping Agent Solo..."
+
+    # Kill ttyd processes from PID files
+    if [ -d "$peer_sync/pids" ]; then
+        for pidfile in "$peer_sync/pids"/*.pid; do
+            [ -f "$pidfile" ] || continue
+            local pid
+            pid="$(cat "$pidfile")"
+            if kill -0 "$pid" 2>/dev/null; then
+                kill "$pid" 2>/dev/null || true
+                info "Killed process $pid ($(basename "$pidfile" .pid))"
+            fi
+            rm -f "$pidfile"
+        done
+    fi
+
+    # Get feature name for session-specific cleanup
+    local feature
+    feature="$(get_feature 2>/dev/null)" || true
+
+    # Kill tmux sessions for this feature
+    if [ -n "$feature" ]; then
+        pkill -f "ttyd.*solo-${feature}-" 2>/dev/null && info "Killed remaining ttyd processes for solo-${feature}" || true
+        tmux kill-session -t "solo-${feature}" 2>/dev/null && info "Killed tmux session: solo-${feature}" || true
+        tmux kill-session -t "solo-${feature}-orchestrator" 2>/dev/null && info "Killed tmux session: solo-${feature}-orchestrator" || true
+        tmux kill-session -t "solo-${feature}-coder" 2>/dev/null && info "Killed tmux session: solo-${feature}-coder" || true
+        tmux kill-session -t "solo-${feature}-reviewer" 2>/dev/null && info "Killed tmux session: solo-${feature}-reviewer" || true
+    fi
+
+    success "Stopped"
+}
+
+#------------------------------------------------------------------------------
+# Command: status
+#------------------------------------------------------------------------------
+
+cmd_status() {
+    local root
+    root="$(get_project_root 2>/dev/null)" || die "Not in an agent-solo session"
+    local peer_sync="$root/.peer-sync"
+
+    echo ""
+    echo "=== Agent Solo Status ==="
+    echo ""
+
+    if [ -f "$peer_sync/feature" ]; then
+        echo "Feature:  $(cat "$peer_sync/feature")"
+    fi
+
+    if [ -f "$peer_sync/session" ]; then
+        echo "Session:  $(cat "$peer_sync/session")"
+    fi
+
+    if [ -f "$peer_sync/phase" ]; then
+        echo "Phase:    $(cat "$peer_sync/phase")"
+    fi
+
+    if [ -f "$peer_sync/round" ]; then
+        echo "Round:    $(cat "$peer_sync/round")"
+    fi
+
+    # Show coder/reviewer assignments
+    if [ -f "$peer_sync/coder-agent" ]; then
+        echo "Coder:    $(cat "$peer_sync/coder-agent")"
+    fi
+    if [ -f "$peer_sync/reviewer-agent" ]; then
+        echo "Reviewer: $(cat "$peer_sync/reviewer-agent")"
+    fi
+
+    # Show allocated ports if available
+    if [ -f "$peer_sync/ports" ]; then
+        # shellcheck source=/dev/null
+        source "$peer_sync/ports"
+        echo ""
+        echo "--- Web Terminals ---"
+        echo "Orchestrator: http://localhost:$ORCHESTRATOR_PORT"
+        echo "Coder:        http://localhost:$CODER_PORT"
+        echo "Reviewer:     http://localhost:$REVIEWER_PORT"
+    fi
+
+    echo ""
+    echo "--- Agent Status ---"
+
+    for agent in coder reviewer; do
+        local status_file="$peer_sync/${agent}.status"
+        if [ -f "$status_file" ]; then
+            local line
+            line="$(cat "$status_file")"
+            local status msg timestamp
+            status="$(echo "$line" | cut -d'|' -f1)"
+            timestamp="$(echo "$line" | cut -d'|' -f2)"
+            msg="$(echo "$line" | cut -d'|' -f3-)"
+
+            local time_str=""
+            if [ -n "$timestamp" ] && [ "$timestamp" != "$status" ]; then
+                time_str=" ($(date -r "$timestamp" '+%H:%M:%S' 2>/dev/null || echo "$timestamp"))"
+            fi
+
+            printf "%-10s: %s%s" "$agent" "$status" "$time_str"
+            [ -n "$msg" ] && [ "$msg" != "$status" ] && printf " - %s" "$msg"
+            echo ""
+        else
+            echo "$agent:     (no status)"
+        fi
+    done
+
+    # Check for PR
+    echo ""
+    echo "--- Pull Request ---"
+    if [ -f "$peer_sync/coder.pr" ]; then
+        echo "PR: $(cat "$peer_sync/coder.pr")"
+    else
+        echo "PR: (none)"
+    fi
+
+    # List reviews
+    if [ -d "$peer_sync/reviews" ] && [ "$(ls -A "$peer_sync/reviews" 2>/dev/null)" ]; then
+        echo ""
+        echo "--- Reviews ---"
+        ls -1 "$peer_sync/reviews"
+    fi
+
+    echo ""
+}
+
+#------------------------------------------------------------------------------
+# Command: run (orchestrator)
+#------------------------------------------------------------------------------
+
+# Generate clarify message for coder
+generate_coder_clarify_message() {
+    local feature="$1"
+    local task_content="$2"
+    local peer_sync="$3"
+
+    cat <<EOF
+# Task: $feature
+
+$task_content
+
+---
+## Agent-Solo Context - CLARIFY PHASE (Coder)
+
+You are the **CODER** in a solo workflow. A reviewer will review your code.
+
+**PHASE: CLARIFY** - Before starting implementation, propose your high-level approach and ask clarifying questions.
+
+### Your Task
+
+Produce TWO outputs:
+
+1. **High-level approach** - Not a detailed plan, but a sketch: the key idea, first steps to explore, or general direction
+2. **Clarifying questions** - Questions for the user that would help you start more effectively
+
+### Write Your Approach and Questions
+
+\`\`\`bash
+cat > "$peer_sync/clarify-coder.md" << 'CLARIFY_EOF'
+# Coder's Proposed Approach
+
+## High-Level Approach
+
+[Write 3-5 sentences describing your high-level approach.]
+
+## Questions for the User
+
+1. [Question 1]
+2. [Question 2]
+3. [Question 3 - optional]
+
+CLARIFY_EOF
+\`\`\`
+
+Edit the file with actual content, then signal completion:
+
+\`\`\`bash
+agent-solo signal coder clarify-done "approach and questions submitted"
+\`\`\`
+
+Then **STOP and wait**. The reviewer will also provide comments, then the user will respond.
+Do NOT start implementing until the work phase begins.
+EOF
+}
+
+# Generate clarify message for reviewer (reviews coder's approach)
+generate_reviewer_clarify_message() {
+    local feature="$1"
+    local task_content="$2"
+    local peer_sync="$3"
+
+    cat <<EOF
+# Task: $feature
+
+$task_content
+
+---
+## Agent-Solo Context - CLARIFY PHASE (Reviewer)
+
+You are the **REVIEWER** in a solo workflow. The coder has proposed an approach.
+
+**PHASE: CLARIFY** - Review the coder's proposed approach and add your own questions or comments.
+
+### Your Task
+
+1. **Read the coder's proposed approach**:
+   \`\`\`bash
+   cat "$peer_sync/clarify-coder.md"
+   \`\`\`
+
+2. **Write your comments and additional questions**:
+   \`\`\`bash
+   cat > "$peer_sync/clarify-reviewer.md" << 'CLARIFY_EOF'
+# Reviewer's Comments
+
+## Comments on Coder's Approach
+
+[What do you think of the proposed approach? Any concerns or suggestions?]
+
+## Additional Questions
+
+1. [Any additional questions you have for the user?]
+
+CLARIFY_EOF
+   \`\`\`
+
+Edit the file with actual content, then signal completion:
+
+\`\`\`bash
+agent-solo signal reviewer clarify-done "comments submitted"
+\`\`\`
+
+Then **STOP and wait**. The user will review both and respond.
+EOF
+}
+
+# Generate work message for coder (round 1)
+generate_coder_work_message() {
+    local feature="$1"
+    local task_content="$2"
+    local peer_sync="$3"
+    local round="$4"
+
+    cat <<EOF
+# Task: $feature
+
+$task_content
+
+---
+## Agent-Solo Context - WORK PHASE (Coder)
+
+You are the **CODER** in a solo workflow. A reviewer will review your code.
+
+- **Phase**: Work (Round $round)
+- **Worktree**: Current directory (read/write)
+- **Sync directory**: $peer_sync
+
+### Your Goal
+
+Implement the solution. The reviewer will examine your work after you signal done.
+
+### Guidelines
+
+1. Implement your solution following best practices
+2. Make sure the code works (run tests if available)
+3. If round > 1, check the reviewer's feedback from the previous round:
+   \`\`\`bash
+   cat "$peer_sync/reviews/round-$((round - 1))-review.md" 2>/dev/null
+   \`\`\`
+
+### When Done
+
+Signal completion and **STOP**:
+\`\`\`bash
+agent-solo signal coder done "brief summary of what you did"
+\`\`\`
+
+The reviewer will then examine your work.
+
+### When Ready for Final PR
+
+When the reviewer approves your solution:
+\`\`\`bash
+agent-solo pr   # handles commit, push, and PR creation
+\`\`\`
+EOF
+}
+
+cmd_run() {
+    local work_timeout=$DEFAULT_WORK_TIMEOUT
+    local review_timeout=$DEFAULT_REVIEW_TIMEOUT
+    local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
+    local poll_interval=$DEFAULT_POLL_INTERVAL
+    local max_rounds=10
+    local auto_start=false
+    local enable_clarify=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --work-timeout) work_timeout="$2"; shift 2 ;;
+            --review-timeout) review_timeout="$2"; shift 2 ;;
+            --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
+            --clarify) enable_clarify="true"; shift ;;
+            --poll) poll_interval="$2"; shift 2 ;;
+            --max-rounds) max_rounds="$2"; shift 2 ;;
+            --auto-start) auto_start=true; shift ;;
+            -*) die "Unknown option: $1" ;;
+            *) die "Unknown argument: $1" ;;
+        esac
+    done
+
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+    local feature
+    feature="$(get_feature)"
+
+    # Get coder/reviewer agent assignments
+    local coder reviewer
+    coder="$(cat "$peer_sync/coder-agent" 2>/dev/null)" || coder="$DEFAULT_CODER"
+    reviewer="$(cat "$peer_sync/reviewer-agent" 2>/dev/null)" || reviewer="$DEFAULT_REVIEWER"
+
+    # Determine tmux session name
+    local session_name="solo-${feature}"
+
+    # Check tmux session exists
+    local coder_session reviewer_session
+    if tmux has-session -t "${session_name}-coder" 2>/dev/null; then
+        coder_session="${session_name}-coder"
+        reviewer_session="${session_name}-reviewer"
+    elif tmux has-session -t "$session_name" 2>/dev/null; then
+        coder_session="${session_name}:coder"
+        reviewer_session="${session_name}:reviewer"
+    else
+        die "No tmux session found. Run 'agent-solo start $feature' first."
+    fi
+
+    echo ""
+    echo "=== Agent Solo Orchestrator ==="
+    echo "Feature:        $feature"
+    echo "Coder:          $coder"
+    echo "Reviewer:       $reviewer"
+    echo "Work timeout:   ${work_timeout}s"
+    echo "Review timeout: ${review_timeout}s"
+    echo "Max rounds:     $max_rounds"
+    echo ""
+
+    # Calculate worktree path
+    local project_name
+    project_name="$(basename "$root")"
+    local parent_dir
+    parent_dir="$(dirname "$root")"
+    local worktree="$parent_dir/${project_name}-${feature}"
+
+    # Load codex thinking effort from session
+    local codex_thinking
+    codex_thinking="$(cat "$peer_sync/codex-thinking" 2>/dev/null)" || codex_thinking="$DEFAULT_CODEX_THINKING"
+
+    # Optionally auto-start agents
+    if $auto_start; then
+        info "Starting agents..."
+        tmux send-keys -t "$coder_session" "$(get_agent_cmd "$coder" "$codex_thinking")"
+        tmux send-keys -t "$coder_session" C-m
+        tmux send-keys -t "$reviewer_session" "$(get_agent_cmd "$reviewer" "$codex_thinking")"
+        tmux send-keys -t "$reviewer_session" C-m
+        sleep 3
+    fi
+
+    # Check if clarify mode is enabled
+    local clarify_mode
+    if [ -n "$enable_clarify" ]; then
+        clarify_mode="$enable_clarify"
+        echo "$enable_clarify" > "$peer_sync/clarify-mode"
+    else
+        clarify_mode="$(cat "$peer_sync/clarify-mode" 2>/dev/null)" || clarify_mode="false"
+    fi
+
+    # Handle clarify phase if enabled and not already confirmed
+    if [ "$clarify_mode" = "true" ] && [ ! -f "$peer_sync/clarify-confirmed" ]; then
+        info "=== Clarify Phase ==="
+        echo "clarify" > "$peer_sync/phase"
+
+        # Read task content
+        local task_file
+        local task_content=""
+        if task_file="$(find_task_file "$root" "$feature")"; then
+            task_content="$(cat "$task_file" | head -c 4000)"
+        fi
+
+        # Step 1: Coder proposes approach
+        atomic_write "$peer_sync/coder.status" "clarifying|$(date +%s)|clarify phase"
+        info "Coder: propose your approach..."
+        local coder_clarify_msg
+        coder_clarify_msg="$(generate_coder_clarify_message "$feature" "$task_content" "$peer_sync")"
+        tmux send-keys -t "$coder_session" "$coder_clarify_msg"
+        sleep 0.5
+        tmux send-keys -t "$coder_session" C-m
+
+        # Wait for coder to complete clarify
+        local clarify_start=$SECONDS
+        while true; do
+            local elapsed=$((SECONDS - clarify_start))
+            local coder_status
+            coder_status="$(get_agent_status "coder" "$peer_sync")"
+
+            if [ "$coder_status" = "clarify-done" ]; then
+                break
+            fi
+
+            if [ "$elapsed" -ge "$clarify_timeout" ]; then
+                warn "Coder clarify timeout (${clarify_timeout}s)"
+                break
+            fi
+
+            printf "\r  Waiting for coder... status=%s (%ds/%ds)  " "$coder_status" "$elapsed" "$clarify_timeout"
+            sleep "$poll_interval"
+        done
+        echo ""
+
+        # Step 2: Reviewer reviews coder's approach and adds comments
+        atomic_write "$peer_sync/reviewer.status" "clarifying|$(date +%s)|reviewing approach"
+        info "Reviewer: review approach and add comments..."
+        local reviewer_clarify_msg
+        reviewer_clarify_msg="$(generate_reviewer_clarify_message "$feature" "$task_content" "$peer_sync")"
+        tmux send-keys -t "$reviewer_session" "$reviewer_clarify_msg"
+        sleep 0.5
+        tmux send-keys -t "$reviewer_session" C-m
+
+        # Wait for reviewer to complete clarify
+        clarify_start=$SECONDS
+        while true; do
+            local elapsed=$((SECONDS - clarify_start))
+            local reviewer_status
+            reviewer_status="$(get_agent_status "reviewer" "$peer_sync")"
+
+            if [ "$reviewer_status" = "clarify-done" ]; then
+                break
+            fi
+
+            if [ "$elapsed" -ge "$clarify_timeout" ]; then
+                warn "Reviewer clarify timeout (${clarify_timeout}s)"
+                break
+            fi
+
+            printf "\r  Waiting for reviewer... status=%s (%ds/%ds)  " "$reviewer_status" "$elapsed" "$clarify_timeout"
+            sleep "$poll_interval"
+        done
+        echo ""
+
+        # Send email notification
+        send_clarify_email "$peer_sync" "$feature" "solo"
+
+        # Display clarify results
+        echo ""
+        info "=== Clarify Phase Results ==="
+        echo ""
+
+        if [ -f "$peer_sync/clarify-coder.md" ]; then
+            echo "--- Coder's Approach ---"
+            cat "$peer_sync/clarify-coder.md"
+            echo ""
+        else
+            warn "Coder did not submit a clarification"
+        fi
+
+        if [ -f "$peer_sync/clarify-reviewer.md" ]; then
+            echo "--- Reviewer's Comments ---"
+            cat "$peer_sync/clarify-reviewer.md"
+            echo ""
+        else
+            warn "Reviewer did not submit comments"
+        fi
+
+        echo ""
+        echo "=================================="
+        echo ""
+        info "Respond to agents in their terminals if needed."
+        echo ""
+        read -r -p "Press Enter when ready to proceed to work phase... "
+
+        # Mark clarify as confirmed
+        echo "confirmed" > "$peer_sync/clarify-confirmed"
+        echo "work" > "$peer_sync/phase"
+
+        success "Clarify phase confirmed! Proceeding to work phase..."
+        echo ""
+    fi
+
+    # Main loop: Sequential work/review
+    local round=1
+
+    while [ "$round" -le "$max_rounds" ]; do
+        # Check if session is complete
+        if [ "$(cat "$peer_sync/session" 2>/dev/null)" = "complete" ]; then
+            success "Session complete!"
+            break
+        fi
+
+        # Check if PR was created
+        if has_pr "coder" "$peer_sync"; then
+            echo "complete" > "$peer_sync/session"
+            success "PR created - session complete!"
+            echo ""
+            echo "PR: $(cat "$peer_sync/coder.pr")"
+            break
+        fi
+
+        echo ""
+        info "=== Round $round: Coder Work Phase ==="
+        echo "$round" > "$peer_sync/round"
+        echo "work" > "$peer_sync/phase"
+
+        # Trigger work phase for coder
+        atomic_write "$peer_sync/coder.status" "working|$(date +%s)|round $round work phase"
+        atomic_write "$peer_sync/reviewer.status" "waiting|$(date +%s)|waiting for coder"
+
+        if [ "$round" -eq 1 ]; then
+            # Round 1: Send full context message
+            local task_file
+            local task_content=""
+            if task_file="$(find_task_file "$root" "$feature")"; then
+                task_content="$(cat "$task_file" | head -c 4000)"
+            fi
+
+            info "Sending task to coder..."
+            local coder_msg
+            coder_msg="$(generate_coder_work_message "$feature" "$task_content" "$peer_sync" "$round")"
+            tmux send-keys -t "$coder_session" "$coder_msg"
+            sleep 0.5
+            tmux send-keys -t "$coder_session" C-m
+        else
+            # Round 2+: Trigger skill
+            info "Triggering solo-coder-work for coder..."
+            trigger_skill "$coder" "$coder_session" "solo-coder-work"
+        fi
+
+        # Wait for coder to complete work
+        local work_start=$SECONDS
+        while true; do
+            local elapsed=$((SECONDS - work_start))
+            local coder_status
+            coder_status="$(get_agent_status "coder" "$peer_sync")"
+
+            # Accept done or pr-created
+            if [[ "$coder_status" =~ ^(done|pr-created)$ ]]; then
+                break
+            fi
+
+            # Check for PR created mid-phase
+            if has_pr "coder" "$peer_sync"; then
+                break
+            fi
+
+            # Check timeout
+            if [ "$elapsed" -ge "$work_timeout" ]; then
+                warn "Work phase timeout (${work_timeout}s)"
+                interrupt_agent "coder" "$coder_session" "$peer_sync"
+                break
+            fi
+
+            printf "\r  Waiting for coder... status=%s (%ds/%ds)  " "$coder_status" "$elapsed" "$work_timeout"
+            sleep "$poll_interval"
+        done
+        echo ""
+
+        # Check if PR was created during work
+        if has_pr "coder" "$peer_sync"; then
+            echo "complete" > "$peer_sync/session"
+            success "PR created - session complete!"
+            echo ""
+            echo "PR: $(cat "$peer_sync/coder.pr")"
+            break
+        fi
+
+        # Review phase
+        info "=== Round $round: Review Phase ==="
+        echo "review" > "$peer_sync/phase"
+
+        atomic_write "$peer_sync/reviewer.status" "reviewing|$(date +%s)|round $round review phase"
+        atomic_write "$peer_sync/coder.status" "waiting|$(date +%s)|waiting for review"
+
+        info "Triggering solo-reviewer-work for reviewer..."
+        trigger_skill "$reviewer" "$reviewer_session" "solo-reviewer-work"
+
+        # Wait for reviewer to complete review
+        local review_start=$SECONDS
+        while true; do
+            local elapsed=$((SECONDS - review_start))
+            local reviewer_status
+            reviewer_status="$(get_agent_status "reviewer" "$peer_sync")"
+
+            # Accept review-done or done
+            if [[ "$reviewer_status" =~ ^(done|review-done)$ ]]; then
+                break
+            fi
+
+            # Check timeout
+            if [ "$elapsed" -ge "$review_timeout" ]; then
+                warn "Review phase timeout (${review_timeout}s)"
+                interrupt_agent "reviewer" "$reviewer_session" "$peer_sync"
+                break
+            fi
+
+            printf "\r  Waiting for reviewer... status=%s (%ds/%ds)  " "$reviewer_status" "$elapsed" "$review_timeout"
+            sleep "$poll_interval"
+        done
+        echo ""
+
+        # Check review verdict
+        local review_file="$peer_sync/reviews/round-${round}-review.md"
+        if [ -f "$review_file" ]; then
+            if grep -qi "APPROVE" "$review_file" 2>/dev/null; then
+                success "Reviewer approved! Ready for PR."
+                info "Coder can now create PR with: agent-solo pr"
+                # Continue loop to let coder create PR
+            else
+                info "Reviewer requested changes. Proceeding to next round."
+            fi
+        fi
+
+        round=$((round + 1))
+    done
+
+    if [ "$round" -gt "$max_rounds" ]; then
+        warn "Reached max rounds ($max_rounds)"
+    fi
+
+    echo ""
+    info "=== Final Status ==="
+    cmd_status
+}
+
+#------------------------------------------------------------------------------
+# Command: pr
+#------------------------------------------------------------------------------
+
+cmd_pr() {
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+    local feature
+    feature="$(get_feature)"
+
+    # Determine worktree
+    local project_name
+    project_name="$(basename "$root")"
+    local parent_dir
+    parent_dir="$(dirname "$root")"
+    local worktree="$parent_dir/${project_name}-${feature}"
+
+    [ -d "$worktree" ] || die "Worktree not found: $worktree"
+
+    info "Creating PR for coder's solution..."
+
+    cd "$worktree"
+
+    # Check if feature file exists and was NOT modified (should be deleted)
+    local feature_file="$worktree/${feature}.md"
+    if [ -f "$feature_file" ]; then
+        local main_branch
+        main_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')" || true
+        if [ -z "$main_branch" ]; then
+            for candidate in main master; do
+                if git rev-parse --verify "$candidate" >/dev/null 2>&1; then
+                    main_branch="$candidate"
+                    break
+                fi
+            done
+        fi
+        if [ -z "$main_branch" ]; then
+            main_branch="HEAD~1"
+        fi
+
+        local file_modified=false
+        if git show "${main_branch}:${feature}.md" >/dev/null 2>&1; then
+            if ! git diff --quiet "${main_branch}" -- "${feature}.md" 2>/dev/null; then
+                file_modified=true
+            fi
+        else
+            local original_task_file
+            if original_task_file="$(find_task_file "$root" "$feature")"; then
+                if ! diff -q "$feature_file" "$original_task_file" >/dev/null 2>&1; then
+                    file_modified=true
+                fi
+            fi
+        fi
+
+        if [ "$file_modified" = "false" ]; then
+            info "Feature file ${feature}.md was not modified - removing it"
+            git rm "${feature}.md"
+            git commit -m "Remove unmodified feature file ${feature}.md"
+        fi
+    fi
+
+    # Check for changes
+    if [ -z "$(git status --porcelain)" ]; then
+        warn "No changes to commit"
+    else
+        # Auto-commit changes
+        git add -A
+        git commit -m "Solution for $feature" || true
+    fi
+
+    # Push branch
+    local branch="${feature}"
+    git push -u origin "$branch" 2>/dev/null || git push origin "$branch"
+
+    # Look for PR body file
+    local pr_body=""
+    local pr_body_file="$root/${feature}-PR.md"
+    if [ -f "$pr_body_file" ]; then
+        pr_body="$(cat "$pr_body_file")"
+    else
+        pr_body="Solution for feature: $feature"
+    fi
+
+    # Create PR
+    local pr_url
+    pr_url="$(gh pr create --title "Solution for $feature" --body "$pr_body" --head "$branch" 2>/dev/null)" || \
+        pr_url="$(gh pr view --json url -q '.url' 2>/dev/null)" || \
+        die "Failed to create PR. Is gh installed and authenticated?"
+
+    # Record PR
+    echo "$pr_url" > "$peer_sync/coder.pr"
+    atomic_write "$peer_sync/coder.status" "pr-created|$(date +%s)|$pr_url"
+
+    success "PR created: $pr_url"
+
+    # Mark session complete
+    echo "complete" > "$peer_sync/session"
+    success "Session complete!"
+}
+
+#------------------------------------------------------------------------------
+# Command: cleanup
+#------------------------------------------------------------------------------
+
+cmd_cleanup() {
+    local full=false
+    [ "$1" = "--full" ] && full=true
+
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+    local feature
+    feature="$(get_feature)"
+    local project_name
+    project_name="$(basename "$root")"
+    local parent_dir
+    parent_dir="$(dirname "$root")"
+
+    info "Cleaning up session: $feature"
+
+    # Stop any running processes first
+    cmd_stop
+
+    # Remove worktree
+    local worktree="$parent_dir/${project_name}-${feature}"
+
+    cd "$root"  # Make sure we're not in a worktree
+
+    if [ -d "$worktree" ]; then
+        git worktree remove --force "$worktree" 2>/dev/null || rm -rf "$worktree"
+        info "Removed worktree: $worktree"
+    fi
+
+    # Prune worktree references
+    git worktree prune
+
+    if $full; then
+        # Remove state
+        rm -rf "$peer_sync"
+        info "Removed .peer-sync"
+
+        # Optionally delete branch
+        git branch -D "${feature}" 2>/dev/null && info "Deleted branch: ${feature}" || true
+    fi
+
+    success "Cleanup complete"
+}
+
+#------------------------------------------------------------------------------
+# Command: confirm
+#------------------------------------------------------------------------------
+
+cmd_confirm() {
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+
+    local phase
+    phase="$(cat "$peer_sync/phase" 2>/dev/null)" || die "No active session"
+
+    if [ "$phase" != "clarify" ]; then
+        if [ -f "$peer_sync/clarify-confirmed" ]; then
+            info "Clarify phase already confirmed."
+        else
+            die "Not in clarify phase (current phase: $phase)"
+        fi
+        return 0
+    fi
+
+    echo "confirmed" > "$peer_sync/clarify-confirmed"
+    echo "work" > "$peer_sync/phase"
+
+    success "Clarify phase confirmed! Transitioning to work phase."
+    echo "Note: If orchestrator is waiting for input, press Enter there to continue."
+}
+
+#------------------------------------------------------------------------------
+# Command: signal (for agents)
+#------------------------------------------------------------------------------
+
+cmd_signal() {
+    lib_cmd_signal "$@"
+}
+
+#------------------------------------------------------------------------------
+# Command: peer-status (for agents)
+#------------------------------------------------------------------------------
+
+cmd_peer_status() {
+    lib_cmd_peer_status
+}
+
+#------------------------------------------------------------------------------
+# Command: phase (for agents)
+#------------------------------------------------------------------------------
+
+cmd_phase() {
+    lib_cmd_phase
+}
+
+#------------------------------------------------------------------------------
+# Command: nudge
+#------------------------------------------------------------------------------
+
+cmd_nudge() {
+    local agent="$1"
+    local message="${2:-Continue.}"
+
+    [ -z "$agent" ] && die "Usage: agent-solo nudge <agent> [message]"
+    [[ "$agent" =~ ^(coder|reviewer)$ ]] || die "Agent must be 'coder' or 'reviewer'"
+
+    local root
+    root="$(get_project_root)"
+    local feature
+    feature="$(get_feature)"
+    local session_name="solo-${feature}"
+
+    # Determine session target
+    local session
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+        session="${session_name}:${agent}"
+    elif tmux has-session -t "${session_name}-${agent}" 2>/dev/null; then
+        session="${session_name}-${agent}"
+    else
+        die "No tmux session found for $agent"
+    fi
+
+    nudge_agent "$agent" "$session" "$message"
+    success "Nudged $agent"
+}
+
+#------------------------------------------------------------------------------
+# Command: interrupt
+#------------------------------------------------------------------------------
+
+cmd_interrupt() {
+    local agent="$1"
+
+    [ -z "$agent" ] && die "Usage: agent-solo interrupt <agent>"
+    [[ "$agent" =~ ^(coder|reviewer)$ ]] || die "Agent must be 'coder' or 'reviewer'"
+
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+    local feature
+    feature="$(get_feature)"
+    local session_name="solo-${feature}"
+
+    # Determine session target
+    local session
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+        session="${session_name}:${agent}"
+    elif tmux has-session -t "${session_name}-${agent}" 2>/dev/null; then
+        session="${session_name}-${agent}"
+    else
+        die "No tmux session found for $agent"
+    fi
+
+    interrupt_agent "$agent" "$session" "$peer_sync"
+    success "Interrupted $agent"
+}
+
+#------------------------------------------------------------------------------
+# Command: help
+#------------------------------------------------------------------------------
+
+cmd_help() {
+    cat << 'EOF'
+Agent Solo - Coder/Reviewer AI Workflow
+
+USAGE
+    agent-solo <command> [options]
+
+SESSION COMMANDS
+    start <feature> [options]
+        Start a new session for the given feature.
+        Creates one shared worktree, two tmux sessions (coder + reviewer), and ttyd web terminals.
+
+        Options:
+          --coder <agent>        Agent for coding (default: claude)
+          --reviewer <agent>     Agent for reviewing (default: codex)
+          --auto-run             Start orchestrator immediately
+          --no-ttyd              Use single tmux session instead of web terminals
+          --clarify              Enable clarify phase before work starts
+          --work-timeout <secs>  Work phase timeout (default: 600)
+          --review-timeout <secs> Review phase timeout (default: 300)
+          --clarify-timeout <secs> Clarify phase timeout (default: 300)
+          --max-rounds <n>       Maximum rounds (default: 10)
+          --codex-thinking <level> Codex reasoning effort: low, medium, high (default: high)
+
+    run [options]
+        Run the orchestrator loop (coder work -> reviewer review -> repeat).
+
+        Options:
+          --clarify              Enable clarify phase
+          --work-timeout <secs>  Work phase timeout (default: 600)
+          --review-timeout <secs> Review phase timeout (default: 300)
+          --clarify-timeout <secs> Clarify phase timeout (default: 300)
+          --poll <secs>          Status poll interval (default: 10)
+          --max-rounds <n>       Maximum rounds (default: 10)
+          --auto-start           Auto-launch agent CLIs and send task
+
+    stop
+        Stop ttyd servers and tmux sessions, keep worktree.
+
+    status
+        Show current session state and agent statuses.
+
+    confirm
+        Confirm the clarify phase is complete and proceed to work phase.
+
+    pr
+        Create a PR for the coder's solution.
+        Auto-commits uncommitted changes and pushes.
+
+    cleanup [--full]
+        Remove worktree. With --full, also removes .peer-sync
+        and deletes the feature branch.
+
+    setup
+        Install agent-solo to ~/.local/bin and skills to agent dirs.
+
+CONTROL COMMANDS
+    nudge <agent> [message]
+        Send a message to an agent's terminal (coder or reviewer).
+        Default message: "Continue."
+
+    interrupt <agent>
+        Send Escape + Ctrl-C to interrupt an agent.
+
+AGENT COMMANDS (used by AI agents)
+    signal <agent> <status> [message]
+        Signal a status change. Agent is 'coder' or 'reviewer'.
+        Status values: clarifying, clarify-done, working, done,
+        reviewing, review-done, interrupted, error, pr-created
+
+    peer-status
+        Read peer's current status (requires PEER_NAME env var).
+
+    phase
+        Read current phase (clarify, work, or review).
+
+WORKFLOW
+    Solo mode uses a sequential workflow:
+
+    CLARIFY PHASE (if --clarify):
+      1. Coder proposes approach and questions
+      2. Reviewer reviews approach and adds comments
+      3. User responds, then confirms
+
+    WORK/REVIEW LOOP:
+      1. Coder implements solution
+      2. Coder signals "done"
+      3. Reviewer examines code (git diff, etc.)
+      4. Reviewer writes review with verdict (APPROVE or REQUEST_CHANGES)
+      5. If approved: coder creates PR
+      6. If changes requested: loop back to step 1
+
+EXAMPLES
+    # Start with auto-run (opens 3 web terminals, starts everything)
+    agent-solo start auth --auto-run
+
+    # With clarify phase
+    agent-solo start auth --auto-run --clarify
+
+    # Swap agent roles (codex codes, claude reviews)
+    agent-solo start auth --coder codex --reviewer claude
+
+    # Check status
+    agent-solo status
+
+    # Create PR when reviewer approves
+    agent-solo pr
+
+    # Clean up
+    agent-solo cleanup --full
+EOF
+}
+
+#------------------------------------------------------------------------------
+# Main
+#------------------------------------------------------------------------------
+
+main() {
+    local cmd="${1:-help}"
+    shift || true
+
+    case "$cmd" in
+        start)       cmd_start "$@" ;;
+        run)         cmd_run "$@" ;;
+        stop)        cmd_stop "$@" ;;
+        status)      cmd_status "$@" ;;
+        confirm)     cmd_confirm "$@" ;;
+        pr)          cmd_pr "$@" ;;
+        cleanup)     cmd_cleanup "$@" ;;
+        setup)       cmd_setup "$@" ;;
+        nudge)       cmd_nudge "$@" ;;
+        interrupt)   cmd_interrupt "$@" ;;
+        signal)      cmd_signal "$@" ;;
+        peer-status) cmd_peer_status "$@" ;;
+        phase)       cmd_phase "$@" ;;
+        help|--help|-h) cmd_help ;;
+        *)           die "Unknown command: $cmd (try 'agent-solo help')" ;;
+    esac
+}
+
+main "$@"
