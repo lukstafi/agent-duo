@@ -47,9 +47,12 @@ DEFAULT_AGENT_B="codex"
 # Default base port for ttyd (actual ports allocated dynamically)
 DEFAULT_BASE_PORT=7680
 
+# Default thinking effort for Codex (low, medium, high)
+DEFAULT_CODEX_THINKING="high"
+
 # Commands to launch each agent
 CLAUDE_CMD="claude --dangerously-skip-permissions"
-CODEX_CMD="codex --yolo"
+# CODEX_CMD is built dynamically with thinking effort via get_agent_cmd()
 
 #------------------------------------------------------------------------------
 # Helper Functions
@@ -123,11 +126,14 @@ atomic_write() {
 }
 
 # Get agent command
+# Usage: get_agent_cmd <agent> [thinking_effort]
+# thinking_effort is only used for codex (low, medium, high)
 get_agent_cmd() {
     local agent="$1"
+    local thinking="${2:-$DEFAULT_CODEX_THINKING}"
     case "$agent" in
         claude) echo "$CLAUDE_CMD" ;;
-        codex) echo "$CODEX_CMD" ;;
+        codex) echo "codex --yolo -c model_reasoning_effort=\"$thinking\"" ;;
         *) echo "$agent" ;;  # Allow custom agents
     esac
 }
@@ -297,6 +303,7 @@ restart_ttyd_for_session() {
 }
 
 # Restart an agent TUI in its tmux session
+# Usage: restart_agent_tui <agent> <session> <worktree> <peer_sync> <peer_worktree> <feature> [thinking_effort]
 restart_agent_tui() {
     local agent="$1"
     local session="$2"
@@ -304,6 +311,7 @@ restart_agent_tui() {
     local peer_sync="$4"
     local peer_worktree="$5"
     local feature="$6"
+    local thinking="${7:-$DEFAULT_CODEX_THINKING}"
 
     # Check if tmux session exists
     if ! tmux_session_exists "$session"; then
@@ -334,7 +342,7 @@ restart_agent_tui() {
 
     # Start the agent CLI
     local agent_cmd
-    agent_cmd="$(get_agent_cmd "$agent")"
+    agent_cmd="$(get_agent_cmd "$agent" "$thinking")"
     tmux send-keys -t "$session" "$agent_cmd"
     tmux send-keys -t "$session" C-m
 
@@ -545,6 +553,7 @@ cmd_start() {
     local work_timeout=$DEFAULT_WORK_TIMEOUT
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
     local max_rounds=10
+    local codex_thinking=$DEFAULT_CODEX_THINKING
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -554,12 +563,19 @@ cmd_start() {
             --work-timeout) work_timeout="$2"; shift 2 ;;
             --review-timeout) review_timeout="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
+            --codex-thinking) codex_thinking="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
             *) feature="$1"; shift ;;
         esac
     done
 
     [ -z "$feature" ] && die "Usage: agent-duo start <feature> [--no-ttyd] [--auto-run]"
+
+    # Validate codex thinking effort
+    case "$codex_thinking" in
+        low|medium|high) ;;
+        *) die "Invalid --codex-thinking value: $codex_thinking (valid: low, medium, high)" ;;
+    esac
 
     # Ensure we're in a git repo
     git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not a git repository"
@@ -636,6 +652,7 @@ cmd_start() {
     echo "work" > "$peer_sync/phase"
     echo "1" > "$peer_sync/round"
     echo "$feature" > "$peer_sync/feature"
+    echo "$codex_thinking" > "$peer_sync/codex-thinking"
     echo "working|$(date +%s)|starting" > "$peer_sync/claude.status"
     echo "working|$(date +%s)|starting" > "$peer_sync/codex.status"
 
@@ -662,9 +679,9 @@ cmd_start() {
 
     if $ttyd_mode; then
         start_ttyd_mode "$feature" "$project_root" "$worktree_claude" "$worktree_codex" "$peer_sync" \
-            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds"
+            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking"
     else
-        start_tmux_mode "$feature" "$project_root" "$worktree_claude" "$worktree_codex" "$peer_sync"
+        start_tmux_mode "$feature" "$project_root" "$worktree_claude" "$worktree_codex" "$peer_sync" "$codex_thinking"
     fi
 }
 
@@ -674,6 +691,7 @@ start_tmux_mode() {
     local worktree_claude="$3"
     local worktree_codex="$4"
     local peer_sync="$5"
+    local codex_thinking="${6:-$DEFAULT_CODEX_THINKING}"
 
     local session_name="duo-${feature}"
 
@@ -720,7 +738,7 @@ start_tmux_mode() {
     echo ""
     echo "To start agents, in each window run their CLI:"
     echo "  claude window: $CLAUDE_CMD"
-    echo "  codex window:  $CODEX_CMD"
+    echo "  codex window:  $(get_agent_cmd codex "$codex_thinking")"
 }
 
 start_ttyd_mode() {
@@ -733,6 +751,7 @@ start_ttyd_mode() {
     local work_timeout="${7:-$DEFAULT_WORK_TIMEOUT}"
     local review_timeout="${8:-$DEFAULT_REVIEW_TIMEOUT}"
     local max_rounds="${9:-10}"
+    local codex_thinking="${10:-$DEFAULT_CODEX_THINKING}"
 
     local session_name="duo-${feature}"
 
@@ -895,11 +914,16 @@ cmd_restart() {
     local claude_port=$CLAUDE_PORT
     local codex_port=$CODEX_PORT
 
+    # Load codex thinking effort
+    local codex_thinking
+    codex_thinking="$(cat "$peer_sync/codex-thinking" 2>/dev/null)" || codex_thinking="$DEFAULT_CODEX_THINKING"
+
     echo ""
     echo "=== Agent Duo Restart ==="
     echo ""
     echo "Feature:  $feature"
     echo "Project:  $project_name"
+    echo "Codex thinking: $codex_thinking"
     echo ""
 
     # Ensure pids directory exists
@@ -996,15 +1020,15 @@ cmd_restart() {
     echo ""
     info "Checking agent TUIs..."
 
-    # Check claude TUI
+    # Check claude TUI (thinking effort not used for claude)
     if ! restart_agent_tui "claude" "${session_name}-claude" \
             "$worktree_claude" "$peer_sync" "$worktree_codex" "$feature"; then
         errors=$((errors + 1))
     fi
 
-    # Check codex TUI
+    # Check codex TUI (pass thinking effort)
     if ! restart_agent_tui "codex" "${session_name}-codex" \
-            "$worktree_codex" "$peer_sync" "$worktree_claude" "$feature"; then
+            "$worktree_codex" "$peer_sync" "$worktree_claude" "$feature" "$codex_thinking"; then
         errors=$((errors + 1))
     fi
 
@@ -1588,12 +1612,16 @@ cmd_run() {
     local worktree_claude="$parent_dir/${project_name}-${feature}-claude"
     local worktree_codex="$parent_dir/${project_name}-${feature}-codex"
 
+    # Load codex thinking effort from session
+    local codex_thinking
+    codex_thinking="$(cat "$peer_sync/codex-thinking" 2>/dev/null)" || codex_thinking="$DEFAULT_CODEX_THINKING"
+
     # Optionally auto-start agents
     if $auto_start; then
         info "Starting agents..."
         tmux send-keys -t "$claude_session" "$CLAUDE_CMD"
         tmux send-keys -t "$claude_session" C-m
-        tmux send-keys -t "$codex_session" "$CODEX_CMD"
+        tmux send-keys -t "$codex_session" "$(get_agent_cmd codex "$codex_thinking")"
         tmux send-keys -t "$codex_session" C-m
         sleep 3
         # Task will be sent as augmented round 1 message below
@@ -1892,6 +1920,7 @@ SESSION COMMANDS
           --work-timeout <secs>    Work phase timeout (default: 600, with --auto-run)
           --review-timeout <secs>  Review phase timeout (default: 300, with --auto-run)
           --max-rounds <n>         Maximum rounds (default: 10, with --auto-run)
+          --codex-thinking <level> Codex reasoning effort: low, medium, high (default: high)
 
         With ttyd (default): Creates 3 web terminals (ports allocated dynamically)
           - Orchestrator: Main project root
