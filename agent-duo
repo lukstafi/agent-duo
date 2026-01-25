@@ -1269,6 +1269,51 @@ cmd_pr() {
 
     cd "$worktree"
 
+    # Check if feature file exists and was NOT modified (should be deleted)
+    # The feature file is copied to the worktree root during start
+    local feature_file="$worktree/${feature}.md"
+    if [ -f "$feature_file" ]; then
+        # Get the main branch to compare against
+        local main_branch
+        main_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')" || true
+        if [ -z "$main_branch" ]; then
+            for candidate in main master; do
+                if git rev-parse --verify "$candidate" >/dev/null 2>&1; then
+                    main_branch="$candidate"
+                    break
+                fi
+            done
+        fi
+        if [ -z "$main_branch" ]; then
+            main_branch="HEAD~1"  # fallback: compare to parent commit
+        fi
+
+        # Check if the feature file was modified compared to when it was copied
+        # We compare the file content in the worktree against main branch
+        local file_modified=false
+        if git show "${main_branch}:${feature}.md" >/dev/null 2>&1; then
+            # File exists in main branch - check if content differs
+            if ! git diff --quiet "${main_branch}" -- "${feature}.md" 2>/dev/null; then
+                file_modified=true
+            fi
+        else
+            # File doesn't exist in main branch (was copied during start)
+            # Check if it was modified from the original task file in .peer-sync or root
+            local original_task_file
+            if original_task_file="$(find_task_file "$root" "$feature")"; then
+                if ! diff -q "$feature_file" "$original_task_file" >/dev/null 2>&1; then
+                    file_modified=true
+                fi
+            fi
+        fi
+
+        if [ "$file_modified" = "false" ]; then
+            info "Feature file ${feature}.md was not modified - removing it"
+            git rm "${feature}.md"
+            git commit -m "Remove unmodified feature file ${feature}.md"
+        fi
+    fi
+
     # Check for changes
     if [ -z "$(git status --porcelain)" ]; then
         warn "No changes to commit in $agent's worktree"
