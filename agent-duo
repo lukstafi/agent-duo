@@ -1521,6 +1521,9 @@ cmd_pr() {
 
     success "PR created: $pr_url"
 
+    # Send notification
+    send_pr_notification "$agent" "$feature" "$pr_url" "duo"
+
     # Check if both PRs exist
     if [ -f "$peer_sync/claude.pr" ] && [ -f "$peer_sync/codex.pr" ]; then
         echo "complete" > "$peer_sync/session"

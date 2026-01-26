@@ -1263,6 +1263,9 @@ cmd_pr() {
 
     success "PR created: $pr_url"
 
+    # Send notification
+    send_pr_notification "coder" "$feature" "$pr_url" "solo"
+
     # Mark session complete
     echo "complete" > "$peer_sync/session"
     success "Session complete!"

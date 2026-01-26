@@ -864,6 +864,31 @@ send_clarify_notification() {
     fi
 }
 
+# Send notification when a PR is created
+# Usage: send_pr_notification <agent> <feature> <pr_url> <mode>
+send_pr_notification() {
+    local agent="$1"
+    local feature="$2"
+    local pr_url="$3"
+    local mode="${4:-duo}"
+
+    # Only send via ntfy (email would be overkill for this)
+    if ! get_ntfy_topic >/dev/null 2>&1; then
+        return 0  # Silent skip if ntfy not configured
+    fi
+
+    local title="[agent-${mode}] PR created: ${feature}"
+    local message="${agent^} has created a PR for ${feature}
+
+$pr_url"
+
+    if send_ntfy "$title" "$message" "default" "rocket,link"; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Skill installation helper
 #------------------------------------------------------------------------------
