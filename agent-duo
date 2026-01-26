@@ -98,6 +98,14 @@ install_skill() {
 }
 
 cmd_setup() {
+    # Detect if user meant to run ./agent-duo setup from a repo checkout
+    local install_dir="$HOME/.local/bin"
+
+    if [ "$SCRIPT_DIR" = "$install_dir" ] && [ -x "./agent-duo" ]; then
+        die "Found ./agent-duo in current directory - did you mean to run:
+  ./agent-duo setup"
+    fi
+
     info "Installing agent-duo..."
 
     local templates_dir="$SCRIPT_DIR/skills/templates"
@@ -107,7 +115,6 @@ cmd_setup() {
     fi
 
     # Install CLI to ~/.local/bin
-    local install_dir="$HOME/.local/bin"
     mkdir -p "$install_dir"
 
     local install_path="$install_dir/agent-duo"
