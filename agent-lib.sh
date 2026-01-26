@@ -618,6 +618,25 @@ get_ntfy_server() {
     echo "https://ntfy.sh"
 }
 
+# Get ntfy access token from config or environment
+get_ntfy_token() {
+    if [ -n "$AGENT_DUO_NTFY_TOKEN" ]; then
+        echo "$AGENT_DUO_NTFY_TOKEN"
+        return 0
+    fi
+
+    if [ -f "$AGENT_DUO_CONFIG" ]; then
+        local token
+        token="$(grep -E '^ntfy_token=' "$AGENT_DUO_CONFIG" 2>/dev/null | cut -d= -f2-)"
+        if [ -n "$token" ]; then
+            echo "$token"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 # Send notification via ntfy.sh
 # Usage: send_ntfy <title> <message> [priority] [tags]
 send_ntfy() {
@@ -641,6 +660,12 @@ send_ntfy() {
 
     if [ -n "$tags" ]; then
         curl_args+=(-H "Tags: $tags")
+    fi
+
+    # Add authentication if token is configured
+    local token
+    if token="$(get_ntfy_token 2>/dev/null)"; then
+        curl_args+=(-H "Authorization: Bearer $token")
     fi
 
     if curl "${curl_args[@]}" "$server/$topic" >/dev/null 2>&1; then

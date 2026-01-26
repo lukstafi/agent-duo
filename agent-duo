@@ -471,13 +471,21 @@ Sent: $(date)"
         ntfy_server="$(get_ntfy_server)"
         info "  Server: $ntfy_server"
 
+        # Check for token
+        local ntfy_token
+        if ntfy_token="$(get_ntfy_token 2>/dev/null)"; then
+            success "ntfy token: ${ntfy_token:0:6}...${ntfy_token: -4} (authenticated)"
+        else
+            info "  Token: not set (using anonymous access)"
+        fi
+
         if [ "$send_test_ntfy" = true ]; then
             info "Sending test notification..."
             if send_ntfy "agent-duo test" "This is a test notification from agent-duo doctor. Sent: $(date)" "default" "white_check_mark"; then
                 success "Test notification sent to $ntfy_server/$ntfy_topic"
             else
                 warn "Failed to send test notification"
-                warn "  Check your internet connection and topic name"
+                warn "  Check your internet connection, topic name, and token"
             fi
         else
             info "  Use --send-ntfy to send a test notification"
@@ -615,13 +623,22 @@ cmd_config() {
         info "Configuration file: $config_file"
         echo ""
         if [ -f "$config_file" ]; then
-            cat "$config_file"
+            # Display config with token masked
+            while IFS= read -r line; do
+                if [[ "$line" =~ ^ntfy_token= ]]; then
+                    local token="${line#ntfy_token=}"
+                    echo "ntfy_token=${token:0:6}...${token: -4}"
+                else
+                    echo "$line"
+                fi
+            done < "$config_file"
         else
             info "No configuration set"
         fi
         echo ""
         info "Available settings:"
         echo "  ntfy_topic   - ntfy.sh topic for push notifications"
+        echo "  ntfy_token   - ntfy.sh access token (for reserved topics)"
         echo "  ntfy_server  - ntfy server URL (default: https://ntfy.sh)"
         echo ""
         info "Usage: agent-duo config <key> [value]"
@@ -633,10 +650,10 @@ cmd_config() {
 
     # Validate key
     case "$key" in
-        ntfy_topic|ntfy_server)
+        ntfy_topic|ntfy_token|ntfy_server)
             ;;
         *)
-            die "Unknown config key: $key (valid: ntfy_topic, ntfy_server)"
+            die "Unknown config key: $key (valid: ntfy_topic, ntfy_token, ntfy_server)"
             ;;
     esac
 
@@ -646,7 +663,12 @@ cmd_config() {
             local current
             current="$(grep -E "^${key}=" "$config_file" 2>/dev/null | cut -d= -f2-)"
             if [ -n "$current" ]; then
-                echo "$current"
+                # Mask token for security
+                if [ "$key" = "ntfy_token" ]; then
+                    echo "${current:0:6}...${current: -4}"
+                else
+                    echo "$current"
+                fi
             else
                 info "$key is not set"
                 return 1
@@ -669,20 +691,33 @@ cmd_config() {
 
     # Add new value
     echo "${key}=${value}" >> "$config_file"
-    success "Set $key=$value"
 
-    # Show helpful info for ntfy_topic
-    if [ "$key" = "ntfy_topic" ]; then
-        local server
-        server="$(get_ntfy_server)"
-        echo ""
-        info "To receive notifications:"
-        echo "  1. Install ntfy app on your phone (iOS/Android)"
-        echo "  2. Subscribe to topic: $value"
-        echo "  3. Or open in browser: $server/$value"
-        echo ""
-        info "Test with: agent-duo doctor --send-ntfy"
+    # Mask token in success message
+    if [ "$key" = "ntfy_token" ]; then
+        success "Set $key=${value:0:6}...${value: -4}"
+    else
+        success "Set $key=$value"
     fi
+
+    # Show helpful info based on key
+    case "$key" in
+        ntfy_topic)
+            local server
+            server="$(get_ntfy_server)"
+            echo ""
+            info "To receive notifications:"
+            echo "  1. Install ntfy app on your phone (iOS/Android)"
+            echo "  2. Subscribe to topic: $value"
+            echo "  3. Or open in browser: $server/$value"
+            echo ""
+            info "Test with: agent-duo doctor --send-ntfy"
+            ;;
+        ntfy_token)
+            echo ""
+            info "Token configured for authenticated access."
+            info "Test with: agent-duo doctor --send-ntfy"
+            ;;
+    esac
 }
 
 #------------------------------------------------------------------------------
@@ -2362,12 +2397,14 @@ SESSION COMMANDS
 
         Keys:
           ntfy_topic      ntfy.sh topic name for push notifications
+          ntfy_token      ntfy.sh access token (for reserved/private topics)
           ntfy_server     ntfy server URL (default: https://ntfy.sh)
 
         Examples:
-          agent-duo config                     # Show all config
-          agent-duo config ntfy_topic          # Get ntfy topic
-          agent-duo config ntfy_topic myapp123 # Set ntfy topic
+          agent-duo config                       # Show all config
+          agent-duo config ntfy_topic            # Get ntfy topic
+          agent-duo config ntfy_topic myapp123   # Set ntfy topic
+          agent-duo config ntfy_token tk_abc123  # Set access token
 
 CONTROL COMMANDS
     nudge <agent> [message]
