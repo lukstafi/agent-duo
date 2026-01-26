@@ -984,8 +984,8 @@ cmd_run() {
         done
         echo ""
 
-        # Send email notification
-        send_clarify_email "$peer_sync" "$feature" "solo"
+        # Send notification (ntfy and/or email)
+        send_clarify_notification "$peer_sync" "$feature" "solo"
 
         # Display clarify results
         echo ""

@@ -14,7 +14,8 @@
 #   pr <agent>           Create PR for agent's solution
 #   cleanup [--full]     Remove worktrees (--full: also state)
 #   setup                Install agent-duo to PATH and skills
-#   doctor [--send-email] Check system health and configuration
+#   doctor [--send-email|--send-ntfy]  Check system health and configuration
+#   config <key> [value] Get/set configuration (e.g., ntfy_topic)
 #
 # Control Commands:
 #   nudge <agent> [msg]  Send message to agent terminal
@@ -275,11 +276,13 @@ NOTIFY_EOF
 cmd_doctor() {
     local all_ok=true
     local send_test_email=false
+    local send_test_ntfy=false
 
     # Parse arguments
     while [ $# -gt 0 ]; do
         case "$1" in
             --send-email) send_test_email=true ;;
+            --send-ntfy) send_test_ntfy=true ;;
             *) die "Unknown option: $1" ;;
         esac
         shift
@@ -456,6 +459,38 @@ Sent: $(date)"
 
     echo ""
 
+    # --- ntfy.sh Setup ---
+    echo "=== ntfy.sh Notifications ==="
+
+    local ntfy_topic
+    ntfy_topic="$(get_ntfy_topic 2>/dev/null || true)"
+
+    if [ -n "$ntfy_topic" ]; then
+        success "ntfy topic: $ntfy_topic"
+        local ntfy_server
+        ntfy_server="$(get_ntfy_server)"
+        info "  Server: $ntfy_server"
+
+        if [ "$send_test_ntfy" = true ]; then
+            info "Sending test notification..."
+            if send_ntfy "agent-duo test" "This is a test notification from agent-duo doctor. Sent: $(date)" "default" "white_check_mark"; then
+                success "Test notification sent to $ntfy_server/$ntfy_topic"
+            else
+                warn "Failed to send test notification"
+                warn "  Check your internet connection and topic name"
+            fi
+        else
+            info "  Use --send-ntfy to send a test notification"
+        fi
+    else
+        info "ntfy: not configured (optional)"
+        info "  Configure with: agent-duo config ntfy_topic <your-topic>"
+        info "  ntfy.sh is a free push notification service"
+        info "  Subscribe at: https://ntfy.sh/<your-topic>"
+    fi
+
+    echo ""
+
     # --- Skills Installation ---
     echo "=== Skills Installation ==="
 
@@ -564,6 +599,89 @@ Sent: $(date)"
     else
         warn "Some issues found - see above for details"
         return 1
+    fi
+}
+
+#------------------------------------------------------------------------------
+# Command: config
+#------------------------------------------------------------------------------
+
+cmd_config() {
+    local config_dir="$HOME/.config/agent-duo"
+    local config_file="$config_dir/config"
+
+    # List all config if no arguments
+    if [ $# -eq 0 ]; then
+        info "Configuration file: $config_file"
+        echo ""
+        if [ -f "$config_file" ]; then
+            cat "$config_file"
+        else
+            info "No configuration set"
+        fi
+        echo ""
+        info "Available settings:"
+        echo "  ntfy_topic   - ntfy.sh topic for push notifications"
+        echo "  ntfy_server  - ntfy server URL (default: https://ntfy.sh)"
+        echo ""
+        info "Usage: agent-duo config <key> [value]"
+        return 0
+    fi
+
+    local key="$1"
+    local value="${2:-}"
+
+    # Validate key
+    case "$key" in
+        ntfy_topic|ntfy_server)
+            ;;
+        *)
+            die "Unknown config key: $key (valid: ntfy_topic, ntfy_server)"
+            ;;
+    esac
+
+    # Get value if not setting
+    if [ -z "$value" ]; then
+        if [ -f "$config_file" ]; then
+            local current
+            current="$(grep -E "^${key}=" "$config_file" 2>/dev/null | cut -d= -f2-)"
+            if [ -n "$current" ]; then
+                echo "$current"
+            else
+                info "$key is not set"
+                return 1
+            fi
+        else
+            info "$key is not set"
+            return 1
+        fi
+        return 0
+    fi
+
+    # Set value
+    mkdir -p "$config_dir"
+
+    if [ -f "$config_file" ]; then
+        # Remove existing key if present
+        grep -v "^${key}=" "$config_file" > "$config_file.tmp" 2>/dev/null || true
+        mv "$config_file.tmp" "$config_file"
+    fi
+
+    # Add new value
+    echo "${key}=${value}" >> "$config_file"
+    success "Set $key=$value"
+
+    # Show helpful info for ntfy_topic
+    if [ "$key" = "ntfy_topic" ]; then
+        local server
+        server="$(get_ntfy_server)"
+        echo ""
+        info "To receive notifications:"
+        echo "  1. Install ntfy app on your phone (iOS/Android)"
+        echo "  2. Subscribe to topic: $value"
+        echo "  3. Or open in browser: $server/$value"
+        echo ""
+        info "Test with: agent-duo doctor --send-ntfy"
     fi
 }
 
@@ -1518,8 +1636,8 @@ cmd_confirm() {
     echo "Note: If orchestrator is waiting for input, press Enter there to continue."
 }
 
-# Note: send_clarify_email is provided by agent-lib.sh
-# Call it with mode="duo" for agent-duo specific behavior
+# Note: send_clarify_notification is provided by agent-lib.sh
+# It tries ntfy first (if configured), then email
 
 #------------------------------------------------------------------------------
 # Generate clarify phase message for agents
@@ -1817,8 +1935,8 @@ cmd_run() {
         done
         echo ""
 
-        # Send email notification with clarify results
-        send_clarify_email "$peer_sync" "$feature" "duo"
+        # Send notification with clarify results (ntfy and/or email)
+        send_clarify_notification "$peer_sync" "$feature" "duo"
 
         # Display clarify results
         echo ""
@@ -2229,13 +2347,27 @@ SESSION COMMANDS
     setup
         Install agent-duo to ~/.local/bin and skills to agent dirs.
 
-    doctor [--send-email]
+    doctor [--send-email] [--send-ntfy]
         Check system configuration and diagnose common issues.
-        Verifies: required tools, AI CLIs, git config, email setup,
+        Verifies: required tools, AI CLIs, git config, email/ntfy setup,
         skills installation, hook configuration, and PATH.
 
         Options:
           --send-email    Send a test email to verify email delivery
+          --send-ntfy     Send a test ntfy notification
+
+    config [key] [value]
+        Get or set configuration values.
+        Without arguments, shows current configuration.
+
+        Keys:
+          ntfy_topic      ntfy.sh topic name for push notifications
+          ntfy_server     ntfy server URL (default: https://ntfy.sh)
+
+        Examples:
+          agent-duo config                     # Show all config
+          agent-duo config ntfy_topic          # Get ntfy topic
+          agent-duo config ntfy_topic myapp123 # Set ntfy topic
 
 CONTROL COMMANDS
     nudge <agent> [message]
@@ -2317,6 +2449,7 @@ main() {
         cleanup)     cmd_cleanup "$@" ;;
         setup)       cmd_setup "$@" ;;
         doctor)      cmd_doctor "$@" ;;
+        config)      cmd_config "$@" ;;
         nudge)       cmd_nudge "$@" ;;
         interrupt)   cmd_interrupt "$@" ;;
         signal)      cmd_signal "$@" ;;

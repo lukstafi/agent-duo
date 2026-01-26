@@ -572,8 +572,141 @@ lib_cmd_phase() {
 }
 
 #------------------------------------------------------------------------------
-# Email notifications
+# Notifications (ntfy.sh and email)
 #------------------------------------------------------------------------------
+
+# Configuration file for notifications
+AGENT_DUO_CONFIG="${AGENT_DUO_CONFIG:-$HOME/.config/agent-duo/config}"
+
+# Get ntfy topic from config or environment
+get_ntfy_topic() {
+    # Check environment variable first
+    if [ -n "$AGENT_DUO_NTFY_TOPIC" ]; then
+        echo "$AGENT_DUO_NTFY_TOPIC"
+        return 0
+    fi
+
+    # Check config file
+    if [ -f "$AGENT_DUO_CONFIG" ]; then
+        local topic
+        topic="$(grep -E '^ntfy_topic=' "$AGENT_DUO_CONFIG" 2>/dev/null | cut -d= -f2-)"
+        if [ -n "$topic" ]; then
+            echo "$topic"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Get ntfy server URL (default: ntfy.sh)
+get_ntfy_server() {
+    if [ -n "$AGENT_DUO_NTFY_SERVER" ]; then
+        echo "$AGENT_DUO_NTFY_SERVER"
+        return 0
+    fi
+
+    if [ -f "$AGENT_DUO_CONFIG" ]; then
+        local server
+        server="$(grep -E '^ntfy_server=' "$AGENT_DUO_CONFIG" 2>/dev/null | cut -d= -f2-)"
+        if [ -n "$server" ]; then
+            echo "$server"
+            return 0
+        fi
+    fi
+
+    echo "https://ntfy.sh"
+}
+
+# Send notification via ntfy.sh
+# Usage: send_ntfy <title> <message> [priority] [tags]
+send_ntfy() {
+    local title="$1"
+    local message="$2"
+    local priority="${3:-default}"
+    local tags="${4:-}"
+
+    local topic
+    topic="$(get_ntfy_topic)" || return 1
+
+    local server
+    server="$(get_ntfy_server)"
+
+    local curl_args=(
+        -s
+        -H "Title: $title"
+        -H "Priority: $priority"
+        -d "$message"
+    )
+
+    if [ -n "$tags" ]; then
+        curl_args+=(-H "Tags: $tags")
+    fi
+
+    if curl "${curl_args[@]}" "$server/$topic" >/dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Send clarify phase notification via ntfy
+send_clarify_ntfy() {
+    local peer_sync="$1"
+    local feature="$2"
+    local mode="${3:-duo}"
+
+    local topic
+    topic="$(get_ntfy_topic)" || {
+        # ntfy not configured, silently skip
+        return 1
+    }
+
+    local title="[agent-${mode}] Clarify phase complete: $feature"
+    local message=""
+
+    message+="Feature: $feature"
+    message+=$'\n\n'
+
+    if [ "$mode" = "solo" ]; then
+        if [ -f "$peer_sync/clarify-coder.md" ]; then
+            message+="CODER'S APPROACH:"
+            message+=$'\n'
+            # Truncate for notification (ntfy has limits)
+            message+="$(head -20 "$peer_sync/clarify-coder.md")"
+            message+=$'\n\n'
+        fi
+        if [ -f "$peer_sync/clarify-reviewer.md" ]; then
+            message+="REVIEWER'S COMMENTS:"
+            message+=$'\n'
+            message+="$(head -20 "$peer_sync/clarify-reviewer.md")"
+            message+=$'\n\n'
+        fi
+    else
+        if [ -f "$peer_sync/clarify-claude.md" ]; then
+            message+="CLAUDE'S APPROACH:"
+            message+=$'\n'
+            message+="$(head -20 "$peer_sync/clarify-claude.md")"
+            message+=$'\n\n'
+        fi
+        if [ -f "$peer_sync/clarify-codex.md" ]; then
+            message+="CODEX'S APPROACH:"
+            message+=$'\n'
+            message+="$(head -20 "$peer_sync/clarify-codex.md")"
+            message+=$'\n\n'
+        fi
+    fi
+
+    message+="Run 'agent-${mode} confirm' to proceed"
+
+    if send_ntfy "$title" "$message" "default" "robot,clipboard"; then
+        success "Notification sent via ntfy"
+        return 0
+    else
+        warn "Failed to send ntfy notification"
+        return 1
+    fi
+}
 
 # Send email notification with clarify phase results
 send_clarify_email() {
@@ -665,10 +798,43 @@ send_clarify_email() {
     echo "$body" | mail -s "$subject" "$email" 2>/dev/null
 
     if [ $? -eq 0 ]; then
-        success "Email sent to $email"
+        success "Email queued to $email"
         return 0
     else
         warn "Failed to send email"
+        return 1
+    fi
+}
+
+# Send clarify notification via all configured methods
+# Tries ntfy first (instant), then email (may not work)
+send_clarify_notification() {
+    local peer_sync="$1"
+    local feature="$2"
+    local mode="${3:-duo}"
+
+    local ntfy_ok=false
+    local email_ok=false
+
+    # Try ntfy first (more reliable, instant delivery)
+    if get_ntfy_topic >/dev/null 2>&1; then
+        if send_clarify_ntfy "$peer_sync" "$feature" "$mode"; then
+            ntfy_ok=true
+        fi
+    fi
+
+    # Also try email (as backup or if ntfy not configured)
+    if command -v mail >/dev/null 2>&1; then
+        if send_clarify_email "$peer_sync" "$feature" "$mode"; then
+            email_ok=true
+        fi
+    fi
+
+    # Return success if at least one method worked
+    if [ "$ntfy_ok" = true ] || [ "$email_ok" = true ]; then
+        return 0
+    else
+        warn "No notification sent (configure ntfy or email)"
         return 1
     fi
 }
