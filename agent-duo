@@ -180,44 +180,67 @@ cmd_setup() {
 agent="$1"
 [ -z "$agent" ] && exit 0
 
+# Debug logging (writes to .peer-sync/notify.log if PEER_SYNC found)
+log_debug() {
+    [ -d "$PEER_SYNC" ] && echo "$(date '+%H:%M:%S') [$agent] $*" >> "$PEER_SYNC/notify.log"
+}
+
 # Discover PEER_SYNC from working directory (worktrees have .peer-sync symlink)
 if [ -z "$PEER_SYNC" ]; then
     if [ -d "$PWD/.peer-sync" ]; then
         PEER_SYNC="$PWD/.peer-sync"
     else
-        exit 0
+        # Try parent directory (in case we're in a subdirectory)
+        parent="$PWD"
+        while [ "$parent" != "/" ]; do
+            if [ -d "$parent/.peer-sync" ]; then
+                PEER_SYNC="$parent/.peer-sync"
+                break
+            fi
+            parent="$(dirname "$parent")"
+        done
+        [ -z "$PEER_SYNC" ] && exit 0
     fi
 fi
 [ ! -d "$PEER_SYNC" ] && exit 0
 
+log_debug "hook fired, PWD=$PWD"
+
 # Read current phase
-phase="$(cat "$PEER_SYNC/phase" 2>/dev/null)" || exit 0
+phase="$(cat "$PEER_SYNC/phase" 2>/dev/null)" || { log_debug "no phase file"; exit 0; }
 
 # Read current status
 current_status="$(cut -d'|' -f1 < "$PEER_SYNC/${agent}.status" 2>/dev/null)"
+log_debug "phase=$phase status=$current_status"
 
 # Determine what status to signal based on phase
 case "$phase" in
     clarify)
         # Don't override if already clarify-done or beyond
         case "$current_status" in
-            clarify-done|done|review-done|pr-created) exit 0 ;;
+            clarify-done|done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
         esac
+        log_debug "signaling clarify-done"
         agent-duo signal "$agent" clarify-done "completed via hook"
         ;;
     work)
         # Don't override if already done or beyond
         case "$current_status" in
-            done|review-done|pr-created) exit 0 ;;
+            done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
         esac
+        log_debug "signaling done"
         agent-duo signal "$agent" done "completed via hook"
         ;;
     review)
         # Don't override if already review-done or beyond
         case "$current_status" in
-            review-done|pr-created) exit 0 ;;
+            review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
         esac
+        log_debug "signaling review-done"
         agent-duo signal "$agent" review-done "completed via hook"
+        ;;
+    *)
+        log_debug "unknown phase: $phase"
         ;;
 esac
 NOTIFY_EOF

@@ -38,17 +38,18 @@ Stop any review activity. Your task is to continue developing your implementatio
 git -C "$PEER_WORKTREE" diff
 ```
 
-## When Done
+## Before You Stop
 
-Signal completion and **STOP**:
+Do one of the following:
+
+**If more iteration needed** (incomplete, untested, or want to address peer feedback):
 ```bash
 agent-duo signal "$MY_NAME" done "brief summary"
 ```
 
-## When Ready for Final PR
-
-When your solution is complete and tested, create your PR:
+**If your solution is complete** — create the PR now:
 ```bash
-agent-duo pr "$MY_NAME"   # recommended: handles commit, push, and orchestrator sync
-# or: gh pr create ...    # also works, orchestrator will detect it
+agent-duo pr "$MY_NAME"
 ```
+
+The orchestrator waits for your signal or PR before proceeding.

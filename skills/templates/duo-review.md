@@ -96,12 +96,18 @@ agent-duo signal "$MY_NAME" reviewing "examining peer's work"
 - **Note tradeoffs, not defects**: "They chose X which trades off Y for Z"
 - **Stay on your path**: You're reviewing to understand, not to adopt their approach wholesale
 
-### When Done
+### Before You Stop
 
-Signal that your review is complete:
+Do one of the following:
 
+**If more work/review rounds needed**:
 ```bash
 agent-duo signal "$MY_NAME" review-done "review written"
 ```
 
-Then **STOP and wait**. The orchestrator will trigger the next work phase, where you'll incorporate insights from the review.
+**If your solution is complete** — create the PR now:
+```bash
+agent-duo pr "$MY_NAME"
+```
+
+The orchestrator waits for your signal or PR before proceeding.
