@@ -527,11 +527,26 @@ check_tui_health() {
             echo ""
             warn "Agent $agent TUI has exited. Orchestrator paused."
             echo ""
+
+            # Send ntfy notification so user knows intervention is needed
+            local feature="${FEATURE:-unknown}"
+            local resume_info=""
+            if [ "$agent" = "codex" ] && [ -f "$peer_sync/codex-resume-key" ]; then
+                resume_info=$'\n'"Resume key: $(cat "$peer_sync/codex-resume-key")"
+            fi
+            send_ntfy \
+                "[agent-duo] $agent TUI exited - intervention needed" \
+                "Agent $agent has exited unexpectedly during feature: $feature
+
+Run 'agent-duo restart' to recover.$resume_info" \
+                "high" \
+                "warning,robot" 2>/dev/null || true
+
             info "Options to recover:"
             echo "  1. Run 'agent-duo restart' to restart the agent TUI"
             echo "  2. Press Enter to continue waiting (will timeout eventually)"
             echo "  3. Press Ctrl-C to stop the orchestrator"
-            if [ "$agent" = "codex" ] && [ -f "$peer_sync/codex-resume-key" ]; then
+            if [ -n "$resume_info" ]; then
                 echo "  4. Resume key saved: $(cat "$peer_sync/codex-resume-key")"
             fi
             echo ""
