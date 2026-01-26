@@ -246,6 +246,53 @@ agent_tui_is_running() {
     esac
 }
 
+# Extract Codex resume key from tmux pane buffer
+# Returns the resume key if found, empty string otherwise
+get_codex_resume_key() {
+    local session="$1"
+
+    # Capture recent lines from the tmux pane (last 50 lines should be enough)
+    local buffer
+    buffer="$(tmux capture-pane -t "$session" -p -S -50 2>/dev/null)" || return 1
+
+    # Look for "codex resume <key>" pattern
+    # Codex outputs: "To continue this session, run codex resume <uuid>"
+    # UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    local resume_key
+    resume_key="$(echo "$buffer" | grep -oE 'codex resume [a-zA-Z0-9-]+' | tail -1 | awk '{print $3}')"
+
+    echo "$resume_key"
+}
+
+# Attempt to resume Codex session using the resume key from terminal output
+# Returns 0 if resume was attempted, 1 if no resume key found
+attempt_codex_resume() {
+    local session="$1"
+    local peer_sync="$2"
+
+    local resume_key
+    resume_key="$(get_codex_resume_key "$session")"
+
+    if [ -z "$resume_key" ]; then
+        return 1
+    fi
+
+    info "Found Codex resume key: $resume_key"
+    info "Attempting to resume Codex session..."
+
+    # Save the resume key for reference
+    echo "$resume_key" > "$peer_sync/codex-resume-key"
+
+    # Send the resume command to the tmux session
+    tmux send-keys -t "$session" "codex resume $resume_key"
+    tmux send-keys -t "$session" C-m
+
+    # Wait a moment for it to start
+    sleep 2
+
+    return 0
+}
+
 # Restart ttyd for a specific session
 # Returns 0 on success, 1 on failure
 restart_ttyd_for_session() {
@@ -426,8 +473,7 @@ interrupt_agent() {
 }
 
 # Check if agent TUI has exited and handle according to behavior setting
-# Returns 0 if TUI is running, 1 if TUI exited (and handled)
-# Sets global TUI_EXIT_AGENT if an exit was detected
+# Returns 0 if TUI is running (or was resumed), 1 if TUI exited and not recovered
 check_tui_health() {
     local agent="$1"
     local session="$2"
@@ -439,8 +485,27 @@ check_tui_health() {
         return 0  # TUI is running, all good
     fi
 
-    # TUI has exited - handle according to behavior
+    # TUI has exited
     warn "Agent $agent TUI has exited unexpectedly!"
+
+    # For Codex, try to auto-resume using the resume key from terminal output
+    if [ "$agent" = "codex" ]; then
+        if attempt_codex_resume "$session" "$peer_sync"; then
+            # Wait and check if resume worked
+            sleep 3
+            if agent_tui_is_running "$session" "$agent"; then
+                success "Codex session resumed successfully!"
+                atomic_write "$peer_sync/${agent}.status" "working|$(date +%s)|resumed from exit"
+                return 0
+            else
+                warn "Codex resume attempted but TUI still not running"
+            fi
+        else
+            warn "No Codex resume key found in terminal output"
+        fi
+    fi
+
+    # Resume failed or not applicable - fall back to configured behavior
     atomic_write "$peer_sync/${agent}.status" "tui-exited|$(date +%s)|TUI process exited"
 
     case "$behavior" in
@@ -466,6 +531,9 @@ check_tui_health() {
             echo "  1. Run 'agent-duo restart' to restart the agent TUI"
             echo "  2. Press Enter to continue waiting (will timeout eventually)"
             echo "  3. Press Ctrl-C to stop the orchestrator"
+            if [ "$agent" = "codex" ] && [ -f "$peer_sync/codex-resume-key" ]; then
+                echo "  4. Resume key saved: $(cat "$peer_sync/codex-resume-key")"
+            fi
             echo ""
             read -r -p "Press Enter to continue or Ctrl-C to stop: " || true
             # After user presses Enter, return and continue polling

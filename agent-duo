@@ -2098,12 +2098,15 @@ cmd_run() {
         else
             # Round 2+: Trigger skill (agent already knows the context)
             # Reset status to working before triggering (in case agent doesn't signal)
+            # Check TUI health before triggering to avoid sending to dead session
             if ! has_pr "claude" "$peer_sync"; then
+                check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
                 atomic_write "$peer_sync/claude.status" "working|$(date +%s)|round $round work phase"
                 info "Triggering duo-work for claude..."
                 trigger_skill "claude" "$claude_session" "duo-work"
             fi
             if ! has_pr "codex" "$peer_sync"; then
+                check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
                 atomic_write "$peer_sync/codex.status" "working|$(date +%s)|round $round work phase"
                 info "Triggering duo-work for codex..."
                 trigger_skill "codex" "$codex_session" "duo-work"
@@ -2182,12 +2185,15 @@ cmd_run() {
 
         # Trigger review phase
         # Reset status to reviewing before triggering (in case agent doesn't signal)
+        # Check TUI health before triggering to avoid sending to dead session
         if ! has_pr "claude" "$peer_sync"; then
+            check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
             atomic_write "$peer_sync/claude.status" "reviewing|$(date +%s)|round $round review phase"
             info "Triggering duo-review for claude..."
             trigger_skill "claude" "$claude_session" "duo-review"
         fi
         if ! has_pr "codex" "$peer_sync"; then
+            check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
             atomic_write "$peer_sync/codex.status" "reviewing|$(date +%s)|round $round review phase"
             info "Triggering duo-review for codex..."
             trigger_skill "codex" "$codex_session" "duo-review"
