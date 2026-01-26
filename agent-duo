@@ -14,6 +14,7 @@
 #   pr <agent>           Create PR for agent's solution
 #   cleanup [--full]     Remove worktrees (--full: also state)
 #   setup                Install agent-duo to PATH and skills
+#   doctor [--send-email] Check system health and configuration
 #
 # Control Commands:
 #   nudge <agent> [msg]  Send message to agent terminal
@@ -265,6 +266,305 @@ NOTIFY_EOF
     fi
 
     success "Setup complete!"
+}
+
+#------------------------------------------------------------------------------
+# Command: doctor
+#------------------------------------------------------------------------------
+
+cmd_doctor() {
+    local all_ok=true
+    local send_test_email=false
+
+    # Parse arguments
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --send-email) send_test_email=true ;;
+            *) die "Unknown option: $1" ;;
+        esac
+        shift
+    done
+
+    info "Running health checks..."
+    echo ""
+
+    # --- Required Tools ---
+    echo "=== Required Tools ==="
+
+    # git
+    if command -v git >/dev/null 2>&1; then
+        success "git: $(git --version | head -1)"
+    else
+        warn "git: NOT FOUND (required)"
+        all_ok=false
+    fi
+
+    # tmux
+    if command -v tmux >/dev/null 2>&1; then
+        success "tmux: $(tmux -V)"
+    else
+        warn "tmux: NOT FOUND (required)"
+        all_ok=false
+    fi
+
+    # ttyd (optional but recommended)
+    if command -v ttyd >/dev/null 2>&1; then
+        success "ttyd: $(ttyd --version 2>&1 | head -1)"
+    else
+        warn "ttyd: NOT FOUND (optional - use --no-ttyd flag without it)"
+    fi
+
+    # jq (optional but helpful)
+    if command -v jq >/dev/null 2>&1; then
+        success "jq: $(jq --version)"
+    else
+        warn "jq: NOT FOUND (optional - used for JSON config manipulation)"
+    fi
+
+    echo ""
+
+    # --- AI Agent CLIs ---
+    echo "=== AI Agent CLIs ==="
+
+    # claude
+    if command -v claude >/dev/null 2>&1; then
+        success "claude: found at $(command -v claude)"
+    else
+        warn "claude: NOT FOUND"
+        warn "  Install: npm install -g @anthropic-ai/claude-code"
+        all_ok=false
+    fi
+
+    # codex
+    if command -v codex >/dev/null 2>&1; then
+        success "codex: found at $(command -v codex)"
+    else
+        warn "codex: NOT FOUND"
+        warn "  Install: npm install -g @openai/codex"
+        all_ok=false
+    fi
+
+    echo ""
+
+    # --- Git Configuration ---
+    echo "=== Git Configuration ==="
+
+    local git_name git_email
+    git_name="$(git config user.name 2>/dev/null || true)"
+    git_email="$(git config user.email 2>/dev/null || true)"
+
+    if [ -n "$git_name" ]; then
+        success "git user.name: $git_name"
+    else
+        warn "git user.name: NOT SET"
+        warn "  Run: git config --global user.name \"Your Name\""
+        all_ok=false
+    fi
+
+    if [ -n "$git_email" ]; then
+        success "git user.email: $git_email"
+    else
+        warn "git user.email: NOT SET (required for email notifications)"
+        warn "  Run: git config --global user.email \"you@example.com\""
+        all_ok=false
+    fi
+
+    echo ""
+
+    # --- Email Setup ---
+    echo "=== Email Notifications ==="
+
+    local email_likely_works=false
+
+    if command -v mail >/dev/null 2>&1; then
+        success "mail command: found at $(command -v mail)"
+
+        # Check if email delivery is likely to work
+        local mail_warning=""
+
+        # Check for running mail daemon (postfix, sendmail, etc.)
+        if ! pgrep -x "master" >/dev/null 2>&1 && ! pgrep -x "sendmail" >/dev/null 2>&1; then
+            # No mail daemon running - check if msmtp is configured as sendmail
+            if command -v msmtp >/dev/null 2>&1; then
+                # msmtp found - check if it's linked as sendmail
+                local sendmail_path
+                sendmail_path="$(command -v sendmail 2>/dev/null || true)"
+                if [ -n "$sendmail_path" ] && readlink "$sendmail_path" 2>/dev/null | grep -q msmtp; then
+                    success "msmtp: configured as sendmail relay"
+                    email_likely_works=true
+                elif [ -f "$HOME/.msmtprc" ]; then
+                    success "msmtp: found with config"
+                    info "  Tip: link msmtp as sendmail for mail command to use it"
+                    email_likely_works=true
+                else
+                    warn "msmtp: found but not configured (~/.msmtprc missing)"
+                fi
+            else
+                mail_warning="no mail daemon running"
+            fi
+        else
+            success "Mail daemon: running"
+            email_likely_works=true
+        fi
+
+        # On macOS, warn about common postfix issue
+        if [ "$(uname)" = "Darwin" ] && [ "$email_likely_works" = false ]; then
+            warn "macOS mail issue: $mail_warning"
+            warn "  The 'mail' command will appear to succeed but emails won't deliver."
+            warn "  Fix options:"
+            warn "    1. Install msmtp: brew install msmtp"
+            warn "       Configure ~/.msmtprc with SMTP relay (e.g., Gmail app password)"
+            warn "    2. Start postfix: sudo postfix start (temporary)"
+            warn "    3. Use a webhook notification service instead"
+        elif [ "$email_likely_works" = false ]; then
+            warn "Mail delivery issue: $mail_warning"
+            warn "  Emails may not be delivered. Check your MTA configuration."
+        fi
+
+        if [ "$send_test_email" = true ]; then
+            if [ -n "$git_email" ]; then
+                info "Sending test email to $git_email..."
+                local test_body="This is a test email from agent-duo doctor.
+
+If you received this, your email configuration is working correctly.
+
+Sent: $(date)"
+                if echo "$test_body" | mail -s "[agent-duo] Test email from doctor" "$git_email" 2>/dev/null; then
+                    if [ "$email_likely_works" = true ]; then
+                        success "Test email sent to $git_email"
+                        info "  Check your inbox (and spam folder)"
+                    else
+                        warn "Test email queued to $git_email (but delivery unlikely)"
+                        warn "  The mail command succeeded, but without a working MTA,"
+                        warn "  the email is probably sitting in a local queue."
+                    fi
+                else
+                    warn "Failed to send test email"
+                    warn "  Your mail system may not be configured correctly"
+                fi
+            else
+                warn "Cannot send test email: git user.email not configured"
+            fi
+        else
+            info "  Use --send-email to send a test email"
+        fi
+    else
+        warn "mail command: NOT FOUND"
+        warn "  Email notifications will not work"
+        warn "  Install: mailutils (Linux) or configure msmtp (macOS)"
+    fi
+
+    echo ""
+
+    # --- Skills Installation ---
+    echo "=== Skills Installation ==="
+
+    # Claude skills
+    local claude_skills="$HOME/.claude/commands"
+    local claude_skills_ok=true
+    for skill in duo-work duo-review duo-clarify; do
+        if [ -f "$claude_skills/$skill.md" ]; then
+            success "Claude skill: $skill"
+        else
+            warn "Claude skill: $skill NOT FOUND"
+            claude_skills_ok=false
+        fi
+    done
+    if [ "$claude_skills_ok" = false ]; then
+        warn "  Run: agent-duo setup"
+        all_ok=false
+    fi
+
+    # Codex skills
+    local codex_skills="$HOME/.codex/skills"
+    local codex_skills_ok=true
+    for skill in duo-work duo-review duo-clarify; do
+        if [ -f "$codex_skills/$skill/SKILL.md" ]; then
+            success "Codex skill: $skill"
+        else
+            warn "Codex skill: $skill NOT FOUND"
+            codex_skills_ok=false
+        fi
+    done
+    if [ "$codex_skills_ok" = false ]; then
+        warn "  Run: agent-duo setup"
+        all_ok=false
+    fi
+
+    echo ""
+
+    # --- Hook Configuration ---
+    echo "=== Hook Configuration ==="
+
+    local notify_script="$HOME/.local/bin/agent-duo-notify"
+    if [ -x "$notify_script" ]; then
+        success "Notify script: $notify_script"
+    else
+        warn "Notify script: NOT FOUND or not executable"
+        warn "  Run: agent-duo setup"
+        all_ok=false
+    fi
+
+    # Check Claude hooks
+    local claude_settings="$HOME/.claude/settings.json"
+    if [ -f "$claude_settings" ]; then
+        if grep -q "agent-duo-notify" "$claude_settings" 2>/dev/null; then
+            success "Claude hooks: configured"
+        else
+            warn "Claude hooks: not configured for agent-duo"
+            warn "  Run: agent-duo setup"
+        fi
+    else
+        warn "Claude settings: $claude_settings not found"
+    fi
+
+    # Check Codex hooks
+    local codex_config="$HOME/.codex/config.toml"
+    if [ -f "$codex_config" ]; then
+        if grep -q "agent-duo-notify" "$codex_config" 2>/dev/null; then
+            success "Codex hooks: configured"
+        else
+            warn "Codex hooks: not configured for agent-duo"
+            warn "  Run: agent-duo setup"
+        fi
+    else
+        warn "Codex config: $codex_config not found"
+    fi
+
+    echo ""
+
+    # --- PATH Check ---
+    echo "=== PATH Configuration ==="
+
+    local install_dir="$HOME/.local/bin"
+    if [[ ":$PATH:" == *":$install_dir:"* ]]; then
+        success "~/.local/bin is in PATH"
+    else
+        warn "~/.local/bin is NOT in PATH"
+        warn "  Add to your shell profile:"
+        warn "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+        all_ok=false
+    fi
+
+    # Check if agent-duo is accessible
+    if command -v agent-duo >/dev/null 2>&1; then
+        success "agent-duo: found at $(command -v agent-duo)"
+    else
+        warn "agent-duo: not found in PATH"
+        warn "  Run: agent-duo setup"
+        all_ok=false
+    fi
+
+    echo ""
+
+    # --- Summary ---
+    echo "=== Summary ==="
+    if [ "$all_ok" = true ]; then
+        success "All checks passed!"
+    else
+        warn "Some issues found - see above for details"
+        return 1
+    fi
 }
 
 #------------------------------------------------------------------------------
@@ -1929,6 +2229,14 @@ SESSION COMMANDS
     setup
         Install agent-duo to ~/.local/bin and skills to agent dirs.
 
+    doctor [--send-email]
+        Check system configuration and diagnose common issues.
+        Verifies: required tools, AI CLIs, git config, email setup,
+        skills installation, hook configuration, and PATH.
+
+        Options:
+          --send-email    Send a test email to verify email delivery
+
 CONTROL COMMANDS
     nudge <agent> [message]
         Send a message to an agent's terminal.
@@ -2008,6 +2316,7 @@ main() {
         pr)          cmd_pr "$@" ;;
         cleanup)     cmd_cleanup "$@" ;;
         setup)       cmd_setup "$@" ;;
+        doctor)      cmd_doctor "$@" ;;
         nudge)       cmd_nudge "$@" ;;
         interrupt)   cmd_interrupt "$@" ;;
         signal)      cmd_signal "$@" ;;
