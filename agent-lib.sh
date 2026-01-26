@@ -757,7 +757,8 @@ send_clarify_email() {
     local subject="[agent-${mode}] Clarify phase complete: $feature"
     local body=""
 
-    body+="Agent ${mode^} - Clarify Phase Results"
+    local mode_cap="$(echo "$mode" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
+    body+="Agent $mode_cap - Clarify Phase Results"
     body+=$'\n'
     body+="=================================="
     body+=$'\n\n'
@@ -878,7 +879,8 @@ send_pr_notification() {
     fi
 
     local title="[agent-${mode}] PR created: ${feature}"
-    local message="${agent^} has created a PR for ${feature}
+    local agent_cap="$(echo "$agent" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
+    local message="${agent_cap} has created a PR for ${feature}
 
 $pr_url"
 
