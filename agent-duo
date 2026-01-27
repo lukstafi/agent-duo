@@ -286,21 +286,41 @@ NOTIFY_EOF
     success "Installed unified notify hook script to $notify_script"
 
     # Configure Codex to use the notify hook (with "codex" as agent type argument)
+    # IMPORTANT: notify must be at top level in TOML, not inside a [section]
     local codex_config="$HOME/.codex/config.toml"
+    local notify_line="notify = [\"$notify_script\", \"codex\"]"
     if [ -f "$codex_config" ]; then
         if grep -q "^notify" "$codex_config"; then
             warn "Codex config already has 'notify' setting - not overwriting"
-            warn "To enable auto-signaling, set: notify = [\"$notify_script\", \"codex\"]"
+            warn "To enable auto-signaling, set: $notify_line"
         else
-            echo "" >> "$codex_config"
-            echo "# Unified notify hook for agent-duo and agent-solo" >> "$codex_config"
-            echo "notify = [\"$notify_script\", \"codex\"]" >> "$codex_config"
+            # Insert at top level (before first [section] or at start of file)
+            local tmp_config
+            tmp_config="$(mktemp)"
+            if grep -q '^\[' "$codex_config"; then
+                # Insert before first section header
+                awk -v notify="$notify_line" '
+                    /^\[/ && !inserted {
+                        print "# Unified notify hook for agent-duo and agent-solo"
+                        print notify
+                        print ""
+                        inserted=1
+                    }
+                    { print }
+                ' "$codex_config" > "$tmp_config"
+                mv "$tmp_config" "$codex_config"
+            else
+                # No sections, safe to append
+                echo "" >> "$codex_config"
+                echo "# Unified notify hook for agent-duo and agent-solo" >> "$codex_config"
+                echo "$notify_line" >> "$codex_config"
+            fi
             success "Added notify hook to Codex config"
         fi
     else
         mkdir -p "$(dirname "$codex_config")"
         echo "# Unified notify hook for agent-duo and agent-solo" > "$codex_config"
-        echo "notify = [\"$notify_script\", \"codex\"]" >> "$codex_config"
+        echo "$notify_line" >> "$codex_config"
         success "Created Codex config with notify hook"
     fi
 
