@@ -2527,10 +2527,10 @@ SESSION COMMANDS
           --no-ttyd                Use single tmux session instead of web terminals
           --clarify                Enable clarify stage before work starts
           --pushback               Enable pushback stage (after clarify if both enabled)
-          --work-timeout <secs>    Work phase timeout (default: 600, with --auto-run)
-          --review-timeout <secs>  Review phase timeout (default: 300, with --auto-run)
-          --clarify-timeout <secs> Clarify stage timeout (default: 300, with --clarify)
-          --pushback-timeout <secs> Pushback stage timeout (default: 300, with --pushback)
+          --work-timeout <secs>    Work phase timeout (default: 1200, with --auto-run)
+          --review-timeout <secs>  Review phase timeout (default: 600, with --auto-run)
+          --clarify-timeout <secs> Clarify stage timeout (default: 600, with --clarify)
+          --pushback-timeout <secs> Pushback stage timeout (default: 600, with --pushback)
           --max-rounds <n>         Maximum rounds (default: 10, with --auto-run)
           --codex-thinking <level> Codex reasoning effort: low, medium, high (default: high)
           --codex-model <model>    GPT model for Codex (e.g., o3, gpt-4.1)
@@ -2558,10 +2558,10 @@ SESSION COMMANDS
         Options:
           --clarify                Enable clarify stage before work starts
           --pushback               Enable pushback stage (after clarify if both enabled)
-          --work-timeout <secs>    Work phase timeout (default: 600)
-          --review-timeout <secs>  Review phase timeout (default: 300)
-          --clarify-timeout <secs> Clarify stage timeout (default: 300)
-          --pushback-timeout <secs> Pushback stage timeout (default: 300)
+          --work-timeout <secs>    Work phase timeout (default: 1200)
+          --review-timeout <secs>  Review phase timeout (default: 600)
+          --clarify-timeout <secs> Clarify stage timeout (default: 600)
+          --pushback-timeout <secs> Pushback stage timeout (default: 600)
           --poll <secs>            Status poll interval (default: 10)
           --max-rounds <n>         Maximum rounds (default: 10)
           --auto-start             Auto-launch agent CLIs and send task
@@ -2579,8 +2579,8 @@ SESSION COMMANDS
 
         Options:
           --auto-run               Also restart the orchestrator loop
-          --work-timeout <secs>    Work phase timeout (default: 600)
-          --review-timeout <secs>  Review phase timeout (default: 300)
+          --work-timeout <secs>    Work phase timeout (default: 1200)
+          --review-timeout <secs>  Review phase timeout (default: 600)
           --max-rounds <n>         Maximum rounds (default: 10)
 
     status

@@ -459,11 +459,11 @@ restart_agent_tui() {
 #------------------------------------------------------------------------------
 
 # Default timeouts in seconds
-DEFAULT_WORK_TIMEOUT=600    # 10 minutes
-DEFAULT_REVIEW_TIMEOUT=300  # 5 minutes
-DEFAULT_CLARIFY_TIMEOUT=300 # 5 minutes
-DEFAULT_PUSHBACK_TIMEOUT=300 # 5 minutes
-DEFAULT_POLL_INTERVAL=10    # Check every 10 seconds
+DEFAULT_WORK_TIMEOUT=1200    # 20 minutes
+DEFAULT_REVIEW_TIMEOUT=600   # 10 minutes
+DEFAULT_CLARIFY_TIMEOUT=600  # 10 minutes
+DEFAULT_PUSHBACK_TIMEOUT=600 # 10 minutes
+DEFAULT_POLL_INTERVAL=10     # Check every 10 seconds
 DEFAULT_TUI_EXIT_BEHAVIOR="pause"  # What to do on TUI exit: pause, quit, or ignore
 
 # Get agent status (just the status part, not timestamp/message)

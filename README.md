@@ -126,18 +126,18 @@ The orchestrator terminal shows:
 ```
 === Agent Duo Orchestrator ===
 Feature:        add-auth
-Work timeout:   600s
-Review timeout: 300s
+Work timeout:   1200s
+Review timeout: 600s
 Max rounds:     10
 
 === Round 1: Work Phase ===
-  Waiting... claude=working codex=working (120s/600s)
-  Waiting... claude=working codex=done (180s/600s)
-  Waiting... claude=done codex=done (240s/600s)
+  Waiting... claude=working codex=working (120s/1200s)
+  Waiting... claude=working codex=done (180s/1200s)
+  Waiting... claude=done codex=done (240s/1200s)
 
 === Round 1: Review Phase ===
-  Waiting... claude=reviewing codex=reviewing (30s/300s)
-  Waiting... claude=review-done codex=review-done (90s/300s)
+  Waiting... claude=reviewing codex=reviewing (30s/600s)
+  Waiting... claude=review-done codex=review-done (90s/600s)
 
 === Round 2: Work Phase ===
   ...
@@ -170,10 +170,10 @@ agent-duo config [key] [value]         # Get/set configuration (e.g., ntfy_topic
 
 ```bash
 agent-duo run \
-  --work-timeout 600 \      # Seconds before interrupting work phase
-  --review-timeout 300 \    # Seconds before interrupting review phase
-  --clarify-timeout 300 \   # Seconds for clarify stage
-  --pushback-timeout 300 \  # Seconds for pushback stage
+  --work-timeout 1200 \     # Seconds before interrupting work phase
+  --review-timeout 600 \    # Seconds before interrupting review phase
+  --clarify-timeout 600 \   # Seconds for clarify stage
+  --pushback-timeout 600 \  # Seconds for pushback stage
   --max-rounds 10 \         # Maximum work/review cycles
   --auto-start              # Auto-launch agent CLIs
 ```
