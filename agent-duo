@@ -1749,7 +1749,13 @@ Consider:
 2. Are there better alternatives or optimizations?
 3. Are there missing requirements or edge cases?
 
-### Write Your Pushback
+### Modify the Task File Directly
+
+If you believe the task could be improved, edit \`$feature.md\` directly in your worktree. The user will compare versions using diff3.
+
+If the task is well-specified and needs no changes, skip to writing your rationale.
+
+### Write Your Rationale
 
 \`\`\`bash
 cat > "$peer_sync/pushback-${agent}.md" << 'PUSHBACK_EOF'
@@ -1757,16 +1763,11 @@ cat > "$peer_sync/pushback-${agent}.md" << 'PUSHBACK_EOF'
 
 ## Summary of Proposed Changes
 
-[1-3 sentences explaining what you're proposing to change and why]
+[1-3 sentences explaining what you changed and why, or "No changes proposed - the task is well-specified."]
 
 ## Reasoning
 
-[Explain why this change would improve the solution quality]
-
-## Proposed Task File
-
-[Include the full modified task file here, with your improvements.
-If you have no changes to propose, write "No changes proposed - the task is well-specified."]
+[Explain why your changes would improve the solution quality, or why the original is already good]
 
 PUSHBACK_EOF
 \`\`\`
@@ -1777,7 +1778,7 @@ Edit the file with actual content, then signal completion:
 agent-duo signal "$agent" pushback-done "proposed task modifications submitted"
 \`\`\`
 
-Then **STOP and wait**. The user will review the pushbacks and decide whether to accept, reject, or modify.
+Then **STOP and wait**. The user will review task file changes (via diff3) and rationales, then decide whether to accept, reject, or modify.
 Do NOT start implementing until the work phase begins.
 EOF
 }
@@ -2067,12 +2068,13 @@ cmd_run() {
         info "=== Pushback Stage ==="
         echo "pushback" > "$peer_sync/phase"
 
-        # Read task content
+        # Find task file
         local task_file
         local task_content=""
         if task_file="$(find_task_file "$root" "$feature")"; then
             task_content="$(cat "$task_file" | head -c 4000)"
         fi
+        local task_basename="${feature}.md"
 
         # Send pushback message to both agents
         atomic_write "$peer_sync/claude.status" "pushing-back|$(date +%s)|pushback stage"
@@ -2167,24 +2169,33 @@ cmd_run() {
 
         case "$pushback_choice" in
             c|C)
-                if [ -f "$peer_sync/pushback-claude.md" ]; then
-                    # Extract the proposed task file from Claude's pushback
-                    info "Applying Claude's pushback..."
-                    echo "claude" > "$peer_sync/pushback-accepted"
-                else
-                    warn "Claude's pushback file not found, proceeding with original"
+                # Accept Claude's: copy Claude's task file to Codex's worktree
+                info "Accepting Claude's pushback..."
+                if [ -f "$worktree_claude/$task_basename" ]; then
+                    cp "$worktree_claude/$task_basename" "$worktree_codex/$task_basename"
+                    success "Copied Claude's task file to Codex worktree"
                 fi
+                echo "claude" > "$peer_sync/pushback-accepted"
                 ;;
             x|X)
-                if [ -f "$peer_sync/pushback-codex.md" ]; then
-                    info "Applying Codex's pushback..."
-                    echo "codex" > "$peer_sync/pushback-accepted"
-                else
-                    warn "Codex's pushback file not found, proceeding with original"
+                # Accept Codex's: copy Codex's task file to Claude's worktree
+                info "Accepting Codex's pushback..."
+                if [ -f "$worktree_codex/$task_basename" ]; then
+                    cp "$worktree_codex/$task_basename" "$worktree_claude/$task_basename"
+                    success "Copied Codex's task file to Claude worktree"
                 fi
+                echo "codex" > "$peer_sync/pushback-accepted"
                 ;;
             *)
-                info "Proceeding with original task"
+                # Reject: restore original task file from project root to both worktrees
+                info "Rejecting pushbacks, restoring original task..."
+                if [ -f "$root/$task_basename" ]; then
+                    cp "$root/$task_basename" "$worktree_claude/$task_basename"
+                    cp "$root/$task_basename" "$worktree_codex/$task_basename"
+                    success "Restored original task file to both worktrees"
+                else
+                    warn "Original task file not found in project root"
+                fi
                 echo "rejected" > "$peer_sync/pushback-accepted"
                 ;;
         esac

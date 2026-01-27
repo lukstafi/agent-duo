@@ -44,9 +44,15 @@ cat "$FEATURE.md"
 cat "$PEER_SYNC/clarify-coder.md" 2>/dev/null || echo "No clarify file found"
 ```
 
-### 3. Create Your Proposed Task Modification
+### 3. Modify the Task File Directly
 
-If you believe the task could be improved, create a modified version:
+If you believe the task could be improved, edit `$FEATURE.md` directly. The user will compare your version with the original using diff.
+
+If the task is well-specified and needs no changes, skip to step 4.
+
+### 4. Write Your Rationale
+
+Create a pushback file explaining your changes (or lack thereof):
 
 ```bash
 cat > "$PEER_SYNC/pushback-reviewer.md" << 'EOF'
@@ -54,31 +60,26 @@ cat > "$PEER_SYNC/pushback-reviewer.md" << 'EOF'
 
 ## Summary of Proposed Changes
 
-[1-3 sentences explaining what you're proposing to change and why]
+[1-3 sentences explaining what you changed and why, or "No changes proposed - the task is well-specified."]
 
 ## Reasoning
 
-[Explain why this change would improve the solution quality]
-
-## Proposed Task File
-
-[Include the full modified task file here, with your improvements.
-If you have no changes to propose, write "No changes proposed - the task is well-specified."]
+[Explain why your changes would improve the solution quality, or why the original is already good]
 
 EOF
 ```
 
 Edit the file to fill in actual content.
 
-### 4. Signal Completion
+### 5. Signal Completion
 
 ```bash
 agent-solo signal reviewer pushback-done "proposed task modifications submitted"
 ```
 
-Then **STOP and wait**. The user will review your pushback and decide:
-- **Reject** - proceed with the original task
-- **Accept** - use your proposed modification
+Then **STOP and wait**. The user will review your task file changes (via diff) and rationale, then decide:
+- **Reject** - revert to the original task
+- **Accept** - keep your modified task file
 - **Modify** - make their own adjustments based on your feedback
 
 Do NOT provide implementation guidance yet - wait for the work phase.

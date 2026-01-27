@@ -828,7 +828,13 @@ Consider:
 2. Are there better alternatives or optimizations?
 3. Are there missing requirements or edge cases?
 
-### Write Your Pushback
+### Modify the Task File Directly
+
+If you believe the task could be improved, edit \`$feature.md\` directly. The user will compare your version with the original using diff.
+
+If the task is well-specified and needs no changes, skip to writing your rationale.
+
+### Write Your Rationale
 
 \`\`\`bash
 cat > "$peer_sync/pushback-reviewer.md" << 'PUSHBACK_EOF'
@@ -836,16 +842,11 @@ cat > "$peer_sync/pushback-reviewer.md" << 'PUSHBACK_EOF'
 
 ## Summary of Proposed Changes
 
-[1-3 sentences explaining what you're proposing to change and why]
+[1-3 sentences explaining what you changed and why, or "No changes proposed - the task is well-specified."]
 
 ## Reasoning
 
-[Explain why this change would improve the solution quality]
-
-## Proposed Task File
-
-[Include the full modified task file here, with your improvements.
-If you have no changes to propose, write "No changes proposed - the task is well-specified."]
+[Explain why your changes would improve the solution quality, or why the original is already good]
 
 PUSHBACK_EOF
 \`\`\`
@@ -856,7 +857,7 @@ Edit the file with actual content, then signal completion:
 agent-solo signal reviewer pushback-done "proposed task modifications submitted"
 \`\`\`
 
-Then **STOP and wait**. The user will review your pushback and decide whether to accept or reject it.
+Then **STOP and wait**. The user will review task file changes (via diff) and your rationale, then decide whether to accept or reject.
 Do NOT provide implementation guidance yet - wait for the work phase.
 EOF
 }
@@ -1080,12 +1081,13 @@ cmd_run() {
         info "=== Pushback Stage ==="
         echo "pushback" > "$peer_sync/phase"
 
-        # Read task content
+        # Find task file
         local task_file
         local task_content=""
         if task_file="$(find_task_file "$root" "$feature")"; then
             task_content="$(cat "$task_file" | head -c 4000)"
         fi
+        local task_basename="${feature}.md"
 
         # Only reviewer pushes back in solo mode
         atomic_write "$peer_sync/coder.status" "waiting|$(date +%s)|waiting for reviewer pushback"
@@ -1152,15 +1154,19 @@ cmd_run() {
 
         case "$pushback_choice" in
             a|A)
-                if [ -f "$peer_sync/pushback-reviewer.md" ]; then
-                    info "Applying reviewer's pushback..."
-                    echo "reviewer" > "$peer_sync/pushback-accepted"
-                else
-                    warn "Reviewer's pushback file not found, proceeding with original"
-                fi
+                # Accept: keep the modified task file as-is
+                info "Accepting reviewer's pushback (keeping modified task file)..."
+                echo "reviewer" > "$peer_sync/pushback-accepted"
                 ;;
             *)
-                info "Proceeding with original task"
+                # Reject: restore original task file from project root
+                info "Rejecting pushback, restoring original task..."
+                if [ -f "$root/$task_basename" ]; then
+                    cp "$root/$task_basename" "$worktree/$task_basename"
+                    success "Restored original task file"
+                else
+                    warn "Original task file not found in project root"
+                fi
                 echo "rejected" > "$peer_sync/pushback-accepted"
                 ;;
         esac
