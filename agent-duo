@@ -667,6 +667,8 @@ cmd_config() {
         fi
         echo ""
         info "Available settings:"
+        echo "  codex_model  - GPT model for Codex (e.g., o3, gpt-4.1)"
+        echo "  claude_model - Claude model (e.g., opus, sonnet)"
         echo "  ntfy_topic   - ntfy.sh topic for push notifications"
         echo "  ntfy_token   - ntfy.sh access token (for reserved topics)"
         echo "  ntfy_server  - ntfy server URL (default: https://ntfy.sh)"
@@ -680,10 +682,10 @@ cmd_config() {
 
     # Validate key
     case "$key" in
-        ntfy_topic|ntfy_token|ntfy_server)
+        codex_model|claude_model|ntfy_topic|ntfy_token|ntfy_server)
             ;;
         *)
-            die "Unknown config key: $key (valid: ntfy_topic, ntfy_token, ntfy_server)"
+            die "Unknown config key: $key (valid: codex_model, claude_model, ntfy_topic, ntfy_token, ntfy_server)"
             ;;
     esac
 
@@ -731,6 +733,16 @@ cmd_config() {
 
     # Show helpful info based on key
     case "$key" in
+        codex_model)
+            echo ""
+            info "Codex will use model: $value"
+            echo "  Common models: o3, o4-mini, gpt-4.1"
+            ;;
+        claude_model)
+            echo ""
+            info "Claude will use model: $value"
+            echo "  Common models: opus, sonnet, haiku"
+            ;;
         ntfy_topic)
             local server
             server="$(get_ntfy_server)"

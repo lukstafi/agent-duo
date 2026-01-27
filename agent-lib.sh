@@ -138,9 +138,55 @@ atomic_write() {
 # Default thinking effort for Codex (low, medium, high)
 DEFAULT_CODEX_THINKING="high"
 
+# Default models (can be overridden via config or environment)
+DEFAULT_CODEX_MODEL=""  # Empty means use Codex's default
+DEFAULT_CLAUDE_MODEL="" # Empty means use Claude's default
+
 # Commands to launch each agent
-CLAUDE_CMD="claude --dangerously-skip-permissions"
-# CODEX_CMD is built dynamically with thinking effort via get_agent_cmd()
+# CLAUDE_CMD and CODEX_CMD are built dynamically via get_agent_cmd()
+
+# Configuration file path (same as notifications config)
+AGENT_DUO_CONFIG="${AGENT_DUO_CONFIG:-$HOME/.config/agent-duo/config}"
+
+# Get Codex model from config or environment
+# Returns empty string if not configured (uses Codex's default)
+get_codex_model() {
+    if [ -n "$AGENT_DUO_CODEX_MODEL" ]; then
+        echo "$AGENT_DUO_CODEX_MODEL"
+        return 0
+    fi
+
+    if [ -f "$AGENT_DUO_CONFIG" ]; then
+        local model
+        model="$(grep -E '^codex_model=' "$AGENT_DUO_CONFIG" 2>/dev/null | cut -d= -f2-)"
+        if [ -n "$model" ]; then
+            echo "$model"
+            return 0
+        fi
+    fi
+
+    echo "$DEFAULT_CODEX_MODEL"
+}
+
+# Get Claude model from config or environment
+# Returns empty string if not configured (uses Claude's default)
+get_claude_model() {
+    if [ -n "$AGENT_DUO_CLAUDE_MODEL" ]; then
+        echo "$AGENT_DUO_CLAUDE_MODEL"
+        return 0
+    fi
+
+    if [ -f "$AGENT_DUO_CONFIG" ]; then
+        local model
+        model="$(grep -E '^claude_model=' "$AGENT_DUO_CONFIG" 2>/dev/null | cut -d= -f2-)"
+        if [ -n "$model" ]; then
+            echo "$model"
+            return 0
+        fi
+    fi
+
+    echo "$DEFAULT_CLAUDE_MODEL"
+}
 
 # Get agent command
 # Usage: get_agent_cmd <agent> [thinking_effort]
@@ -148,9 +194,25 @@ CLAUDE_CMD="claude --dangerously-skip-permissions"
 get_agent_cmd() {
     local agent="$1"
     local thinking="${2:-$DEFAULT_CODEX_THINKING}"
+    local codex_model claude_model
+    codex_model="$(get_codex_model)"
+    claude_model="$(get_claude_model)"
+
     case "$agent" in
-        claude) echo "$CLAUDE_CMD" ;;
-        codex) echo "codex --yolo -c model_reasoning_effort=\"$thinking\"" ;;
+        claude)
+            if [ -n "$claude_model" ]; then
+                echo "claude --dangerously-skip-permissions --model $claude_model"
+            else
+                echo "claude --dangerously-skip-permissions"
+            fi
+            ;;
+        codex)
+            if [ -n "$codex_model" ]; then
+                echo "codex --yolo -m \"$codex_model\" -c model_reasoning_effort=\"$thinking\""
+            else
+                echo "codex --yolo -c model_reasoning_effort=\"$thinking\""
+            fi
+            ;;
         *) echo "$agent" ;;  # Allow custom agents
     esac
 }
@@ -658,8 +720,7 @@ lib_cmd_phase() {
 # Notifications (ntfy.sh and email)
 #------------------------------------------------------------------------------
 
-# Configuration file for notifications
-AGENT_DUO_CONFIG="${AGENT_DUO_CONFIG:-$HOME/.config/agent-duo/config}"
+# Note: AGENT_DUO_CONFIG is defined earlier in the Agent commands section
 
 # Get ntfy topic from config or environment
 get_ntfy_topic() {
