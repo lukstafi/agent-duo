@@ -142,75 +142,175 @@ cmd_setup() {
     install_skill "$templates_dir/solo-reviewer-clarify.md" "$codex_skills/solo-reviewer-clarify/SKILL.md" "\$solo-reviewer-clarify"
     success "Installed Codex solo skills to $codex_skills"
 
-    # Install shared notify hook script (reuses agent-duo-notify if present, or creates solo version)
-    local notify_script="$install_dir/agent-solo-notify"
+    # Install unified notify hook script for both agent-duo and agent-solo
+    # Called when agent completes a turn to auto-signal status
+    local notify_script="$install_dir/agent-duo-and-solo-notify"
     cat > "$notify_script" << 'NOTIFY_EOF'
 #!/bin/bash
-# Called by agent hooks when they complete a turn (solo mode)
-# Signals the appropriate status based on current phase
-# Usage: agent-solo-notify <agent-name>
-#   Agent name (coder or reviewer) is required as $1
+# Unified notify hook for both agent-duo and agent-solo modes
+# Called by agent hooks when they complete a turn
+# Signals the appropriate status based on current phase and mode
+# Usage: agent-duo-and-solo-notify <agent-type>
+#   Agent type (claude or codex) is required as $1
 #   PEER_SYNC is discovered from $PWD/.peer-sync symlink
 
-agent="$1"
-[ -z "$agent" ] && exit 0
+agent_type="$1"
+[ -z "$agent_type" ] && exit 0
+
+# Debug logging (writes to .peer-sync/notify.log if PEER_SYNC found)
+log_debug() {
+    [ -d "$PEER_SYNC" ] && echo "$(date '+%H:%M:%S') [$agent_type] $*" >> "$PEER_SYNC/notify.log"
+}
 
 # Discover PEER_SYNC from working directory (worktrees have .peer-sync symlink)
 if [ -z "$PEER_SYNC" ]; then
     if [ -d "$PWD/.peer-sync" ]; then
         PEER_SYNC="$PWD/.peer-sync"
     else
-        exit 0
+        # Try parent directory (in case we're in a subdirectory)
+        parent="$PWD"
+        while [ "$parent" != "/" ]; do
+            if [ -d "$parent/.peer-sync" ]; then
+                PEER_SYNC="$parent/.peer-sync"
+                break
+            fi
+            parent="$(dirname "$parent")"
+        done
+        [ -z "$PEER_SYNC" ] && exit 0
     fi
 fi
 [ ! -d "$PEER_SYNC" ] && exit 0
 
-# Check mode
+log_debug "hook fired, PWD=$PWD"
+
+# Check mode (duo or solo)
 mode="$(cat "$PEER_SYNC/mode" 2>/dev/null)" || mode="duo"
-[ "$mode" != "solo" ] && exit 0
+log_debug "mode=$mode"
+
+# Determine agent name based on mode
+if [ "$mode" = "solo" ]; then
+    # Solo mode: look up which role this agent type is playing
+    coder_agent="$(cat "$PEER_SYNC/coder-agent" 2>/dev/null)"
+    reviewer_agent="$(cat "$PEER_SYNC/reviewer-agent" 2>/dev/null)"
+
+    if [ "$agent_type" = "$coder_agent" ]; then
+        agent="coder"
+    elif [ "$agent_type" = "$reviewer_agent" ]; then
+        agent="reviewer"
+    else
+        log_debug "agent type $agent_type doesn't match coder ($coder_agent) or reviewer ($reviewer_agent)"
+        exit 0
+    fi
+    signal_cmd="agent-solo"
+else
+    # Duo mode: agent type is the agent name (claude or codex)
+    agent="$agent_type"
+    signal_cmd="agent-duo"
+fi
+
+log_debug "resolved agent=$agent, signal_cmd=$signal_cmd"
 
 # Read current phase
-phase="$(cat "$PEER_SYNC/phase" 2>/dev/null)" || exit 0
+phase="$(cat "$PEER_SYNC/phase" 2>/dev/null)" || { log_debug "no phase file"; exit 0; }
 
 # Read current status
 current_status="$(cut -d'|' -f1 < "$PEER_SYNC/${agent}.status" 2>/dev/null)"
+log_debug "phase=$phase status=$current_status"
 
-# Determine what status to signal based on phase and role
+# Determine what status to signal based on phase
 case "$phase" in
     clarify)
+        # Don't override if already clarify-done or beyond
         case "$current_status" in
-            clarify-done|done|review-done|pr-created) exit 0 ;;
+            clarify-done|done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
         esac
-        agent-solo signal "$agent" clarify-done "completed via hook"
+        log_debug "signaling clarify-done"
+        $signal_cmd signal "$agent" clarify-done "completed via hook"
         ;;
     work)
-        # Only coder works in work phase
-        if [ "$agent" = "coder" ]; then
-            case "$current_status" in
-                done|review-done|pr-created) exit 0 ;;
-            esac
-            agent-solo signal "$agent" done "completed via hook"
+        # Don't override if already done or beyond
+        case "$current_status" in
+            done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
+        esac
+        # In solo mode, only coder works in work phase
+        if [ "$mode" = "solo" ] && [ "$agent" != "coder" ]; then
+            log_debug "skipping (not coder in work phase)"
+            exit 0
         fi
+        log_debug "signaling done"
+        $signal_cmd signal "$agent" done "completed via hook"
         ;;
     review)
-        # Only reviewer works in review phase
-        if [ "$agent" = "reviewer" ]; then
-            case "$current_status" in
-                review-done|pr-created) exit 0 ;;
-            esac
-            agent-solo signal "$agent" review-done "completed via hook"
+        # Don't override if already review-done or beyond
+        case "$current_status" in
+            review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
+        esac
+        # In solo mode, only reviewer works in review phase
+        if [ "$mode" = "solo" ] && [ "$agent" != "reviewer" ]; then
+            log_debug "skipping (not reviewer in review phase)"
+            exit 0
         fi
+        log_debug "signaling review-done"
+        $signal_cmd signal "$agent" review-done "completed via hook"
+        ;;
+    *)
+        log_debug "unknown phase: $phase"
         ;;
 esac
 NOTIFY_EOF
     chmod +x "$notify_script"
-    success "Installed solo notify hook script to $notify_script"
+    success "Installed unified notify hook script to $notify_script"
+
+    # Configure Codex to use the notify hook (with "codex" as agent type argument)
+    local codex_config="$HOME/.codex/config.toml"
+    if [ -f "$codex_config" ]; then
+        if grep -q "^notify" "$codex_config"; then
+            warn "Codex config already has 'notify' setting - not overwriting"
+            warn "To enable auto-signaling, set: notify = [\"$notify_script\", \"codex\"]"
+        else
+            echo "" >> "$codex_config"
+            echo "# Unified notify hook for agent-duo and agent-solo" >> "$codex_config"
+            echo "notify = [\"$notify_script\", \"codex\"]" >> "$codex_config"
+            success "Added notify hook to Codex config"
+        fi
+    else
+        mkdir -p "$(dirname "$codex_config")"
+        echo "# Unified notify hook for agent-duo and agent-solo" > "$codex_config"
+        echo "notify = [\"$notify_script\", \"codex\"]" >> "$codex_config"
+        success "Created Codex config with notify hook"
+    fi
+
+    # Configure Claude to use the Stop hook (with "claude" as agent type argument)
+    local claude_settings="$HOME/.claude/settings.json"
+    local hook_config="{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$notify_script claude\"}]}]}"
+
+    if [ -f "$claude_settings" ]; then
+        # Check if hooks already configured
+        if grep -q '"hooks"' "$claude_settings"; then
+            warn "Claude settings already has 'hooks' - not overwriting"
+            warn "To enable auto-signaling, add Stop hook: $notify_script claude"
+        else
+            # Add hooks to existing settings using a temp file approach
+            # Remove trailing } and add hooks
+            local tmp_settings
+            tmp_settings="$(mktemp)"
+            # Use Python/jq if available, otherwise simple sed
+            if command -v jq >/dev/null 2>&1; then
+                jq --arg cmd "$notify_script claude" '.hooks = {"Stop":[{"hooks":[{"type":"command","command":$cmd}]}]}' "$claude_settings" > "$tmp_settings"
+                mv "$tmp_settings" "$claude_settings"
+                success "Added Stop hook to Claude settings"
+            else
+                warn "jq not found - please manually add hooks to $claude_settings:"
+                echo "  \"hooks\": $hook_config"
+            fi
+        fi
+    else
+        mkdir -p "$(dirname "$claude_settings")"
+        echo "{\"hooks\":$hook_config}" > "$claude_settings"
+        success "Created Claude settings with Stop hook"
+    fi
 
     success "Setup complete!"
-    echo ""
-    echo "Note: To enable auto-signaling, configure agent hooks to call:"
-    echo "  $notify_script coder    (for the coder agent)"
-    echo "  $notify_script reviewer (for the reviewer agent)"
 }
 
 #------------------------------------------------------------------------------
