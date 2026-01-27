@@ -126,6 +126,18 @@ cmd_setup() {
         success "agent-duo already installed at $install_path"
     fi
 
+    # Install agent-solo CLI
+    local solo_install_path="$install_dir/agent-solo"
+    if [ -f "$SCRIPT_DIR/agent-solo" ]; then
+        if [ "$SCRIPT_DIR/agent-solo" != "$solo_install_path" ]; then
+            cp "$SCRIPT_DIR/agent-solo" "$solo_install_path"
+            chmod +x "$solo_install_path"
+            success "Installed agent-solo to $solo_install_path"
+        else
+            success "agent-solo already installed at $solo_install_path"
+        fi
+    fi
+
     # Install shared library
     local lib_path="$install_dir/agent-lib.sh"
     if [ -f "$SCRIPT_DIR/agent-lib.sh" ]; then
@@ -776,6 +788,8 @@ cmd_start() {
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
     local max_rounds=10
     local codex_thinking=$DEFAULT_CODEX_THINKING
+    local codex_model=""
+    local claude_model=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -788,10 +802,16 @@ cmd_start() {
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --codex-thinking) codex_thinking="$2"; shift 2 ;;
+            --codex-model) codex_model="$2"; shift 2 ;;
+            --claude-model) claude_model="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
             *) feature="$1"; shift ;;
         esac
     done
+
+    # Export model overrides if specified (used by get_agent_cmd)
+    [ -n "$codex_model" ] && export AGENT_DUO_CODEX_MODEL="$codex_model"
+    [ -n "$claude_model" ] && export AGENT_DUO_CLAUDE_MODEL="$claude_model"
 
     [ -z "$feature" ] && die "Usage: agent-duo start <feature> [--no-ttyd] [--auto-run] [--clarify]"
 
@@ -2372,6 +2392,8 @@ SESSION COMMANDS
           --clarify-timeout <secs> Clarify phase timeout (default: 300, with --clarify)
           --max-rounds <n>         Maximum rounds (default: 10, with --auto-run)
           --codex-thinking <level> Codex reasoning effort: low, medium, high (default: high)
+          --codex-model <model>    GPT model for Codex (e.g., o3, gpt-4.1)
+          --claude-model <model>   Claude model (e.g., opus, sonnet)
 
         With ttyd (default): Creates 3 web terminals (ports allocated dynamically)
           - Orchestrator: Main project root

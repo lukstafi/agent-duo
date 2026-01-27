@@ -229,6 +229,8 @@ cmd_start() {
     local codex_thinking=$DEFAULT_CODEX_THINKING
     local coder=$DEFAULT_CODER
     local reviewer=$DEFAULT_REVIEWER
+    local codex_model=""
+    local claude_model=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -241,12 +243,18 @@ cmd_start() {
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --codex-thinking) codex_thinking="$2"; shift 2 ;;
+            --codex-model) codex_model="$2"; shift 2 ;;
+            --claude-model) claude_model="$2"; shift 2 ;;
             --coder) coder="$2"; shift 2 ;;
             --reviewer) reviewer="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
             *) feature="$1"; shift ;;
         esac
     done
+
+    # Export model overrides if specified (used by get_agent_cmd)
+    [ -n "$codex_model" ] && export AGENT_DUO_CODEX_MODEL="$codex_model"
+    [ -n "$claude_model" ] && export AGENT_DUO_CLAUDE_MODEL="$claude_model"
 
     [ -z "$feature" ] && die "Usage: agent-solo start <feature> [--no-ttyd] [--auto-run] [--clarify] [--coder <agent>] [--reviewer <agent>]"
 
@@ -1460,6 +1468,8 @@ SESSION COMMANDS
           --clarify-timeout <secs> Clarify phase timeout (default: 300)
           --max-rounds <n>       Maximum rounds (default: 10)
           --codex-thinking <level> Codex reasoning effort: low, medium, high (default: high)
+          --codex-model <model>  GPT model for Codex (e.g., o3, gpt-4.1)
+          --claude-model <model> Claude model (e.g., opus, sonnet)
 
     run [options]
         Run the orchestrator loop (coder work -> reviewer review -> repeat).
