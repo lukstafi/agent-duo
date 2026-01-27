@@ -2,6 +2,8 @@
 
 Coordinate two AI coding agents (Claude, Codex, etc.) working in parallel on the same task, producing **two alternative solutions** as separate PRs.
 
+Also includes **agent-solo**: a single-worktree mode where one agent codes and another reviews.
+
 ## Why?
 
 When solving complex problems, different approaches have different tradeoffs. Instead of getting one solution and hoping it's the best, agent-duo lets two AI agents work independently on the same task. You get:
@@ -10,6 +12,12 @@ When solving complex problems, different approaches have different tradeoffs. In
 - **Peer review** between agents each round
 - **Divergent thinking** - agents are encouraged to take different approaches
 - **Better coverage** of the solution space
+
+Or with **agent-solo**, a single agent implements while another reviews, giving you:
+
+- **Focused implementation** by a dedicated coder agent
+- **Independent code review** by a separate reviewer agent
+- **Single worktree** - simpler setup, no branch conflicts
 
 ## How It Works
 
@@ -33,16 +41,20 @@ Each agent works in its own git worktree. They can peek at each other's uncommit
 ## Installation
 
 ```bash
-git clone https://github.com/user/agent-duo
+git clone https://github.com/lukstafi/agent-duo
 cd agent-duo
-./agent-duo setup
+./agent-duo setup    # For duo mode (two parallel agents)
+./agent-solo setup   # For solo mode (coder + reviewer)
 ```
 
 This installs:
-- `agent-duo` CLI to `~/.local/bin/`
+- `agent-duo` and/or `agent-solo` CLI to `~/.local/bin/`
 - Skills to `~/.claude/commands/` and `~/.codex/skills/`
+- Completion hooks for automatic phase signaling
 
 Add `~/.local/bin` to your PATH if needed.
+
+After installation, run `agent-duo doctor` to verify your setup.
 
 ## Quick Start
 
@@ -65,6 +77,10 @@ EOF
 agent-duo start add-auth --auto-run
 # Opens 3 web terminals (orchestrator, claude, codex) and starts immediately
 
+# With optional clarify/pushback stages:
+agent-duo start add-auth --auto-run --clarify    # Agents propose approaches first
+agent-duo start add-auth --auto-run --pushback   # Agents suggest task improvements first
+
 # Alternative: manual control
 agent-duo start add-auth           # Start ttyd web terminals only
 agent-duo run --auto-start         # Then run orchestrator separately
@@ -72,6 +88,16 @@ agent-duo run --auto-start         # Then run orchestrator separately
 # Or use tmux directly (no web terminals)
 agent-duo start add-auth --no-ttyd
 tmux attach -t duo-add-auth
+```
+
+### Solo Mode Quick Start
+
+```bash
+# Solo mode: one agent codes, another reviews
+agent-solo start add-auth --auto-run
+
+# Swap roles (codex codes, claude reviews)
+agent-solo start add-auth --auto-run --coder codex --reviewer claude
 ```
 
 ## Example Session
@@ -128,21 +154,37 @@ Codex PR:  https://github.com/user/myproject/pull/43
 ```bash
 agent-duo start <feature>              # Start with ttyd web terminals
 agent-duo start <feature> --auto-run   # Start and run orchestrator immediately
+agent-duo start <feature> --clarify    # Enable clarify stage (agents propose approaches)
+agent-duo start <feature> --pushback   # Enable pushback stage (agents improve task)
 agent-duo start <feature> --no-ttyd    # Start with single tmux session (no web terminals)
 agent-duo run [options]                # Run orchestrator loop (if not using --auto-run)
 agent-duo status                       # Show current state
 agent-duo stop                         # Stop servers, keep worktrees
+agent-duo restart [--auto-run]         # Recover session after system restart/crash
 agent-duo cleanup [--full]             # Remove worktrees (--full: everything)
+agent-duo doctor                       # Check system configuration and diagnose issues
+agent-duo config [key] [value]         # Get/set configuration (e.g., ntfy_topic)
 ```
 
 ### Orchestrator Options
 
 ```bash
 agent-duo run \
-  --work-timeout 600 \     # Seconds before interrupting work phase
-  --review-timeout 300 \   # Seconds before interrupting review phase
-  --max-rounds 10 \        # Maximum work/review cycles
-  --auto-start             # Auto-launch agent CLIs
+  --work-timeout 600 \      # Seconds before interrupting work phase
+  --review-timeout 300 \    # Seconds before interrupting review phase
+  --clarify-timeout 300 \   # Seconds for clarify stage
+  --pushback-timeout 300 \  # Seconds for pushback stage
+  --max-rounds 10 \         # Maximum work/review cycles
+  --auto-start              # Auto-launch agent CLIs
+```
+
+### Model Selection
+
+```bash
+agent-duo start <feature> --auto-run \
+  --claude-model opus \     # Claude model (opus, sonnet)
+  --codex-model o3 \        # Codex/GPT model (o3, gpt-4.1)
+  --codex-thinking high     # Codex reasoning effort (low, medium, high)
 ```
 
 ### Manual Control
@@ -151,27 +193,71 @@ agent-duo run \
 agent-duo nudge claude "Please wrap up and signal done."
 agent-duo interrupt codex
 agent-duo pr claude          # Create PR for an agent
+agent-duo confirm            # Confirm clarify phase, proceed to work
 ```
 
 ## The Work/Review Cycle
 
 Each round consists of:
 
-1. **Work Phase**: Agents implement their solution independently
+1. **Clarify Phase** (optional, `--clarify`): Agents propose approaches
+   - Write approach and questions to `.peer-sync/clarify-<agent>.md`
+   - User receives notification (email/ntfy) and can respond
+   - Run `agent-duo confirm` to proceed
+
+2. **Pushback Phase** (optional, `--pushback`): Agents improve the task
+   - Agents propose edits to the task file
+   - User can accept, reject, or modify suggestions
+   - Run `agent-duo confirm` to proceed
+
+3. **Work Phase**: Agents implement their solution independently
    - They can peek at peer's worktree for insight (not imitation)
    - Signal `done` when ready for review
    - Orchestrator interrupts if timeout reached
 
-2. **Review Phase**: Agents review each other's code
+4. **Review Phase**: Agents review each other's code
    - Write structured review to `.peer-sync/reviews/`
    - Note different tradeoffs, not defects
    - Signal `review-done` when finished
 
-3. **Repeat** until both agents create PRs
+5. **Repeat** until both agents create PRs
+
+## Notifications
+
+Configure push notifications to know when agents need attention:
+
+```bash
+# ntfy.sh - free push notifications (recommended)
+agent-duo config ntfy_topic my-agent-duo-topic
+# Subscribe at: https://ntfy.sh/my-agent-duo-topic
+
+# Email notifications use git config user.email
+# Requires working mail setup (see: agent-duo doctor)
+```
+
+## Agent Solo Mode
+
+Agent-solo is a simpler alternative where one agent codes and another reviews:
+
+```bash
+agent-solo start <feature> --auto-run
+```
+
+**Workflow:**
+1. **Coder** implements the solution
+2. **Reviewer** examines code and writes review with verdict (APPROVE/REQUEST_CHANGES)
+3. If approved: create PR. If changes requested: coder addresses feedback, loop continues.
+
+**Key differences from duo mode:**
+- Single worktree (both agents work on same branch)
+- Sequential rather than parallel work
+- Clear coder/reviewer roles (swappable with `--coder` and `--reviewer`)
+
+See `agent-solo help` for full command reference.
 
 ## Documentation
 
-- [DESIGN.md](DESIGN.md) - Full architecture and protocol details
+- [docs/DESIGN.md](docs/DESIGN.md) - Full architecture and protocol details
 - [CLAUDE.md](CLAUDE.md) - Instructions for AI agents working on this repo
 
 ## Requirements
@@ -180,6 +266,20 @@ Each round consists of:
 - `tmux`
 - `gh` CLI (for PR creation)
 - `ttyd` for web terminals (use `--no-ttyd` to disable)
+- `claude` CLI (Claude Code)
+- `codex` CLI (OpenAI Codex)
+
+## Troubleshooting
+
+Run `agent-duo doctor` to diagnose common issues:
+
+```bash
+agent-duo doctor              # Check all configuration
+agent-duo doctor --send-email # Test email delivery
+agent-duo doctor --send-ntfy  # Test ntfy notifications
+```
+
+The doctor command checks: required tools, AI CLIs, git config, email/ntfy setup, skills installation, hook configuration, and PATH.
 
 ## License
 
