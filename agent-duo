@@ -154,16 +154,18 @@ cmd_setup() {
     install_skill "$templates_dir/duo-work.md" "$claude_skills/duo-work.md" "/duo-work"
     install_skill "$templates_dir/duo-review.md" "$claude_skills/duo-review.md" "/duo-review"
     install_skill "$templates_dir/duo-clarify.md" "$claude_skills/duo-clarify.md" "/duo-clarify"
+    install_skill "$templates_dir/duo-pushback.md" "$claude_skills/duo-pushback.md" "/duo-pushback"
     success "Installed Claude skills to $claude_skills"
 
     # Install Codex skills (uses $command syntax)
     # Codex expects skills as directories with SKILL.md inside
     local codex_skills="$HOME/.codex/skills"
-    mkdir -p "$codex_skills/duo-work" "$codex_skills/duo-review" "$codex_skills/duo-clarify"
+    mkdir -p "$codex_skills/duo-work" "$codex_skills/duo-review" "$codex_skills/duo-clarify" "$codex_skills/duo-pushback"
 
     install_skill "$templates_dir/duo-work.md" "$codex_skills/duo-work/SKILL.md" "\$duo-work"
     install_skill "$templates_dir/duo-review.md" "$codex_skills/duo-review/SKILL.md" "\$duo-review"
     install_skill "$templates_dir/duo-clarify.md" "$codex_skills/duo-clarify/SKILL.md" "\$duo-clarify"
+    install_skill "$templates_dir/duo-pushback.md" "$codex_skills/duo-pushback/SKILL.md" "\$duo-pushback"
     success "Installed Codex skills to $codex_skills"
 
     # Install unified notify hook script and configure agent hooks
@@ -419,7 +421,7 @@ Sent: $(date)"
     # Claude skills
     local claude_skills="$HOME/.claude/commands"
     local claude_skills_ok=true
-    for skill in duo-work duo-review duo-clarify; do
+    for skill in duo-work duo-review duo-clarify duo-pushback; do
         if [ -f "$claude_skills/$skill.md" ]; then
             success "Claude skill: $skill"
         else
@@ -435,7 +437,7 @@ Sent: $(date)"
     # Codex skills
     local codex_skills="$HOME/.codex/skills"
     local codex_skills_ok=true
-    for skill in duo-work duo-review duo-clarify; do
+    for skill in duo-work duo-review duo-clarify duo-pushback; do
         if [ -f "$codex_skills/$skill/SKILL.md" ]; then
             success "Codex skill: $skill"
         else
@@ -655,9 +657,11 @@ cmd_start() {
     local ttyd_mode=true
     local auto_run=false
     local clarify_mode=false
+    local pushback_mode=false
     local work_timeout=$DEFAULT_WORK_TIMEOUT
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
+    local pushback_timeout=$DEFAULT_PUSHBACK_TIMEOUT
     local max_rounds=10
     local codex_thinking=$DEFAULT_CODEX_THINKING
     local codex_model=""
@@ -669,9 +673,11 @@ cmd_start() {
             --no-ttyd) ttyd_mode=false; shift ;;
             --auto-run) auto_run=true; shift ;;
             --clarify) clarify_mode=true; shift ;;
+            --pushback) pushback_mode=true; shift ;;
             --work-timeout) work_timeout="$2"; shift 2 ;;
             --review-timeout) review_timeout="$2"; shift 2 ;;
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
+            --pushback-timeout) pushback_timeout="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --codex-thinking) codex_thinking="$2"; shift 2 ;;
             --codex-model) codex_model="$2"; shift 2 ;;
@@ -765,17 +771,23 @@ cmd_start() {
     mkdir -p "$peer_sync/pids"
 
     echo "active" > "$peer_sync/session"
+    # Determine initial phase: clarify -> pushback -> work
     if $clarify_mode; then
         echo "clarify" > "$peer_sync/phase"
         echo "true" > "$peer_sync/clarify-mode"
         echo "clarifying|$(date +%s)|starting" > "$peer_sync/claude.status"
         echo "clarifying|$(date +%s)|starting" > "$peer_sync/codex.status"
+    elif $pushback_mode; then
+        echo "pushback" > "$peer_sync/phase"
+        echo "pushing-back|$(date +%s)|starting" > "$peer_sync/claude.status"
+        echo "pushing-back|$(date +%s)|starting" > "$peer_sync/codex.status"
     else
         echo "work" > "$peer_sync/phase"
-        echo "false" > "$peer_sync/clarify-mode"
         echo "working|$(date +%s)|starting" > "$peer_sync/claude.status"
         echo "working|$(date +%s)|starting" > "$peer_sync/codex.status"
     fi
+    echo "$clarify_mode" > "$peer_sync/clarify-mode"
+    echo "$pushback_mode" > "$peer_sync/pushback-mode"
     echo "1" > "$peer_sync/round"
     echo "$feature" > "$peer_sync/feature"
     echo "$codex_thinking" > "$peer_sync/codex-thinking"
@@ -804,9 +816,9 @@ cmd_start() {
 
     if $ttyd_mode; then
         start_ttyd_mode "$feature" "$project_root" "$worktree_claude" "$worktree_codex" "$peer_sync" \
-            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" "$clarify_mode" "$clarify_timeout"
+            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" "$clarify_mode" "$clarify_timeout" "$pushback_mode" "$pushback_timeout"
     else
-        start_tmux_mode "$feature" "$project_root" "$worktree_claude" "$worktree_codex" "$peer_sync" "$codex_thinking" "$clarify_mode"
+        start_tmux_mode "$feature" "$project_root" "$worktree_claude" "$worktree_codex" "$peer_sync" "$codex_thinking" "$clarify_mode" "$pushback_mode"
     fi
 }
 
@@ -818,6 +830,7 @@ start_tmux_mode() {
     local peer_sync="$5"
     local codex_thinking="${6:-$DEFAULT_CODEX_THINKING}"
     local clarify_mode="${7:-false}"
+    local pushback_mode="${8:-false}"
 
     local session_name="duo-${feature}"
 
@@ -867,10 +880,16 @@ start_tmux_mode() {
     echo "  codex window:  $(get_agent_cmd codex "$codex_thinking")"
     if [ "$clarify_mode" = "true" ]; then
         echo ""
-        echo "Clarify mode enabled. After agents submit their approaches:"
+        echo "Clarify stage enabled. After agents submit their approaches:"
         echo "  1. Review approaches in .peer-sync/clarify-*.md"
         echo "  2. Respond to agents in their terminals (back-and-forth OK)"
-        echo "  3. Press Enter in the orchestrator to proceed to work phase"
+        echo "  3. Press Enter in the orchestrator to proceed"
+    fi
+    if [ "$pushback_mode" = "true" ]; then
+        echo ""
+        echo "Pushback stage enabled. After clarify (if enabled), agents will:"
+        echo "  1. Propose improvements to the task file"
+        echo "  2. You can accept, reject, or modify the pushbacks"
     fi
 }
 
@@ -887,6 +906,8 @@ start_ttyd_mode() {
     local codex_thinking="${10:-$DEFAULT_CODEX_THINKING}"
     local clarify_mode="${11:-false}"
     local clarify_timeout="${12:-$DEFAULT_CLARIFY_TIMEOUT}"
+    local pushback_mode="${13:-false}"
+    local pushback_timeout="${14:-$DEFAULT_PUSHBACK_TIMEOUT}"
 
     local session_name="duo-${feature}"
 
@@ -951,6 +972,9 @@ start_ttyd_mode() {
         if [ "$clarify_mode" = "true" ]; then
             run_cmd="$run_cmd --clarify-timeout $clarify_timeout"
         fi
+        if [ "$pushback_mode" = "true" ]; then
+            run_cmd="$run_cmd --pushback-timeout $pushback_timeout"
+        fi
         tmux send-keys -t "${session_name}-orchestrator" "$run_cmd"
         tmux send-keys -t "${session_name}-orchestrator" C-m
     else
@@ -959,10 +983,16 @@ start_ttyd_mode() {
     echo "Stop with: agent-duo stop"
     if [ "$clarify_mode" = "true" ]; then
         echo ""
-        echo "Clarify mode enabled. After agents submit their approaches:"
+        echo "Clarify stage enabled. After agents submit their approaches:"
         echo "  1. Review approaches (shown in orchestrator, also emailed)"
         echo "  2. Respond to agents in their terminals (back-and-forth OK)"
-        echo "  3. Press Enter in the orchestrator to proceed to work phase"
+        echo "  3. Press Enter in the orchestrator to proceed"
+    fi
+    if [ "$pushback_mode" = "true" ]; then
+        echo ""
+        echo "Pushback stage enabled. After clarify (if enabled), agents will:"
+        echo "  1. Propose improvements to the task file"
+        echo "  2. You can accept, reject, or modify the pushbacks"
     fi
 }
 
@@ -1530,8 +1560,8 @@ cmd_signal() {
 
     # Validate status
     case "$status" in
-        clarifying|clarify-done|working|done|reviewing|review-done|interrupted|error|pr-created) ;;
-        *) die "Invalid status: $status (valid: clarifying, clarify-done, working, done, reviewing, review-done, interrupted, error, pr-created)" ;;
+        clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|interrupted|error|pr-created) ;;
+        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, interrupted, error, pr-created)" ;;
     esac
 
     local content="${status}|$(date +%s)|${message}"
@@ -1679,6 +1709,80 @@ EOF
 }
 
 #------------------------------------------------------------------------------
+# Generate pushback stage message for agents
+#------------------------------------------------------------------------------
+
+generate_pushback_message() {
+    local agent="$1"
+    local peer="$2"
+    local feature="$3"
+    local task_content="$4"
+    local peer_worktree="$5"
+    local peer_sync="$6"
+
+    cat <<EOF
+# Task: $feature
+
+$task_content
+
+---
+## Agent-Duo Context - PUSHBACK STAGE
+
+You are **$agent** in a duo workflow with **$peer** as your peer.
+
+**STAGE: PUSHBACK** - Before starting implementation, you may propose improvements to the task specification.
+
+### Your Environment
+
+- **Your worktree**: Current directory
+- **Peer's worktree**: $peer_worktree (read-only)
+- **Sync directory**: $peer_sync
+
+### Purpose
+
+The task file may specify both a goal and a plan. Sometimes the plan is suboptimal or could be improved. This is your opportunity to suggest modifications that would lead to a better solution.
+
+### Your Task
+
+Consider:
+1. Is the stated plan the best approach to achieve the core goal?
+2. Are there better alternatives or optimizations?
+3. Are there missing requirements or edge cases?
+
+### Write Your Pushback
+
+\`\`\`bash
+cat > "$peer_sync/pushback-${agent}.md" << 'PUSHBACK_EOF'
+# Pushback from $agent
+
+## Summary of Proposed Changes
+
+[1-3 sentences explaining what you're proposing to change and why]
+
+## Reasoning
+
+[Explain why this change would improve the solution quality]
+
+## Proposed Task File
+
+[Include the full modified task file here, with your improvements.
+If you have no changes to propose, write "No changes proposed - the task is well-specified."]
+
+PUSHBACK_EOF
+\`\`\`
+
+Edit the file with actual content, then signal completion:
+
+\`\`\`bash
+agent-duo signal "$agent" pushback-done "proposed task modifications submitted"
+\`\`\`
+
+Then **STOP and wait**. The user will review the pushbacks and decide whether to accept, reject, or modify.
+Do NOT start implementing until the work phase begins.
+EOF
+}
+
+#------------------------------------------------------------------------------
 # Command: run (orchestrator)
 #------------------------------------------------------------------------------
 
@@ -1752,10 +1856,12 @@ cmd_run() {
     local work_timeout=$DEFAULT_WORK_TIMEOUT
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
+    local pushback_timeout=$DEFAULT_PUSHBACK_TIMEOUT
     local poll_interval=$DEFAULT_POLL_INTERVAL
     local max_rounds=10
     local auto_start=false
     local enable_clarify=""  # empty means use session default
+    local enable_pushback="" # empty means use session default
     local tui_exit_behavior=$DEFAULT_TUI_EXIT_BEHAVIOR
 
     # Parse arguments
@@ -1764,7 +1870,9 @@ cmd_run() {
             --work-timeout) work_timeout="$2"; shift 2 ;;
             --review-timeout) review_timeout="$2"; shift 2 ;;
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
+            --pushback-timeout) pushback_timeout="$2"; shift 2 ;;
             --clarify) enable_clarify="true"; shift ;;
+            --pushback) enable_pushback="true"; shift ;;
             --poll) poll_interval="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --auto-start) auto_start=true; shift ;;
@@ -1936,14 +2044,162 @@ cmd_run() {
         echo ""
         info "Respond to agents in their terminals if needed."
         echo ""
-        read -r -p "Press Enter when ready to proceed to work phase... "
+        read -r -p "Press Enter when ready to proceed... "
 
         # Mark clarify as confirmed
         echo "confirmed" > "$peer_sync/clarify-confirmed"
+
+        success "Clarify stage confirmed!"
+        echo ""
+    fi
+
+    # Check if pushback mode is enabled (command line overrides session setting)
+    local pushback_mode
+    if [ -n "$enable_pushback" ]; then
+        pushback_mode="$enable_pushback"
+        echo "$enable_pushback" > "$peer_sync/pushback-mode"
+    else
+        pushback_mode="$(cat "$peer_sync/pushback-mode" 2>/dev/null)" || pushback_mode="false"
+    fi
+
+    # Handle pushback stage if enabled and not already confirmed
+    if [ "$pushback_mode" = "true" ] && [ ! -f "$peer_sync/pushback-confirmed" ]; then
+        info "=== Pushback Stage ==="
+        echo "pushback" > "$peer_sync/phase"
+
+        # Read task content
+        local task_file
+        local task_content=""
+        if task_file="$(find_task_file "$root" "$feature")"; then
+            task_content="$(cat "$task_file" | head -c 4000)"
+        fi
+
+        # Send pushback message to both agents
+        atomic_write "$peer_sync/claude.status" "pushing-back|$(date +%s)|pushback stage"
+        info "Sending pushback task to claude..."
+        local claude_pushback_msg
+        claude_pushback_msg="$(generate_pushback_message "claude" "codex" "$feature" "$task_content" "$worktree_codex" "$peer_sync")"
+        tmux send-keys -t "$claude_session" "$claude_pushback_msg"
+        sleep 0.5
+        tmux send-keys -t "$claude_session" C-m
+
+        atomic_write "$peer_sync/codex.status" "pushing-back|$(date +%s)|pushback stage"
+        info "Sending pushback task to codex..."
+        local codex_pushback_msg
+        codex_pushback_msg="$(generate_pushback_message "codex" "claude" "$feature" "$task_content" "$worktree_claude" "$peer_sync")"
+        tmux send-keys -t "$codex_session" "$codex_pushback_msg"
+        sleep 0.5
+        tmux send-keys -t "$codex_session" C-m
+
+        # Wait for both agents to complete pushback stage
+        local pushback_start=$SECONDS
+        local claude_pushback_done=false
+        local codex_pushback_done=false
+
+        while ! ($claude_pushback_done && $codex_pushback_done); do
+            local elapsed=$((SECONDS - pushback_start))
+
+            # Check for completion
+            local claude_status
+            claude_status="$(get_agent_status "claude" "$peer_sync")"
+            local codex_status
+            codex_status="$(get_agent_status "codex" "$peer_sync")"
+
+            [ "$claude_status" = "pushback-done" ] && claude_pushback_done=true
+            [ "$codex_status" = "pushback-done" ] && codex_pushback_done=true
+
+            if $claude_pushback_done && $codex_pushback_done; then
+                break
+            fi
+
+            # Check if agent TUIs have exited unexpectedly
+            if ! $claude_pushback_done; then
+                check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+            fi
+            if ! $codex_pushback_done; then
+                check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+            fi
+
+            # Check timeout
+            if [ "$elapsed" -ge "$pushback_timeout" ]; then
+                warn "Pushback stage timeout (${pushback_timeout}s)"
+                break
+            fi
+
+            printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$pushback_timeout"
+            sleep "$poll_interval"
+        done
+        echo ""
+
+        # Send notification with pushback results
+        send_pushback_notification "$peer_sync" "$feature" "duo"
+
+        # Display pushback results
+        echo ""
+        info "=== Pushback Stage Results ==="
+        echo ""
+
+        if [ -f "$peer_sync/pushback-claude.md" ]; then
+            echo "--- Claude's Pushback ---"
+            cat "$peer_sync/pushback-claude.md"
+            echo ""
+        else
+            warn "Claude did not submit a pushback"
+        fi
+
+        if [ -f "$peer_sync/pushback-codex.md" ]; then
+            echo "--- Codex's Pushback ---"
+            cat "$peer_sync/pushback-codex.md"
+            echo ""
+        else
+            warn "Codex did not submit a pushback"
+        fi
+
+        echo ""
+        echo "=================================="
+        echo ""
+        info "Options:"
+        echo "  [Enter] - Reject pushbacks, proceed with original task"
+        echo "  [c]     - Accept Claude's pushback"
+        echo "  [x]     - Accept Codex's pushback"
+        echo ""
+        read -r -p "Your choice: " pushback_choice
+
+        case "$pushback_choice" in
+            c|C)
+                if [ -f "$peer_sync/pushback-claude.md" ]; then
+                    # Extract the proposed task file from Claude's pushback
+                    info "Applying Claude's pushback..."
+                    echo "claude" > "$peer_sync/pushback-accepted"
+                else
+                    warn "Claude's pushback file not found, proceeding with original"
+                fi
+                ;;
+            x|X)
+                if [ -f "$peer_sync/pushback-codex.md" ]; then
+                    info "Applying Codex's pushback..."
+                    echo "codex" > "$peer_sync/pushback-accepted"
+                else
+                    warn "Codex's pushback file not found, proceeding with original"
+                fi
+                ;;
+            *)
+                info "Proceeding with original task"
+                echo "rejected" > "$peer_sync/pushback-accepted"
+                ;;
+        esac
+
+        # Mark pushback as confirmed
+        echo "confirmed" > "$peer_sync/pushback-confirmed"
         echo "work" > "$peer_sync/phase"
 
-        success "Clarify phase confirmed! Proceeding to work phase..."
+        success "Pushback stage complete! Proceeding to work phase..."
         echo ""
+    fi
+
+    # Set phase to work if not already set
+    if [ "$(cat "$peer_sync/phase" 2>/dev/null)" != "work" ]; then
+        echo "work" > "$peer_sync/phase"
     fi
 
     local round=1
@@ -2258,10 +2514,12 @@ SESSION COMMANDS
         Options:
           --auto-run               Start orchestrator immediately in its own terminal
           --no-ttyd                Use single tmux session instead of web terminals
-          --clarify                Enable clarify phase before work starts
+          --clarify                Enable clarify stage before work starts
+          --pushback               Enable pushback stage (after clarify if both enabled)
           --work-timeout <secs>    Work phase timeout (default: 600, with --auto-run)
           --review-timeout <secs>  Review phase timeout (default: 300, with --auto-run)
-          --clarify-timeout <secs> Clarify phase timeout (default: 300, with --clarify)
+          --clarify-timeout <secs> Clarify stage timeout (default: 300, with --clarify)
+          --pushback-timeout <secs> Pushback stage timeout (default: 300, with --pushback)
           --max-rounds <n>         Maximum rounds (default: 10, with --auto-run)
           --codex-thinking <level> Codex reasoning effort: low, medium, high (default: high)
           --codex-model <model>    GPT model for Codex (e.g., o3, gpt-4.1)
@@ -2278,16 +2536,21 @@ SESSION COMMANDS
         With --clarify: Agents first propose approaches and questions.
           User receives email and can respond before work begins.
 
+        With --pushback: Agents propose improvements to the task file.
+          User can accept, reject, or modify the proposed changes.
+
     run [options]
         Run the orchestrator loop (work -> review -> work...).
         Automatically manages phase transitions and timeouts.
         Not needed if using 'start --auto-run'.
 
         Options:
-          --clarify                Enable clarify phase before work starts
+          --clarify                Enable clarify stage before work starts
+          --pushback               Enable pushback stage (after clarify if both enabled)
           --work-timeout <secs>    Work phase timeout (default: 600)
           --review-timeout <secs>  Review phase timeout (default: 300)
-          --clarify-timeout <secs> Clarify phase timeout (default: 300)
+          --clarify-timeout <secs> Clarify stage timeout (default: 300)
+          --pushback-timeout <secs> Pushback stage timeout (default: 300)
           --poll <secs>            Status poll interval (default: 10)
           --max-rounds <n>         Maximum rounds (default: 10)
           --auto-start             Auto-launch agent CLIs and send task
@@ -2362,14 +2625,14 @@ CONTROL COMMANDS
 AGENT COMMANDS (used by AI agents)
     signal <agent> <status> [message]
         Signal a status change. Status values:
-        clarifying, clarify-done, working, done, reviewing, review-done,
-        interrupted, error, pr-created
+        clarifying, clarify-done, pushing-back, pushback-done, working, done,
+        reviewing, review-done, interrupted, error, pr-created
 
     peer-status
         Read peer's current status (requires PEER_NAME env var).
 
     phase
-        Read current phase (clarify, work, or review).
+        Read current phase (clarify, pushback, work, or review).
 
 ENVIRONMENT VARIABLES (set in agent sessions)
     PEER_SYNC       Path to .peer-sync directory
@@ -2382,8 +2645,14 @@ EXAMPLES
     # Recommended: start with auto-run (opens 3 web terminals, starts everything)
     agent-duo start auth --auto-run
 
-    # With clarify phase: agents propose approaches before starting work
+    # With clarify stage: agents propose approaches before starting work
     agent-duo start auth --auto-run --clarify
+
+    # With pushback stage: agents propose improvements to the task file
+    agent-duo start auth --auto-run --pushback
+
+    # With both stages: clarify -> pushback -> work
+    agent-duo start auth --auto-run --clarify --pushback
     # Review approaches, respond to agents, then press Enter in orchestrator
 
     # Alternative: start manually then run orchestrator

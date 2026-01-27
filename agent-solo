@@ -129,17 +129,19 @@ cmd_setup() {
     install_skill "$templates_dir/solo-coder-clarify.md" "$claude_skills/solo-coder-clarify.md" "/solo-coder-clarify"
     install_skill "$templates_dir/solo-reviewer-work.md" "$claude_skills/solo-reviewer-work.md" "/solo-reviewer-work"
     install_skill "$templates_dir/solo-reviewer-clarify.md" "$claude_skills/solo-reviewer-clarify.md" "/solo-reviewer-clarify"
+    install_skill "$templates_dir/solo-reviewer-pushback.md" "$claude_skills/solo-reviewer-pushback.md" "/solo-reviewer-pushback"
     success "Installed Claude solo skills to $claude_skills"
 
     # Install Codex skills (uses $command syntax)
     local codex_skills="$HOME/.codex/skills"
     mkdir -p "$codex_skills/solo-coder-work" "$codex_skills/solo-coder-clarify"
-    mkdir -p "$codex_skills/solo-reviewer-work" "$codex_skills/solo-reviewer-clarify"
+    mkdir -p "$codex_skills/solo-reviewer-work" "$codex_skills/solo-reviewer-clarify" "$codex_skills/solo-reviewer-pushback"
 
     install_skill "$templates_dir/solo-coder-work.md" "$codex_skills/solo-coder-work/SKILL.md" "\$solo-coder-work"
     install_skill "$templates_dir/solo-coder-clarify.md" "$codex_skills/solo-coder-clarify/SKILL.md" "\$solo-coder-clarify"
     install_skill "$templates_dir/solo-reviewer-work.md" "$codex_skills/solo-reviewer-work/SKILL.md" "\$solo-reviewer-work"
     install_skill "$templates_dir/solo-reviewer-clarify.md" "$codex_skills/solo-reviewer-clarify/SKILL.md" "\$solo-reviewer-clarify"
+    install_skill "$templates_dir/solo-reviewer-pushback.md" "$codex_skills/solo-reviewer-pushback/SKILL.md" "\$solo-reviewer-pushback"
     success "Installed Codex solo skills to $codex_skills"
 
     # Install unified notify hook script and configure agent hooks
@@ -162,9 +164,11 @@ cmd_start() {
     local ttyd_mode=true
     local auto_run=false
     local clarify_mode=false
+    local pushback_mode=false
     local work_timeout=$DEFAULT_WORK_TIMEOUT
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
+    local pushback_timeout=$DEFAULT_PUSHBACK_TIMEOUT
     local max_rounds=10
     local codex_thinking=$DEFAULT_CODEX_THINKING
     local coder=$DEFAULT_CODER
@@ -178,9 +182,11 @@ cmd_start() {
             --no-ttyd) ttyd_mode=false; shift ;;
             --auto-run) auto_run=true; shift ;;
             --clarify) clarify_mode=true; shift ;;
+            --pushback) pushback_mode=true; shift ;;
             --work-timeout) work_timeout="$2"; shift 2 ;;
             --review-timeout) review_timeout="$2"; shift 2 ;;
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
+            --pushback-timeout) pushback_timeout="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --codex-thinking) codex_thinking="$2"; shift 2 ;;
             --codex-model) codex_model="$2"; shift 2 ;;
@@ -269,17 +275,22 @@ cmd_start() {
     echo "solo" > "$peer_sync/mode"
     echo "$coder" > "$peer_sync/coder-agent"
     echo "$reviewer" > "$peer_sync/reviewer-agent"
+    # Determine initial phase: clarify -> pushback -> work
     if $clarify_mode; then
         echo "clarify" > "$peer_sync/phase"
-        echo "true" > "$peer_sync/clarify-mode"
         echo "clarifying|$(date +%s)|starting" > "$peer_sync/coder.status"
         echo "waiting|$(date +%s)|waiting for coder" > "$peer_sync/reviewer.status"
+    elif $pushback_mode; then
+        echo "pushback" > "$peer_sync/phase"
+        echo "waiting|$(date +%s)|waiting for reviewer pushback" > "$peer_sync/coder.status"
+        echo "pushing-back|$(date +%s)|starting" > "$peer_sync/reviewer.status"
     else
         echo "work" > "$peer_sync/phase"
-        echo "false" > "$peer_sync/clarify-mode"
         echo "working|$(date +%s)|starting" > "$peer_sync/coder.status"
         echo "waiting|$(date +%s)|waiting for coder" > "$peer_sync/reviewer.status"
     fi
+    echo "$clarify_mode" > "$peer_sync/clarify-mode"
+    echo "$pushback_mode" > "$peer_sync/pushback-mode"
     echo "1" > "$peer_sync/round"
     echo "$feature" > "$peer_sync/feature"
     echo "$codex_thinking" > "$peer_sync/codex-thinking"
@@ -305,9 +316,9 @@ cmd_start() {
 
     if $ttyd_mode; then
         start_ttyd_mode_solo "$feature" "$project_root" "$worktree" "$peer_sync" \
-            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" "$clarify_mode" "$clarify_timeout" "$coder" "$reviewer"
+            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" "$clarify_mode" "$clarify_timeout" "$coder" "$reviewer" "$pushback_mode" "$pushback_timeout"
     else
-        start_tmux_mode_solo "$feature" "$project_root" "$worktree" "$peer_sync" "$codex_thinking" "$clarify_mode" "$coder" "$reviewer"
+        start_tmux_mode_solo "$feature" "$project_root" "$worktree" "$peer_sync" "$codex_thinking" "$clarify_mode" "$coder" "$reviewer" "$pushback_mode"
     fi
 }
 
@@ -320,6 +331,7 @@ start_tmux_mode_solo() {
     local clarify_mode="${6:-false}"
     local coder="${7:-$DEFAULT_CODER}"
     local reviewer="${8:-$DEFAULT_REVIEWER}"
+    local pushback_mode="${9:-false}"
 
     local session_name="solo-${feature}"
 
@@ -373,10 +385,16 @@ start_tmux_mode_solo() {
     echo "  reviewer window: $(get_agent_cmd "$reviewer" "$codex_thinking")"
     if [ "$clarify_mode" = "true" ]; then
         echo ""
-        echo "Clarify mode enabled. After coder submits approach and reviewer comments:"
+        echo "Clarify stage enabled. After coder submits approach and reviewer comments:"
         echo "  1. Review in .peer-sync/clarify-coder.md and clarify-reviewer.md"
         echo "  2. Respond to agents in their terminals (back-and-forth OK)"
-        echo "  3. Press Enter in the orchestrator to proceed to work phase"
+        echo "  3. Press Enter in the orchestrator to proceed"
+    fi
+    if [ "$pushback_mode" = "true" ]; then
+        echo ""
+        echo "Pushback stage enabled. After clarify (if enabled), the reviewer will:"
+        echo "  1. Propose improvements to the task file"
+        echo "  2. You can accept, reject, or modify the pushback"
     fi
 }
 
@@ -394,6 +412,8 @@ start_ttyd_mode_solo() {
     local clarify_timeout="${11:-$DEFAULT_CLARIFY_TIMEOUT}"
     local coder="${12:-$DEFAULT_CODER}"
     local reviewer="${13:-$DEFAULT_REVIEWER}"
+    local pushback_mode="${14:-false}"
+    local pushback_timeout="${15:-$DEFAULT_PUSHBACK_TIMEOUT}"
 
     local session_name="solo-${feature}"
 
@@ -459,6 +479,9 @@ start_ttyd_mode_solo() {
         if [ "$clarify_mode" = "true" ]; then
             run_cmd="$run_cmd --clarify-timeout $clarify_timeout"
         fi
+        if [ "$pushback_mode" = "true" ]; then
+            run_cmd="$run_cmd --pushback-timeout $pushback_timeout"
+        fi
         tmux send-keys -t "${session_name}-orchestrator" "$run_cmd"
         tmux send-keys -t "${session_name}-orchestrator" C-m
     else
@@ -467,10 +490,16 @@ start_ttyd_mode_solo() {
     echo "Stop with: agent-solo stop"
     if [ "$clarify_mode" = "true" ]; then
         echo ""
-        echo "Clarify mode enabled. Coder proposes approach, reviewer comments."
+        echo "Clarify stage enabled. Coder proposes approach, reviewer comments."
         echo "  1. Review in orchestrator or read .peer-sync/clarify-*.md"
         echo "  2. Respond to agents in their terminals (back-and-forth OK)"
-        echo "  3. Press Enter in the orchestrator to proceed to work phase"
+        echo "  3. Press Enter in the orchestrator to proceed"
+    fi
+    if [ "$pushback_mode" = "true" ]; then
+        echo ""
+        echo "Pushback stage enabled. After clarify (if enabled), the reviewer will:"
+        echo "  1. Propose improvements to the task file"
+        echo "  2. You can accept, reject, or modify the pushback"
     fi
 }
 
@@ -770,14 +799,78 @@ agent-solo pr   # handles commit, push, and PR creation
 EOF
 }
 
+# Generate pushback message for reviewer (only reviewer pushes back in solo mode)
+generate_solo_pushback_message() {
+    local feature="$1"
+    local task_content="$2"
+    local peer_sync="$3"
+
+    cat <<EOF
+# Task: $feature
+
+$task_content
+
+---
+## Agent-Solo Context - PUSHBACK STAGE (Reviewer)
+
+You are the **REVIEWER** in a solo workflow. Before the coder starts implementing, you may propose improvements to the task specification.
+
+- **Sync directory**: $peer_sync
+
+### Purpose
+
+The task file may specify both a goal and a plan. Sometimes the plan is suboptimal or could be improved. This is your opportunity to suggest modifications that would lead to a better solution.
+
+### Your Task
+
+Consider:
+1. Is the stated plan the best approach to achieve the core goal?
+2. Are there better alternatives or optimizations?
+3. Are there missing requirements or edge cases?
+
+### Write Your Pushback
+
+\`\`\`bash
+cat > "$peer_sync/pushback-reviewer.md" << 'PUSHBACK_EOF'
+# Pushback from Reviewer
+
+## Summary of Proposed Changes
+
+[1-3 sentences explaining what you're proposing to change and why]
+
+## Reasoning
+
+[Explain why this change would improve the solution quality]
+
+## Proposed Task File
+
+[Include the full modified task file here, with your improvements.
+If you have no changes to propose, write "No changes proposed - the task is well-specified."]
+
+PUSHBACK_EOF
+\`\`\`
+
+Edit the file with actual content, then signal completion:
+
+\`\`\`bash
+agent-solo signal reviewer pushback-done "proposed task modifications submitted"
+\`\`\`
+
+Then **STOP and wait**. The user will review your pushback and decide whether to accept or reject it.
+Do NOT provide implementation guidance yet - wait for the work phase.
+EOF
+}
+
 cmd_run() {
     local work_timeout=$DEFAULT_WORK_TIMEOUT
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
+    local pushback_timeout=$DEFAULT_PUSHBACK_TIMEOUT
     local poll_interval=$DEFAULT_POLL_INTERVAL
     local max_rounds=10
     local auto_start=false
     local enable_clarify=""
+    local enable_pushback=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -785,7 +878,9 @@ cmd_run() {
             --work-timeout) work_timeout="$2"; shift 2 ;;
             --review-timeout) review_timeout="$2"; shift 2 ;;
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
+            --pushback-timeout) pushback_timeout="$2"; shift 2 ;;
             --clarify) enable_clarify="true"; shift ;;
+            --pushback) enable_pushback="true"; shift ;;
             --poll) poll_interval="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --auto-start) auto_start=true; shift ;;
@@ -961,14 +1056,126 @@ cmd_run() {
         echo ""
         info "Respond to agents in their terminals if needed."
         echo ""
-        read -r -p "Press Enter when ready to proceed to work phase... "
+        read -r -p "Press Enter when ready to proceed... "
 
         # Mark clarify as confirmed
         echo "confirmed" > "$peer_sync/clarify-confirmed"
+
+        success "Clarify stage confirmed!"
+        echo ""
+    fi
+
+    # Check if pushback mode is enabled (command line overrides session setting)
+    local pushback_mode
+    if [ -n "$enable_pushback" ]; then
+        pushback_mode="$enable_pushback"
+        echo "$enable_pushback" > "$peer_sync/pushback-mode"
+    else
+        pushback_mode="$(cat "$peer_sync/pushback-mode" 2>/dev/null)" || pushback_mode="false"
+    fi
+
+    # Handle pushback stage if enabled and not already confirmed
+    # In solo mode, only the reviewer pushes back
+    if [ "$pushback_mode" = "true" ] && [ ! -f "$peer_sync/pushback-confirmed" ]; then
+        info "=== Pushback Stage ==="
+        echo "pushback" > "$peer_sync/phase"
+
+        # Read task content
+        local task_file
+        local task_content=""
+        if task_file="$(find_task_file "$root" "$feature")"; then
+            task_content="$(cat "$task_file" | head -c 4000)"
+        fi
+
+        # Only reviewer pushes back in solo mode
+        atomic_write "$peer_sync/coder.status" "waiting|$(date +%s)|waiting for reviewer pushback"
+        atomic_write "$peer_sync/reviewer.status" "pushing-back|$(date +%s)|pushback stage"
+        info "Sending pushback task to reviewer..."
+        local reviewer_pushback_msg
+        reviewer_pushback_msg="$(generate_solo_pushback_message "$feature" "$task_content" "$peer_sync")"
+        tmux send-keys -t "$reviewer_session" "$reviewer_pushback_msg"
+        sleep 0.5
+        tmux send-keys -t "$reviewer_session" C-m
+
+        # Wait for reviewer to complete pushback stage
+        local pushback_start=$SECONDS
+        local reviewer_pushback_done=false
+
+        while ! $reviewer_pushback_done; do
+            local elapsed=$((SECONDS - pushback_start))
+
+            # Check for completion
+            local reviewer_status
+            reviewer_status="$(get_agent_status "reviewer" "$peer_sync")"
+
+            [ "$reviewer_status" = "pushback-done" ] && reviewer_pushback_done=true
+
+            if $reviewer_pushback_done; then
+                break
+            fi
+
+            # Check timeout
+            if [ "$elapsed" -ge "$pushback_timeout" ]; then
+                warn "Pushback stage timeout (${pushback_timeout}s)"
+                break
+            fi
+
+            printf "\r  Waiting... reviewer=%s (%ds/%ds)  " "$reviewer_status" "$elapsed" "$pushback_timeout"
+            sleep "$poll_interval"
+        done
+        echo ""
+
+        # Send notification with pushback results
+        send_pushback_notification "$peer_sync" "$feature" "solo"
+
+        # Display pushback results
+        echo ""
+        info "=== Pushback Stage Results ==="
+        echo ""
+
+        if [ -f "$peer_sync/pushback-reviewer.md" ]; then
+            echo "--- Reviewer's Pushback ---"
+            cat "$peer_sync/pushback-reviewer.md"
+            echo ""
+        else
+            warn "Reviewer did not submit a pushback"
+        fi
+
+        echo ""
+        echo "=================================="
+        echo ""
+        info "Options:"
+        echo "  [Enter] - Reject pushback, proceed with original task"
+        echo "  [a]     - Accept the pushback"
+        echo ""
+        read -r -p "Your choice: " pushback_choice
+
+        case "$pushback_choice" in
+            a|A)
+                if [ -f "$peer_sync/pushback-reviewer.md" ]; then
+                    info "Applying reviewer's pushback..."
+                    echo "reviewer" > "$peer_sync/pushback-accepted"
+                else
+                    warn "Reviewer's pushback file not found, proceeding with original"
+                fi
+                ;;
+            *)
+                info "Proceeding with original task"
+                echo "rejected" > "$peer_sync/pushback-accepted"
+                ;;
+        esac
+
+        # Mark pushback as confirmed
+        echo "confirmed" > "$peer_sync/pushback-confirmed"
         echo "work" > "$peer_sync/phase"
 
-        success "Clarify phase confirmed! Proceeding to work phase..."
+        success "Pushback stage complete! Proceeding to work phase..."
         echo ""
+    fi
+
+    # Set phase to work if not already set
+    if [ "$(cat "$peer_sync/phase" 2>/dev/null)" != "work" ]; then
+        echo "work" > "$peer_sync/phase"
     fi
 
     # Main loop: Sequential work/review
@@ -1402,10 +1609,12 @@ SESSION COMMANDS
           --reviewer <agent>     Agent for reviewing (default: codex)
           --auto-run             Start orchestrator immediately
           --no-ttyd              Use single tmux session instead of web terminals
-          --clarify              Enable clarify phase before work starts
+          --clarify              Enable clarify stage before work starts
+          --pushback             Enable pushback stage (reviewer proposes task improvements)
           --work-timeout <secs>  Work phase timeout (default: 600)
           --review-timeout <secs> Review phase timeout (default: 300)
-          --clarify-timeout <secs> Clarify phase timeout (default: 300)
+          --clarify-timeout <secs> Clarify stage timeout (default: 300)
+          --pushback-timeout <secs> Pushback stage timeout (default: 300)
           --max-rounds <n>       Maximum rounds (default: 10)
           --codex-thinking <level> Codex reasoning effort: low, medium, high (default: high)
           --codex-model <model>  GPT model for Codex (e.g., o3, gpt-4.1)
@@ -1415,10 +1624,12 @@ SESSION COMMANDS
         Run the orchestrator loop (coder work -> reviewer review -> repeat).
 
         Options:
-          --clarify              Enable clarify phase
+          --clarify              Enable clarify stage
+          --pushback             Enable pushback stage (reviewer proposes task improvements)
           --work-timeout <secs>  Work phase timeout (default: 600)
           --review-timeout <secs> Review phase timeout (default: 300)
-          --clarify-timeout <secs> Clarify phase timeout (default: 300)
+          --clarify-timeout <secs> Clarify stage timeout (default: 300)
+          --pushback-timeout <secs> Pushback stage timeout (default: 300)
           --poll <secs>          Status poll interval (default: 10)
           --max-rounds <n>       Maximum rounds (default: 10)
           --auto-start           Auto-launch agent CLIs and send task

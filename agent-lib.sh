@@ -462,6 +462,7 @@ restart_agent_tui() {
 DEFAULT_WORK_TIMEOUT=600    # 10 minutes
 DEFAULT_REVIEW_TIMEOUT=300  # 5 minutes
 DEFAULT_CLARIFY_TIMEOUT=300 # 5 minutes
+DEFAULT_PUSHBACK_TIMEOUT=300 # 5 minutes
 DEFAULT_POLL_INTERVAL=10    # Check every 10 seconds
 DEFAULT_TUI_EXIT_BEHAVIOR="pause"  # What to do on TUI exit: pause, quit, or ignore
 
@@ -674,8 +675,8 @@ lib_cmd_signal() {
 
     # Validate status
     case "$status" in
-        clarifying|clarify-done|working|done|reviewing|review-done|interrupted|error|pr-created) ;;
-        *) die "Invalid status: $status (valid: clarifying, clarify-done, working, done, reviewing, review-done, interrupted, error, pr-created)" ;;
+        clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|interrupted|error|pr-created) ;;
+        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, interrupted, error, pr-created)" ;;
     esac
 
     local content="${status}|$(date +%s)|${message}"
@@ -1035,6 +1036,168 @@ $pr_url"
     fi
 }
 
+# Send pushback stage notification via ntfy
+send_pushback_ntfy() {
+    local peer_sync="$1"
+    local feature="$2"
+    local mode="${3:-duo}"
+
+    local topic
+    topic="$(get_ntfy_topic)" || {
+        return 1
+    }
+
+    local title="[agent-${mode}] Pushback stage complete: $feature"
+    local message=""
+
+    message+="Feature: $feature"
+    message+=$'\n\n'
+
+    if [ "$mode" = "solo" ]; then
+        if [ -f "$peer_sync/pushback-reviewer.md" ]; then
+            message+="REVIEWER'S PUSHBACK:"
+            message+=$'\n'
+            message+="$(head -20 "$peer_sync/pushback-reviewer.md")"
+            message+=$'\n\n'
+        fi
+    else
+        if [ -f "$peer_sync/pushback-claude.md" ]; then
+            message+="CLAUDE'S PUSHBACK:"
+            message+=$'\n'
+            message+="$(head -20 "$peer_sync/pushback-claude.md")"
+            message+=$'\n\n'
+        fi
+        if [ -f "$peer_sync/pushback-codex.md" ]; then
+            message+="CODEX'S PUSHBACK:"
+            message+=$'\n'
+            message+="$(head -20 "$peer_sync/pushback-codex.md")"
+            message+=$'\n\n'
+        fi
+    fi
+
+    message+="Choose: reject (Enter), accept claude (c), accept codex (x)"
+
+    if send_ntfy "$title" "$message" "default" "robot,memo"; then
+        success "Pushback notification sent via ntfy"
+        return 0
+    else
+        warn "Failed to send ntfy notification"
+        return 1
+    fi
+}
+
+# Send email notification with pushback stage results
+send_pushback_email() {
+    local peer_sync="$1"
+    local feature="$2"
+    local mode="${3:-duo}"
+
+    if ! command -v mail >/dev/null 2>&1; then
+        warn "mail command not found - skipping email notification"
+        return 1
+    fi
+
+    local email
+    email="$(git config user.email 2>/dev/null)"
+    if [ -z "$email" ]; then
+        warn "No git user.email configured - skipping email notification"
+        return 1
+    fi
+
+    local subject="[agent-${mode}] Pushback stage complete: $feature"
+    local body=""
+
+    local mode_cap="$(echo "$mode" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
+    body+="Agent $mode_cap - Pushback Stage Results"
+    body+=$'\n'
+    body+="=================================="
+    body+=$'\n\n'
+    body+="Feature: $feature"
+    body+=$'\n\n'
+
+    if [ "$mode" = "solo" ]; then
+        if [ -f "$peer_sync/pushback-reviewer.md" ]; then
+            body+="--- REVIEWER'S PUSHBACK ---"
+            body+=$'\n\n'
+            body+="$(cat "$peer_sync/pushback-reviewer.md")"
+            body+=$'\n\n'
+        else
+            body+="Reviewer: No pushback submitted"
+            body+=$'\n\n'
+        fi
+    else
+        if [ -f "$peer_sync/pushback-claude.md" ]; then
+            body+="--- CLAUDE'S PUSHBACK ---"
+            body+=$'\n\n'
+            body+="$(cat "$peer_sync/pushback-claude.md")"
+            body+=$'\n\n'
+        else
+            body+="Claude: No pushback submitted"
+            body+=$'\n\n'
+        fi
+
+        if [ -f "$peer_sync/pushback-codex.md" ]; then
+            body+="--- CODEX'S PUSHBACK ---"
+            body+=$'\n\n'
+            body+="$(cat "$peer_sync/pushback-codex.md")"
+            body+=$'\n\n'
+        else
+            body+="Codex: No pushback submitted"
+            body+=$'\n\n'
+        fi
+    fi
+
+    body+="=================================="
+    body+=$'\n\n'
+    body+="In the orchestrator terminal, choose:"
+    body+=$'\n'
+    body+="  [Enter] - Reject pushbacks, use original task"
+    body+=$'\n'
+    body+="  [c]     - Accept Claude's pushback"
+    body+=$'\n'
+    body+="  [x]     - Accept Codex's pushback"
+    body+=$'\n'
+
+    echo "$body" | mail -s "$subject" "$email" 2>/dev/null
+
+    if [ $? -eq 0 ]; then
+        success "Email queued to $email"
+        return 0
+    else
+        warn "Failed to send email"
+        return 1
+    fi
+}
+
+# Send pushback notification via all configured methods
+send_pushback_notification() {
+    local peer_sync="$1"
+    local feature="$2"
+    local mode="${3:-duo}"
+
+    local ntfy_ok=false
+    local email_ok=false
+
+    if get_ntfy_topic >/dev/null 2>&1; then
+        if send_pushback_ntfy "$peer_sync" "$feature" "$mode"; then
+            ntfy_ok=true
+        fi
+    fi
+
+    if command -v mail >/dev/null 2>&1; then
+        if send_pushback_email "$peer_sync" "$feature" "$mode"; then
+            email_ok=true
+        fi
+    fi
+
+    if [ "$ntfy_ok" = true ] || [ "$email_ok" = true ]; then
+        return 0
+    else
+        warn "No pushback notification sent (configure ntfy or email)"
+        return 1
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Skill installation helper
 #------------------------------------------------------------------------------
@@ -1139,10 +1302,23 @@ case "$phase" in
     clarify)
         # Don't override if already clarify-done or beyond
         case "$current_status" in
-            clarify-done|done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
+            clarify-done|pushback-done|done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
         esac
         log_debug "signaling clarify-done"
         $signal_cmd signal "$agent" clarify-done "completed via hook"
+        ;;
+    pushback)
+        # Don't override if already pushback-done or beyond
+        case "$current_status" in
+            pushback-done|done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
+        esac
+        # In solo mode, only reviewer pushes back
+        if [ "$mode" = "solo" ] && [ "$agent" != "reviewer" ]; then
+            log_debug "skipping (not reviewer in pushback phase)"
+            exit 0
+        fi
+        log_debug "signaling pushback-done"
+        $signal_cmd signal "$agent" pushback-done "completed via hook"
         ;;
     work)
         # Don't override if already done or beyond
