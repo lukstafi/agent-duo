@@ -523,12 +523,9 @@ interrupt_agent() {
 
     info "Interrupting $agent..."
 
-    # Try Escape first (works for many CLI tools)
+    # Send Escape to interrupt the current operation
+    # Note: We avoid Ctrl-C because it exits Codex when the prompt is empty
     tmux send-keys -t "$session" Escape
-    sleep 0.5
-
-    # Then Ctrl-C as backup
-    tmux send-keys -t "$session" C-c
     sleep 1
 
     # Update status

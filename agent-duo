@@ -19,7 +19,7 @@
 #
 # Control Commands:
 #   nudge <agent> [msg]  Send message to agent terminal
-#   interrupt <agent>    Interrupt agent (Esc + Ctrl-C)
+#   interrupt <agent>    Interrupt agent (Esc)
 #
 # Agent Commands:
 #   signal <agent> <status> [message]   Signal status change
@@ -2774,7 +2774,7 @@ CONTROL COMMANDS
         Default message: "Continue."
 
     interrupt <agent>
-        Send Escape + Ctrl-C to interrupt an agent and mark as interrupted.
+        Send Escape to interrupt an agent and mark as interrupted.
 
 AGENT COMMANDS (used by AI agents)
     signal <agent> <status> [message]

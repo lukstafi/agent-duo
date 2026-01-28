@@ -58,7 +58,7 @@ agent-duo setup                 # Install agent-duo to PATH and skills
 agent-duo doctor                # Check system configuration
 agent-duo config [key] [value]  # Get/set configuration (ntfy_topic, etc.)
 agent-duo nudge <agent> [msg]   # Send message to agent terminal
-agent-duo interrupt <agent>     # Interrupt agent (Esc + Ctrl-C)
+agent-duo interrupt <agent>     # Interrupt agent (Esc)
 agent-duo escalate-resolve      # Review and resolve pending escalations
 ```
 
