@@ -883,7 +883,7 @@ start_tmux_mode() {
     echo "Attach with: tmux attach -t $session_name"
     echo ""
     echo "To start agents, in each window run their CLI:"
-    echo "  claude window: $CLAUDE_CMD"
+    echo "  claude window: $(get_agent_cmd claude)"
     echo "  codex window:  $(get_agent_cmd codex "$codex_thinking")"
     if [ "$clarify_mode" = "true" ]; then
         echo ""
@@ -2054,7 +2054,7 @@ cmd_run() {
     # Optionally auto-start agents
     if $auto_start; then
         info "Starting agents..."
-        tmux send-keys -t "$claude_session" "$CLAUDE_CMD"
+        tmux send-keys -t "$claude_session" "$(get_agent_cmd claude)"
         tmux send-keys -t "$claude_session" C-m
         tmux send-keys -t "$codex_session" "$(get_agent_cmd codex "$codex_thinking")"
         tmux send-keys -t "$codex_session" C-m
