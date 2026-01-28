@@ -345,8 +345,8 @@ attempt_codex_resume() {
     # Save the resume key for reference
     echo "$resume_key" > "$peer_sync/codex-resume-key"
 
-    # Send the resume command to the tmux session
-    tmux send-keys -t "$session" "codex resume $resume_key"
+    # Send the resume command to the tmux session (with --yolo for cross-worktree access)
+    tmux send-keys -t "$session" "codex resume --yolo $resume_key"
     tmux send-keys -t "$session" C-m
 
     # Wait a moment for it to start
