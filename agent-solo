@@ -221,6 +221,13 @@ cmd_start() {
     local project_name
     project_name="$(basename "$project_root")"
 
+    # Check for existing session
+    if [ -d "$project_root/.peer-sync" ]; then
+        die "Session already exists (.peer-sync found).
+To continue an existing session: agent-solo run
+To start fresh: agent-solo cleanup && agent-solo start $feature"
+    fi
+
     # Check for task file
     local task_file
     if task_file="$(find_task_file "$project_root" "$feature")"; then
