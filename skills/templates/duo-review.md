@@ -24,6 +24,8 @@ Stop any implementation work. Your task is to review your peer's solution.
 
 Your peer has also completed their work phase. Now you review each other's work **in parallel**.
 
+**Note**: You participate in reviews even if you already have a PR. This ensures your peer gets feedback on their evolving work, and you can see their review of your PR.
+
 ### First Things First
 
 Signal that you're reviewing:
@@ -110,7 +112,7 @@ This notifies the user without interrupting your work. Continue with your best i
 
 Do one of the following:
 
-**If more work/review rounds needed**:
+**If you already have a PR, or more work/review rounds needed**:
 ```bash
 agent-duo signal "$MY_NAME" review-done "review written"
 ```

@@ -276,7 +276,17 @@ This command:
 5. Sets agent status to `pr-created`
 6. Records PR URL in `.peer-sync/<agent>.pr`
 
-Session completes when both agents have `pr-created` status.
+### Session Completion
+
+Session completes when:
+1. Both agents have `pr-created` status, **AND**
+2. At least one full review cycle has completed (round >= 2)
+
+This ensures:
+- Both agents see at least one peer review before the session ends
+- An agent who creates a PR early continues to participate in work/review cycles
+- The early-PR agent can respond to peer feedback and amend their PR if needed
+- Both agents continue reviewing each other's work until the session completes
 
 ## Terminal Modes
 
@@ -305,14 +315,15 @@ agent-duo start myfeature
 ## Skills
 
 Skills provide phase-specific instructions to agents. Installed to:
-- Claude: `~/.claude/commands/duo-{work,review,clarify,pushback}.md`
-- Codex: `~/.codex/skills/duo-{work,review,clarify,pushback}/SKILL.md`
+- Claude: `~/.claude/commands/duo-{work,review,clarify,pushback,amend}.md`
+- Codex: `~/.codex/skills/duo-{work,review,clarify,pushback,amend}/SKILL.md`
 
 Key skill behaviors:
 - **Clarify phase**: Propose high-level approach, ask clarifying questions, signal `clarify-done`
 - **Pushback phase**: Propose improvements to the task file, signal `pushback-done`
 - **Work phase**: Implement solution, signal `done` when ready
-- **Review phase**: Read peer's worktree via git, write review, signal `review-done`
+- **Amend phase**: For agents with PRs — review peer feedback and amend PR if warranted
+- **Review phase**: Read peer's worktree via git, write review, signal `review-done`; agents with PRs still participate
 - **Divergence**: Maintain distinct approach from peer
 - **Interrupts**: If interrupted, gracefully yield and continue next round
 
