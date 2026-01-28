@@ -12,7 +12,7 @@
 #   status               Show session state
 #   confirm              Confirm clarify phase completion (proceed to work)
 #   pr <agent>           Create PR for agent's solution
-#   cleanup [--full]     Remove worktrees (--full: also state)
+#   cleanup [--full]     Remove session state (--full: also worktrees/branches)
 #   setup                Install agent-duo to PATH and skills
 #   doctor [--send-email|--send-ntfy]  Check system health and configuration
 #   config <key> [value] Get/set configuration (e.g., ntfy_topic)
@@ -1518,31 +1518,31 @@ cmd_cleanup() {
     # Stop any running processes first
     cmd_stop
 
-    # Remove worktrees
-    local worktree_claude="$parent_dir/${project_name}-${feature}-claude"
-    local worktree_codex="$parent_dir/${project_name}-${feature}-codex"
-
-    cd "$root"  # Make sure we're not in a worktree
-
-    if [ -d "$worktree_claude" ]; then
-        git worktree remove --force "$worktree_claude" 2>/dev/null || rm -rf "$worktree_claude"
-        info "Removed worktree: $worktree_claude"
-    fi
-
-    if [ -d "$worktree_codex" ]; then
-        git worktree remove --force "$worktree_codex" 2>/dev/null || rm -rf "$worktree_codex"
-        info "Removed worktree: $worktree_codex"
-    fi
-
-    # Prune worktree references
-    git worktree prune
+    # Always remove session state (.peer-sync)
+    rm -rf "$peer_sync"
+    info "Removed .peer-sync"
 
     if $full; then
-        # Remove state
-        rm -rf "$peer_sync"
-        info "Removed .peer-sync"
+        # Remove worktrees
+        local worktree_claude="$parent_dir/${project_name}-${feature}-claude"
+        local worktree_codex="$parent_dir/${project_name}-${feature}-codex"
 
-        # Optionally delete branches
+        cd "$root"  # Make sure we're not in a worktree
+
+        if [ -d "$worktree_claude" ]; then
+            git worktree remove --force "$worktree_claude" 2>/dev/null || rm -rf "$worktree_claude"
+            info "Removed worktree: $worktree_claude"
+        fi
+
+        if [ -d "$worktree_codex" ]; then
+            git worktree remove --force "$worktree_codex" 2>/dev/null || rm -rf "$worktree_codex"
+            info "Removed worktree: $worktree_codex"
+        fi
+
+        # Prune worktree references
+        git worktree prune
+
+        # Delete branches
         git branch -D "${feature}-claude" 2>/dev/null && info "Deleted branch: ${feature}-claude" || true
         git branch -D "${feature}-codex" 2>/dev/null && info "Deleted branch: ${feature}-codex" || true
     fi
@@ -2738,8 +2738,8 @@ SESSION COMMANDS
         Auto-commits uncommitted changes and pushes.
 
     cleanup [--full]
-        Remove worktrees. With --full, also removes .peer-sync
-        and deletes the feature branches.
+        Remove session state (.peer-sync). With --full, also removes
+        worktrees and deletes the feature branches.
 
     setup
         Install agent-duo to ~/.local/bin and skills to agent dirs.

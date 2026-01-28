@@ -11,7 +11,7 @@
 #   status               Show session state
 #   confirm              Confirm clarify phase completion (proceed to work)
 #   pr                   Create PR for coder's solution
-#   cleanup [--full]     Remove worktree (--full: also state)
+#   cleanup [--full]     Remove session state (--full: also worktree/branch)
 #   setup                Install agent-solo to PATH and skills
 #
 # Control Commands:
@@ -1486,25 +1486,25 @@ cmd_cleanup() {
     # Stop any running processes first
     cmd_stop
 
-    # Remove worktree
-    local worktree="$parent_dir/${project_name}-${feature}"
-
-    cd "$root"  # Make sure we're not in a worktree
-
-    if [ -d "$worktree" ]; then
-        git worktree remove --force "$worktree" 2>/dev/null || rm -rf "$worktree"
-        info "Removed worktree: $worktree"
-    fi
-
-    # Prune worktree references
-    git worktree prune
+    # Always remove session state (.peer-sync)
+    rm -rf "$peer_sync"
+    info "Removed .peer-sync"
 
     if $full; then
-        # Remove state
-        rm -rf "$peer_sync"
-        info "Removed .peer-sync"
+        # Remove worktree
+        local worktree="$parent_dir/${project_name}-${feature}"
 
-        # Optionally delete branch
+        cd "$root"  # Make sure we're not in a worktree
+
+        if [ -d "$worktree" ]; then
+            git worktree remove --force "$worktree" 2>/dev/null || rm -rf "$worktree"
+            info "Removed worktree: $worktree"
+        fi
+
+        # Prune worktree references
+        git worktree prune
+
+        # Delete branch
         git branch -D "${feature}" 2>/dev/null && info "Deleted branch: ${feature}" || true
     fi
 
@@ -1754,8 +1754,8 @@ SESSION COMMANDS
         Auto-commits uncommitted changes and pushes.
 
     cleanup [--full]
-        Remove worktree. With --full, also removes .peer-sync
-        and deletes the feature branch.
+        Remove session state (.peer-sync). With --full, also removes
+        worktree and deletes the feature branch.
 
     setup
         Install agent-solo to ~/.local/bin and skills to agent dirs.
