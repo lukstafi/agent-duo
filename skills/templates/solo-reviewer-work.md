@@ -91,6 +91,16 @@ agent-solo signal reviewer reviewing "examining coder's work"
 - **Use clear verdict**: APPROVE means ready for PR, REQUEST_CHANGES means another round needed
 - **Do NOT modify code**: You review only, the coder implements
 
+### If You Discover a Blocking Issue
+
+If you find ambiguity, inconsistency, or evidence the task is misguided — escalate:
+```bash
+agent-solo escalate ambiguity "requirements unclear: what should happen when X?"
+agent-solo escalate inconsistency "docs say X but code does Y"
+agent-solo escalate misguided "this feature already exists in module Z"
+```
+This notifies the user without interrupting your work. Continue with your review.
+
 ### Verdict Guidelines
 
 - **APPROVE**: Code is correct, follows best practices, and is ready to merge

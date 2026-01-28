@@ -38,6 +38,16 @@ Stop any review activity. Your task is to continue developing your implementatio
 git -C "$PEER_WORKTREE" diff
 ```
 
+## If You Discover a Blocking Issue
+
+If you find ambiguity, inconsistency, or evidence the task is misguided — escalate:
+```bash
+agent-duo escalate ambiguity "requirements unclear: what should happen when X?"
+agent-duo escalate inconsistency "docs say X but code does Y"
+agent-duo escalate misguided "this feature already exists in module Z"
+```
+This notifies the user without interrupting your work. Continue with your best interpretation.
+
 ## Before You Stop
 
 Do one of the following:

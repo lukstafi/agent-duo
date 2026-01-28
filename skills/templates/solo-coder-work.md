@@ -36,6 +36,16 @@ Implement the solution, addressing any feedback from the reviewer.
 - **Follow best practices**: Write clean, tested code
 - **Stay focused**: Implement the requested feature
 
+## If You Discover a Blocking Issue
+
+If you find ambiguity, inconsistency, or evidence the task is misguided — escalate:
+```bash
+agent-solo escalate ambiguity "requirements unclear: what should happen when X?"
+agent-solo escalate inconsistency "docs say X but code does Y"
+agent-solo escalate misguided "this feature already exists in module Z"
+```
+This notifies the user without interrupting your work. Continue with your best interpretation.
+
 ## When Done
 
 Signal completion and **STOP**:

@@ -59,6 +59,7 @@ agent-duo doctor                # Check system configuration
 agent-duo config [key] [value]  # Get/set configuration (ntfy_topic, etc.)
 agent-duo nudge <agent> [msg]   # Send message to agent terminal
 agent-duo interrupt <agent>     # Interrupt agent (Esc + Ctrl-C)
+agent-duo escalate-resolve      # Review and resolve pending escalations
 ```
 
 ### Model Selection Options
@@ -76,6 +77,7 @@ agent-duo start <feature> --auto-run \
 agent-duo signal <agent> <status> [message]   # Signal status change
 agent-duo peer-status                         # Read peer's status
 agent-duo phase                               # Read current phase
+agent-duo escalate <reason> [message]         # Escalate issue to user
 ```
 
 ## Naming Conventions
@@ -98,7 +100,7 @@ Given project directory `myapp` and feature `auth`:
 | Concept | Who sets | Values | Purpose |
 |---------|----------|--------|---------|
 | **Phase** | Orchestrator | `clarify`, `pushback`, `work`, `review` | Current stage of the round |
-| **Agent Status** | Agent | `clarifying`, `clarify-done`, `pushing-back`, `pushback-done`, `working`, `done`, `reviewing`, `review-done`, `interrupted`, `error` | What agent is doing |
+| **Agent Status** | Agent | `clarifying`, `clarify-done`, `pushing-back`, `pushback-done`, `working`, `done`, `reviewing`, `review-done`, `interrupted`, `error`, `escalated` | What agent is doing |
 | **Session State** | Orchestrator | `active`, `complete` | Overall progress |
 
 ### State Files (in `.peer-sync/`)
@@ -119,6 +121,9 @@ Given project directory `myapp` and feature `auth`:
 ├── codex-thinking    # Codex reasoning effort level
 ├── claude.status     # Agent status: "working|1705847123|implementing API"
 ├── codex.status      # Format: status|epoch|message
+├── escalation-claude.md  # Escalation from claude (if any)
+├── escalation-codex.md   # Escalation from codex (if any)
+├── escalation-resolved   # Present when escalations have been resolved
 ├── pids/             # Process IDs for ttyd servers
 └── reviews/          # Review files from each round
     └── round-1-claude-reviews-codex.md
@@ -195,6 +200,35 @@ When an agent takes too long, the orchestrator can interrupt rather than fail:
 
 This allows graceful handling of slow agents without losing progress.
 
+### Escalation
+
+Agents can escalate issues requiring user input without interrupting their work:
+
+```bash
+agent-duo escalate ambiguity "requirements unclear: what should happen when X?"
+agent-duo escalate inconsistency "docs say X but code does Y"
+agent-duo escalate misguided "this feature already exists in module Z"
+```
+
+**Scope for escalation:**
+- **Ambiguity** - Requirements are unclear, need clarification
+- **Inconsistency** - Conflicting requirements or code/docs mismatch
+- **Misguided** - Evidence the task approach is wrong
+
+**Out of scope:** Getting stuck on implementation → wrap partial progress as a PR instead.
+
+**Flow:**
+1. Agent calls `escalate <reason> [message]`
+2. Creates `.peer-sync/escalation-<agent>.md` with details
+3. Sets agent status to `escalated`
+4. Agent continues working (not interrupted)
+5. Orchestrator checks for escalations before each phase transition
+6. If escalations exist: displays them, sends ntfy notification, prompts user
+7. User resolves via prompt in orchestrator terminal or `agent-duo escalate-resolve`
+8. Escalation files removed, orchestrator continues
+
+This differs from clarify/pushback phases which are enforced blocking points. Escalation is an ad-hoc mechanism for issues discovered during work or review.
+
 ## Agent Status Values
 
 | Status | Meaning | Set by |
@@ -209,6 +243,7 @@ This allows graceful handling of slow agents without losing progress.
 | `review-done` | Finished review phase | Agent |
 | `interrupted` | Timed out, yielding to review | Orchestrator |
 | `error` | Something failed | Agent or Orchestrator |
+| `escalated` | Issue needs user input | Agent (after `agent-duo escalate`) |
 | `pr-created` | PR submitted | Agent (after `agent-duo pr`) |
 
 ## Reading Peer's Work
@@ -450,5 +485,8 @@ Major feature additions since the initial bootstrap:
 | **Model selection** | `--claude-model`, `--codex-model`, `--codex-thinking` options |
 | **Dynamic port allocation** | Ports stored in `.peer-sync/ports` instead of hardcoded |
 | **agent-solo mode** | Single-worktree coder/reviewer workflow |
+| **Escalation** | `escalate` command for agents to flag ambiguity/inconsistency/misguided tasks |
 
 The pushback phase allows agents to propose improvements to the task file before implementation begins, enabling iterative task refinement.
+
+The escalation mechanism allows agents to flag issues discovered during work/review without interrupting their progress. Unlike clarify/pushback which are enforced phases, escalation is ad-hoc and blocks phase transitions until the user resolves.

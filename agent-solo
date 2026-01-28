@@ -781,6 +781,16 @@ Implement the solution. The reviewer will examine your work after you signal don
    cat "$peer_sync/reviews/round-$((round - 1))-review.md" 2>/dev/null
    \`\`\`
 
+### If You Discover a Blocking Issue
+
+If you find ambiguity, inconsistency, or evidence the task is misguided — escalate:
+\`\`\`bash
+agent-solo escalate ambiguity "requirements unclear: what should happen when X?"
+agent-solo escalate inconsistency "docs say X but code does Y"
+agent-solo escalate misguided "this feature already exists in module Z"
+\`\`\`
+This notifies the user without interrupting your work. Continue with your best interpretation.
+
 ### When Done
 
 Signal completion and **STOP**:
@@ -1270,6 +1280,13 @@ cmd_run() {
             break
         fi
 
+        # Check for escalations before transitioning to review phase
+        # If user chooses to defer, escalations remain but we continue to review phase
+        # They'll be checked again at the next phase boundary
+        if has_pending_escalations "$peer_sync" >/dev/null; then
+            handle_escalation_block "$peer_sync" "$feature" "solo" || true
+        fi
+
         # Review phase
         info "=== Round $round: Review Phase ==="
         echo "review" > "$peer_sync/phase"
@@ -1314,6 +1331,13 @@ cmd_run() {
             else
                 info "Reviewer requested changes. Proceeding to next round."
             fi
+        fi
+
+        # Check for escalations before transitioning to next work round
+        # If user chooses to defer, escalations remain but we continue to next round
+        # They'll be checked again at the next phase boundary
+        if has_pending_escalations "$peer_sync" >/dev/null; then
+            handle_escalation_block "$peer_sync" "$feature" "solo" || true
         fi
 
         round=$((round + 1))
@@ -1509,6 +1533,71 @@ cmd_confirm() {
 }
 
 #------------------------------------------------------------------------------
+# Command: escalate (for agents to flag issues needing user input)
+#------------------------------------------------------------------------------
+
+cmd_escalate() {
+    lib_cmd_escalate "$@"
+}
+
+#------------------------------------------------------------------------------
+# Command: escalate-resolve (user resolves an escalation)
+#------------------------------------------------------------------------------
+
+cmd_escalate_resolve() {
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+
+    # Find pending escalations
+    local escalations=()
+    for f in "$peer_sync"/escalation-*.md; do
+        [ -f "$f" ] && escalations+=("$f")
+    done
+
+    if [ ${#escalations[@]} -eq 0 ]; then
+        info "No pending escalations."
+        return 0
+    fi
+
+    # Display all escalations
+    echo ""
+    info "=== Pending Escalations ==="
+    echo ""
+    for f in "${escalations[@]}"; do
+        cat "$f"
+        echo ""
+        echo "---"
+        echo ""
+    done
+
+    # Prompt for resolution
+    echo "Options:"
+    echo "  1. Resolve all escalations (agents will continue normally)"
+    echo "  2. Cancel (keep escalations pending)"
+    echo ""
+    read -r -p "Choice [1/2]: " choice
+
+    case "$choice" in
+        1)
+            # Remove escalation files
+            for f in "${escalations[@]}"; do
+                rm -f "$f"
+            done
+
+            # Mark escalations as resolved
+            echo "resolved|$(date +%s)" > "$peer_sync/escalation-resolved"
+
+            success "Escalations resolved. Orchestrator will continue."
+            echo "Note: If orchestrator is waiting, press Enter there to continue."
+            ;;
+        2|*)
+            info "Escalations remain pending."
+            ;;
+    esac
+}
+
+#------------------------------------------------------------------------------
 # Command: signal (for agents)
 #------------------------------------------------------------------------------
 
@@ -1649,6 +1738,10 @@ SESSION COMMANDS
     confirm
         Confirm the clarify phase is complete and proceed to work phase.
 
+    escalate-resolve
+        Review and resolve pending escalations from agents.
+        Escalations block phase transitions until resolved.
+
     pr
         Create a PR for the coder's solution.
         Auto-commits uncommitted changes and pushes.
@@ -1672,13 +1765,22 @@ AGENT COMMANDS (used by AI agents)
     signal <agent> <status> [message]
         Signal a status change. Agent is 'coder' or 'reviewer'.
         Status values: clarifying, clarify-done, working, done,
-        reviewing, review-done, interrupted, error, pr-created
+        reviewing, review-done, interrupted, error, pr-created, escalated
 
     peer-status
         Read peer's current status (requires PEER_NAME env var).
 
     phase
         Read current phase (clarify, work, or review).
+
+    escalate <reason> [message]
+        Escalate an issue requiring user input. Does not interrupt the agent.
+        The orchestrator will block phase transitions until user resolves.
+
+        Reasons:
+          ambiguity     - Requirements are unclear
+          inconsistency - Conflicting requirements or code/docs mismatch
+          misguided     - Evidence the task approach is wrong
 
 WORKFLOW
     Solo mode uses a sequential workflow:
@@ -1731,6 +1833,8 @@ main() {
         stop)        cmd_stop "$@" ;;
         status)      cmd_status "$@" ;;
         confirm)     cmd_confirm "$@" ;;
+        escalate)    cmd_escalate "$@" ;;
+        escalate-resolve) cmd_escalate_resolve "$@" ;;
         pr)          cmd_pr "$@" ;;
         cleanup)     cmd_cleanup "$@" ;;
         setup)       cmd_setup "$@" ;;

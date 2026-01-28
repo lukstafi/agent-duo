@@ -675,8 +675,8 @@ lib_cmd_signal() {
 
     # Validate status
     case "$status" in
-        clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|interrupted|error|pr-created) ;;
-        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, interrupted, error, pr-created)" ;;
+        clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|interrupted|error|pr-created|escalated) ;;
+        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, interrupted, error, pr-created, escalated)" ;;
     esac
 
     local content="${status}|$(date +%s)|${message}"
@@ -715,6 +715,56 @@ lib_cmd_phase() {
     else
         echo "unknown"
     fi
+}
+
+# Escalate an issue to the user
+# Usage: lib_cmd_escalate <reason>
+# Reasons: ambiguity, inconsistency, misguided
+lib_cmd_escalate() {
+    local reason="$1"
+    local message="${2:-}"
+
+    [ -z "$reason" ] && die "Usage: escalate <reason> [message]
+Reasons:
+  ambiguity     - Requirements are unclear, need clarification
+  inconsistency - Conflicting requirements or code/docs mismatch
+  misguided     - Evidence the task approach is wrong"
+
+    # Validate reason
+    case "$reason" in
+        ambiguity|inconsistency|misguided) ;;
+        *) die "Invalid reason: $reason (valid: ambiguity, inconsistency, misguided)" ;;
+    esac
+
+    local agent="${AGENT_NAME:-}"
+    [ -z "$agent" ] && die "AGENT_NAME not set. Are you in an agent session?"
+
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+
+    # Write escalation file with details
+    local escalation_file="$peer_sync/escalation-${agent}.md"
+    {
+        echo "# Escalation from $agent"
+        echo ""
+        echo "**Reason:** $reason"
+        echo "**Time:** $(date)"
+        echo ""
+        if [ -n "$message" ]; then
+            echo "## Details"
+            echo ""
+            echo "$message"
+        fi
+    } > "$escalation_file"
+
+    # Update agent status to escalated
+    local content="escalated|$(date +%s)|$reason: ${message:-no details}"
+    atomic_write "$peer_sync/${agent}.status" "$content"
+
+    success "Escalation filed: $reason"
+    info "The orchestrator will pause before advancing phases."
+    info "Continue your current work - you won't be interrupted."
 }
 
 #------------------------------------------------------------------------------
@@ -1008,6 +1058,127 @@ send_clarify_notification() {
         warn "No notification sent (configure ntfy or email)"
         return 1
     fi
+}
+
+# Check if there are pending escalations
+# Returns 0 if escalations exist, 1 otherwise
+# Outputs the list of escalation files if any
+has_pending_escalations() {
+    local peer_sync="$1"
+    local found=false
+
+    for f in "$peer_sync"/escalation-*.md; do
+        if [ -f "$f" ]; then
+            echo "$f"
+            found=true
+        fi
+    done
+
+    [ "$found" = true ]
+}
+
+# Send escalation notification via ntfy
+# Usage: send_escalation_ntfy <peer_sync> <feature> <mode>
+send_escalation_ntfy() {
+    local peer_sync="$1"
+    local feature="$2"
+    local mode="${3:-duo}"
+
+    local topic
+    topic="$(get_ntfy_topic)" || {
+        return 1
+    }
+
+    local title="[agent-${mode}] ESCALATION: $feature"
+    local message="One or more agents have escalated issues requiring your attention."
+    message+=$'\n\n'
+
+    # Include escalation details
+    for f in "$peer_sync"/escalation-*.md; do
+        if [ -f "$f" ]; then
+            message+="$(head -30 "$f")"
+            message+=$'\n\n---\n\n'
+        fi
+    done
+
+    message+="Run 'agent-${mode} escalate-resolve' to review and resolve."
+
+    if send_ntfy "$title" "$message" "high" "warning,robot"; then
+        success "Escalation notification sent via ntfy"
+        return 0
+    else
+        warn "Failed to send escalation notification"
+        return 1
+    fi
+}
+
+# Send escalation notification via all configured methods
+send_escalation_notification() {
+    local peer_sync="$1"
+    local feature="$2"
+    local mode="${3:-duo}"
+
+    # Only ntfy for escalations (high priority, needs immediate attention)
+    if get_ntfy_topic >/dev/null 2>&1; then
+        send_escalation_ntfy "$peer_sync" "$feature" "$mode"
+        return $?
+    fi
+
+    warn "Escalation notification not sent (configure ntfy for alerts)"
+    return 1
+}
+
+# Handle pending escalations - blocks until resolved
+# Returns 0 when escalations are resolved, 1 if user cancels
+handle_escalation_block() {
+    local peer_sync="$1"
+    local feature="$2"
+    local mode="${3:-duo}"
+
+    # Check for pending escalations
+    if ! has_pending_escalations "$peer_sync" >/dev/null; then
+        return 0  # No escalations, continue
+    fi
+
+    echo ""
+    warn "=== ESCALATION PENDING ==="
+    echo ""
+
+    # Display all escalations
+    for f in "$peer_sync"/escalation-*.md; do
+        if [ -f "$f" ]; then
+            cat "$f"
+            echo ""
+            echo "---"
+            echo ""
+        fi
+    done
+
+    # Send notification
+    send_escalation_notification "$peer_sync" "$feature" "$mode" 2>/dev/null || true
+
+    echo "Options:"
+    echo "  1. Resolve escalations (continue with phases)"
+    echo "  2. Keep waiting (agents continue current phase)"
+    echo "  3. Ctrl-C to stop orchestrator"
+    echo ""
+    read -r -p "Choice [1/2]: " choice
+
+    case "$choice" in
+        1)
+            # Remove escalation files
+            for f in "$peer_sync"/escalation-*.md; do
+                [ -f "$f" ] && rm -f "$f"
+            done
+            echo "resolved|$(date +%s)" > "$peer_sync/escalation-resolved"
+            success "Escalations resolved. Continuing..."
+            return 0
+            ;;
+        2|*)
+            info "Escalations remain pending. Will check again before next phase transition."
+            return 1
+            ;;
+    esac
 }
 
 # Send notification when a PR is created
