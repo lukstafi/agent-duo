@@ -51,8 +51,12 @@ DEFAULT_CODER="claude"
 DEFAULT_REVIEWER="codex"
 
 # Allocate ports for a solo session (3 ports: orchestrator, coder, reviewer)
+# Args: peer_sync [base_port]
+# If base_port is provided, uses consecutive ports starting from it (fails if any occupied)
+# Otherwise, dynamically finds 3 consecutive available ports starting from DEFAULT_BASE_PORT
 allocate_ports_solo() {
     local peer_sync="$1"
+    local base_port="${2:-}"
     local ports_file="$peer_sync/ports"
 
     # If ports already allocated, return
@@ -60,12 +64,29 @@ allocate_ports_solo() {
         return 0
     fi
 
-    local base=$DEFAULT_BASE_PORT
     local orchestrator_port coder_port reviewer_port
 
-    orchestrator_port="$(find_available_port "$base")" || die "Could not find available port for orchestrator"
-    coder_port="$(find_available_port "$((orchestrator_port + 1))")" || die "Could not find available port for coder"
-    reviewer_port="$(find_available_port "$((coder_port + 1))")" || die "Could not find available port for reviewer"
+    if [ -n "$base_port" ]; then
+        # User specified a port: use consecutive ports, fail if any occupied
+        orchestrator_port="$base_port"
+        coder_port=$((base_port + 1))
+        reviewer_port=$((base_port + 2))
+
+        if ! is_port_available "$orchestrator_port"; then
+            die "Port $orchestrator_port (orchestrator) is already in use"
+        fi
+        if ! is_port_available "$coder_port"; then
+            die "Port $coder_port (coder) is already in use"
+        fi
+        if ! is_port_available "$reviewer_port"; then
+            die "Port $reviewer_port (reviewer) is already in use"
+        fi
+    else
+        # Dynamic allocation: find 3 consecutive available ports
+        orchestrator_port="$(find_consecutive_ports "$DEFAULT_BASE_PORT" 3)" || die "Could not find 3 consecutive available ports"
+        coder_port=$((orchestrator_port + 1))
+        reviewer_port=$((orchestrator_port + 2))
+    fi
 
     cat > "$ports_file" << EOF
 ORCHESTRATOR_PORT=$orchestrator_port
@@ -175,6 +196,7 @@ cmd_start() {
     local reviewer=$DEFAULT_REVIEWER
     local codex_model=""
     local claude_model=""
+    local base_port=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -193,6 +215,7 @@ cmd_start() {
             --claude-model) claude_model="$2"; shift 2 ;;
             --coder) coder="$2"; shift 2 ;;
             --reviewer) reviewer="$2"; shift 2 ;;
+            --port) base_port="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
             *) feature="$1"; shift ;;
         esac
@@ -456,7 +479,7 @@ start_ttyd_mode_solo() {
     done
 
     # Allocate and load ports
-    allocate_ports_solo "$peer_sync"
+    allocate_ports_solo "$peer_sync" "$base_port"
     get_ports "$peer_sync"
     local orchestrator_port=$ORCHESTRATOR_PORT
     local coder_port=$CODER_PORT
@@ -1721,6 +1744,9 @@ SESSION COMMANDS
           --codex-thinking <level> Codex reasoning effort: low, medium, high (default: high)
           --codex-model <model>  GPT model for Codex (e.g., o3, gpt-4.1)
           --claude-model <model> Claude model (e.g., opus, sonnet)
+          --port <port>          Base port for web terminals (uses 3 consecutive ports)
+                                 If not specified, finds first available consecutive ports.
+                                 Fails if any of the 3 ports are occupied.
 
     run [options]
         Run the orchestrator loop (coder work -> reviewer review -> repeat).

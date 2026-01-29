@@ -97,6 +97,14 @@ else
     test_fail "should return port >= 7680, got: $PORT"
 fi
 
+test_start "find_consecutive_ports finds 3 consecutive ports"
+PORT=$(find_consecutive_ports 7680 3)
+if [ -n "$PORT" ] && [ "$PORT" -ge 7680 ]; then
+    test_pass
+else
+    test_fail "should return port >= 7680, got: $PORT"
+fi
+
 #------------------------------------------------------------------------------
 # Test: Atomic write
 #------------------------------------------------------------------------------

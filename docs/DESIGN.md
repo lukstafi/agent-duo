@@ -304,12 +304,15 @@ agent-duo start myfeature
 
 ```bash
 agent-duo start myfeature
-# Launches web terminals with dynamically allocated ports:
+# Launches web terminals on 3 consecutive ports (default: first available from 7680):
 #   http://localhost:<port>   - Orchestrator
 #   http://localhost:<port+1> - Claude's terminal
 #   http://localhost:<port+2> - Codex's terminal
 # Port assignments stored in .peer-sync/ports
 # PIDs tracked in .peer-sync/pids/ for clean shutdown
+
+agent-duo start myfeature --port 8000
+# Uses fixed ports 8000, 8001, 8002 (fails if any are occupied)
 ```
 
 ## Skills
@@ -402,7 +405,8 @@ Manual cleanup if needed:
 git worktree remove ../myapp-auth-claude
 git worktree remove ../myapp-auth-codex
 tmux kill-session -t duo-auth
-pkill -f "ttyd.*768[12]"
+# Kill ttyd processes (check .peer-sync/ports for actual port numbers)
+pkill -f "ttyd.*<port>"
 ```
 
 ## Supported Agents

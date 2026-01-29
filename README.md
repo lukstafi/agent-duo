@@ -152,7 +152,8 @@ Codex PR:  https://github.com/user/myproject/pull/43
 ### Session Management
 
 ```bash
-agent-duo start <feature>              # Start with ttyd web terminals
+agent-duo start <feature>              # Start with ttyd web terminals (auto-allocates 3 consecutive ports)
+agent-duo start <feature> --port 8000  # Use fixed ports 8000, 8001, 8002 (fails if occupied)
 agent-duo start <feature> --auto-run   # Start and run orchestrator immediately
 agent-duo start <feature> --clarify    # Enable clarify stage (agents propose approaches)
 agent-duo start <feature> --pushback   # Enable pushback stage (agents improve task)

@@ -255,6 +255,37 @@ find_available_port() {
     return 1
 }
 
+# Find N consecutive available ports starting from base
+# Args: base count
+# Returns: the first port of the consecutive range (ports are base..base+count-1)
+find_consecutive_ports() {
+    local base="$1"
+    local count="$2"
+    local port="$base"
+    local max_attempts=100
+    local attempt=0
+
+    while [ "$attempt" -lt "$max_attempts" ]; do
+        local all_available=true
+        for ((i = 0; i < count; i++)); do
+            if ! is_port_available "$((port + i))"; then
+                all_available=false
+                break
+            fi
+        done
+
+        if [ "$all_available" = true ]; then
+            echo "$port"
+            return 0
+        fi
+
+        port=$((port + 1))
+        attempt=$((attempt + 1))
+    done
+
+    return 1
+}
+
 # Get allocated ports from .peer-sync/ports
 get_ports() {
     local peer_sync="$1"

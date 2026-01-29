@@ -54,8 +54,12 @@ DEFAULT_AGENT_A="claude"
 DEFAULT_AGENT_B="codex"
 
 # Allocate ports for a session and store in .peer-sync/ports
+# Args: peer_sync [base_port]
+# If base_port is provided, uses consecutive ports starting from it (fails if any occupied)
+# Otherwise, dynamically finds available ports starting from DEFAULT_BASE_PORT
 allocate_ports() {
     local peer_sync="$1"
+    local base_port="${2:-}"
     local ports_file="$peer_sync/ports"
 
     # If ports already allocated, return
@@ -63,12 +67,29 @@ allocate_ports() {
         return 0
     fi
 
-    local base=$DEFAULT_BASE_PORT
     local orchestrator_port claude_port codex_port
 
-    orchestrator_port="$(find_available_port "$base")" || die "Could not find available port for orchestrator"
-    claude_port="$(find_available_port "$((orchestrator_port + 1))")" || die "Could not find available port for claude"
-    codex_port="$(find_available_port "$((claude_port + 1))")" || die "Could not find available port for codex"
+    if [ -n "$base_port" ]; then
+        # User specified a port: use consecutive ports, fail if any occupied
+        orchestrator_port="$base_port"
+        claude_port=$((base_port + 1))
+        codex_port=$((base_port + 2))
+
+        if ! is_port_available "$orchestrator_port"; then
+            die "Port $orchestrator_port (orchestrator) is already in use"
+        fi
+        if ! is_port_available "$claude_port"; then
+            die "Port $claude_port (claude) is already in use"
+        fi
+        if ! is_port_available "$codex_port"; then
+            die "Port $codex_port (codex) is already in use"
+        fi
+    else
+        # Dynamic allocation: find 3 consecutive available ports
+        orchestrator_port="$(find_consecutive_ports "$DEFAULT_BASE_PORT" 3)" || die "Could not find 3 consecutive available ports"
+        claude_port=$((orchestrator_port + 1))
+        codex_port=$((orchestrator_port + 2))
+    fi
 
     cat > "$ports_file" << EOF
 ORCHESTRATOR_PORT=$orchestrator_port
@@ -668,6 +689,7 @@ cmd_start() {
     local codex_thinking=$DEFAULT_CODEX_THINKING
     local codex_model=""
     local claude_model=""
+    local base_port=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -684,6 +706,7 @@ cmd_start() {
             --codex-thinking) codex_thinking="$2"; shift 2 ;;
             --codex-model) codex_model="$2"; shift 2 ;;
             --claude-model) claude_model="$2"; shift 2 ;;
+            --port) base_port="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
             *) feature="$1"; shift ;;
         esac
@@ -951,7 +974,7 @@ start_ttyd_mode() {
     done
 
     # Allocate and load ports
-    allocate_ports "$peer_sync"
+    allocate_ports "$peer_sync" "$base_port"
     get_ports "$peer_sync"
     local orchestrator_port=$ORCHESTRATOR_PORT
     local claude_port=$CLAUDE_PORT
@@ -2680,11 +2703,14 @@ SESSION COMMANDS
           --codex-thinking <level> Codex reasoning effort: low, medium, high (default: high)
           --codex-model <model>    GPT model for Codex (e.g., o3, gpt-4.1)
           --claude-model <model>   Claude model (e.g., opus, sonnet)
+          --port <port>            Base port for web terminals (uses 3 consecutive ports)
+                                   If not specified, finds first available consecutive ports.
+                                   Fails if any of the 3 ports are occupied.
 
-        With ttyd (default): Creates 3 web terminals (ports allocated dynamically)
-          - Orchestrator: Main project root
-          - Claude: Claude's worktree
-          - Codex: Codex's worktree
+        With ttyd (default): Creates 3 web terminals on consecutive ports
+          - Orchestrator: port (or first available)
+          - Claude: port+1
+          - Codex: port+2
           Port assignments are stored in .peer-sync/ports for the session.
 
         With --no-ttyd: Creates single tmux session with 3 windows
