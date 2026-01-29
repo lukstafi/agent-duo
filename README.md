@@ -263,12 +263,26 @@ See `agent-solo help` for full command reference.
 
 ## Requirements
 
+- **Bash 4.0+** (macOS ships with Bash 3.2; install via `brew install bash`)
 - `git` with worktree support
 - `tmux`
 - `gh` CLI (for PR creation)
 - `ttyd` for web terminals (use `--no-ttyd` to disable)
 - `claude` CLI (Claude Code)
 - `codex` CLI (OpenAI Codex)
+
+### macOS Bash Setup
+
+macOS includes Bash 3.2 for licensing reasons. Install a modern version:
+
+```bash
+brew install bash
+# Add to PATH (for Apple Silicon Macs):
+echo 'export PATH="/opt/homebrew/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+# Verify:
+bash --version  # Should show 5.x
+```
 
 ## Troubleshooting
 

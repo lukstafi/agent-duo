@@ -1,8 +1,21 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # agent-lib.sh - Shared library for agent-duo and agent-solo
+#
+# Requires Bash 4.0+ (for associative arrays, regex matching, etc.)
+# macOS users: install modern bash via Homebrew: brew install bash
 #
 # This file contains common functions used by both agent coordination modes.
 # Source this file from agent-duo or agent-solo scripts.
+
+#------------------------------------------------------------------------------
+# Bash version check
+#------------------------------------------------------------------------------
+
+if ((BASH_VERSINFO[0] < 4)); then
+    echo "Error: Bash 4.0+ required (found ${BASH_VERSION})" >&2
+    echo "macOS users: brew install bash && add /opt/homebrew/bin to PATH" >&2
+    exit 1
+fi
 
 #------------------------------------------------------------------------------
 # Colors for output
@@ -980,7 +993,7 @@ send_clarify_email() {
     local subject="[agent-${mode}] Clarify phase complete: $feature"
     local body=""
 
-    local mode_cap="$(echo "$mode" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
+    local mode_cap="${mode^}"  # Bash 4+ capitalize first letter
     body+="Agent $mode_cap - Clarify Phase Results"
     body+=$'\n'
     body+="=================================="
@@ -1223,7 +1236,7 @@ send_pr_notification() {
     fi
 
     local title="[agent-${mode}] PR created: ${feature}"
-    local agent_cap="$(echo "$agent" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
+    local agent_cap="${agent^}"  # Bash 4+ capitalize first letter
     local message="${agent_cap} has created a PR for ${feature}
 
 $pr_url"
@@ -1306,7 +1319,7 @@ send_pushback_email() {
     local subject="[agent-${mode}] Pushback stage complete: $feature"
     local body=""
 
-    local mode_cap="$(echo "$mode" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
+    local mode_cap="${mode^}"  # Bash 4+ capitalize first letter
     body+="Agent $mode_cap - Pushback Stage Results"
     body+=$'\n'
     body+="=================================="

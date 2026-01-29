@@ -1,5 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # agent-duo - Coordinate two AI coding agents working in parallel
+#
+# Requires Bash 4.0+ (for associative arrays, regex matching, etc.)
+# macOS users: install modern bash via Homebrew: brew install bash
 #
 # Usage: agent-duo <command> [options]
 #

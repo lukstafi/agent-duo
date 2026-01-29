@@ -1,5 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # agent-solo - Coordinate a coder/reviewer AI workflow in a single worktree
+#
+# Requires Bash 4.0+ (for associative arrays, regex matching, etc.)
+# macOS users: install modern bash via Homebrew: brew install bash
 #
 # Usage: agent-solo <command> [options]
 #
