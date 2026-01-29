@@ -1,0 +1,22 @@
+#!/bin/bash
+# Mock gh CLI for testing
+
+case "$1" in
+    pr)
+        case "$2" in
+            create)
+                echo "https://github.com/test/repo/pull/123"
+                ;;
+            view)
+                if [[ "$*" == *"--json"* ]]; then
+                    echo '{"url":"https://github.com/test/repo/pull/123"}'
+                else
+                    echo "Mock PR view"
+                fi
+                ;;
+        esac
+        ;;
+    *)
+        echo "Mock gh: $*"
+        ;;
+esac
