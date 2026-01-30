@@ -2199,58 +2199,69 @@ cmd_run_merge() {
         echo ""
 
         # Check review result
-        if [ -f "$peer_sync/merge-review-${reviewer}.md" ]; then
-            if grep -qi "CHANGES REQUESTED" "$peer_sync/merge-review-${reviewer}.md"; then
-                amend_round=$((amend_round + 1))
-                warn "Review requested changes (round $amend_round/$max_amend_rounds)"
+        if [ ! -f "$peer_sync/merge-review-${reviewer}.md" ]; then
+            # No review file - this is unexpected, notify user and re-trigger review
+            warn "No merge review file found - reviewer may be in bad state"
+            send_notification "Merge review missing" "No review file from $reviewer. Re-triggering review." "medium"
+            # Don't increment amend_round - this is a retry of review, not an amend
+            # Loop will continue and re-trigger duo-merge-review
+            continue
+        fi
 
-                if [ "$amend_round" -ge "$max_amend_rounds" ]; then
-                    warn "Max amend rounds reached. Manual intervention needed."
+        # Check for explicit approval (require "APPROVED" to pass)
+        if grep -qi "APPROVED" "$peer_sync/merge-review-${reviewer}.md" && \
+           ! grep -qi "CHANGES REQUESTED" "$peer_sync/merge-review-${reviewer}.md"; then
+            merge_approved=true
+            success "Merge approved!"
+        else
+            # Either explicit "CHANGES REQUESTED" or ambiguous review
+            amend_round=$((amend_round + 1))
+            if grep -qi "CHANGES REQUESTED" "$peer_sync/merge-review-${reviewer}.md"; then
+                warn "Review requested changes (round $amend_round/$max_amend_rounds)"
+            else
+                warn "Review result ambiguous (no clear APPROVED) - treating as changes requested (round $amend_round/$max_amend_rounds)"
+                send_notification "Ambiguous merge review" "Review from $reviewer unclear. Treating as changes requested." "medium"
+            fi
+
+            if [ "$amend_round" -ge "$max_amend_rounds" ]; then
+                warn "Max amend rounds reached. Manual intervention needed."
+                break
+            fi
+
+            # === AMEND PHASE ===
+            info "=== Merge Amend Phase (round $amend_round) ==="
+
+            atomic_write "$peer_sync/${executor}.status" "merging|$(date +%s)|addressing review feedback"
+            info "Triggering duo-merge-amend for $executor..."
+            trigger_skill "$executor" "$executor_session" "duo-merge-amend"
+
+            # Wait for amend
+            local amend_start=$SECONDS
+            local amend_done=false
+
+            while ! $amend_done; do
+                local elapsed=$((SECONDS - amend_start))
+                local executor_status
+                executor_status="$(get_agent_status "$executor" "$peer_sync")"
+
+                [ "$executor_status" = "merge-done" ] && amend_done=true
+
+                if $amend_done; then
                     break
                 fi
 
-                # === AMEND PHASE ===
-                info "=== Merge Amend Phase (round $amend_round) ==="
+                if [ "$elapsed" -ge "$amend_timeout" ]; then
+                    warn "Merge amend timeout (${amend_timeout}s)"
+                    break
+                fi
 
-                atomic_write "$peer_sync/${executor}.status" "merging|$(date +%s)|addressing review feedback"
-                info "Triggering duo-merge-amend for $executor..."
-                trigger_skill "$executor" "$executor_session" "duo-merge-amend"
+                printf "\r  Waiting for amend... %s=%s (%ds/%ds)  " "$executor" "$executor_status" "$elapsed" "$amend_timeout"
+                sleep "$poll_interval"
+            done
+            echo ""
 
-                # Wait for amend
-                local amend_start=$SECONDS
-                local amend_done=false
-
-                while ! $amend_done; do
-                    local elapsed=$((SECONDS - amend_start))
-                    local executor_status
-                    executor_status="$(get_agent_status "$executor" "$peer_sync")"
-
-                    [ "$executor_status" = "merge-done" ] && amend_done=true
-
-                    if $amend_done; then
-                        break
-                    fi
-
-                    if [ "$elapsed" -ge "$amend_timeout" ]; then
-                        warn "Merge amend timeout (${amend_timeout}s)"
-                        break
-                    fi
-
-                    printf "\r  Waiting for amend... %s=%s (%ds/%ds)  " "$executor" "$executor_status" "$elapsed" "$amend_timeout"
-                    sleep "$poll_interval"
-                done
-                echo ""
-
-                # Clear the old review for next round
-                rm -f "$peer_sync/merge-review-${reviewer}.md"
-            else
-                merge_approved=true
-                success "Merge approved!"
-            fi
-        else
-            # No review file - assume approved
-            merge_approved=true
-            success "Merge complete (no review file found)"
+            # Clear the old review for next round
+            rm -f "$peer_sync/merge-review-${reviewer}.md"
         fi
     done
 

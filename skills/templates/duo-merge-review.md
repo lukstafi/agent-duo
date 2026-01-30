@@ -77,7 +77,9 @@ Were all recommended features cherry-picked? If not, is the omission justified?
 cat > "$PEER_SYNC/merge-review-${MY_NAME}.md" << 'EOF'
 # Merge Review from [MY_NAME]
 
-## Merge Execution: [APPROVED / CHANGES REQUESTED]
+## Merge Execution: APPROVED
+
+(Change to "CHANGES REQUESTED" if issues need fixing)
 
 ## Verification Checklist
 
