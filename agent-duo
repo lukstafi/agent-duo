@@ -165,6 +165,16 @@ cmd_setup() {
         success "Installed skill templates to $installed_templates"
     fi
 
+    # Install shared helper scripts
+    local shared_dir="$HOME/.local/share/agent-duo"
+    mkdir -p "$shared_dir"
+    local shared_templates="$templates_dir/shared"
+    if [ -d "$shared_templates" ]; then
+        cp "$shared_templates"/*.sh "$shared_dir/" 2>/dev/null || true
+        chmod +x "$shared_dir"/*.sh 2>/dev/null || true
+        success "Installed shared scripts to $shared_dir"
+    fi
+
     # Check if ~/.local/bin is in PATH
     if [[ ":$PATH:" != *":$install_dir:"* ]]; then
         warn "Add $install_dir to your PATH:"

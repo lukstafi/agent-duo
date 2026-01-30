@@ -15,39 +15,18 @@ metadata:
 cat "$PEER_SYNC/coder.pr"
 ```
 
-## Fetch PR Comments and Reviews
+## Fetch All PR Feedback
 
-Get your PR number and repo:
+Run the helper script to fetch all comments and reviews (PR-level comments, inline code review comments, and review summaries):
 
 ```bash
 PR_URL=$(cat "$PEER_SYNC/coder.pr")
-PR_NUMBER=$(gh pr view "$PR_URL" --json number -q '.number')
-REPO=$(gh pr view "$PR_URL" --json url -q '.url' | sed -E 's|https://github.com/([^/]+/[^/]+)/pull/.*|\1|')
-```
-
-### 1. PR-level comments (general discussion):
-
-```bash
-gh pr view "$PR_URL" --comments
-```
-
-### 2. Code review comments (attached to specific lines in the diff):
-
-**This is critical** — most substantive feedback appears as inline code comments:
-
-```bash
-gh api "repos/$REPO/pulls/$PR_NUMBER/comments" --jq '.[] | "---\nFile: \(.path):\(.line // .original_line)\nAuthor: \(.user.login)\nComment: \(.body)\n"'
-```
-
-### 3. Review summaries (approve/request changes/comment):
-
-```bash
-gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.body != "") | "---\nReviewer: \(.user.login)\nState: \(.state)\nBody: \(.body)\n"'
+~/.local/share/agent-duo/fetch-pr-feedback.sh "$PR_URL"
 ```
 
 ## Your Task
 
-1. **Review the feedback**: Read through the new comments and reviews
+1. **Review the feedback**: Read through all comments and reviews
 2. **Address concerns**: Make code changes if the feedback is valid
 3. **Respond if needed**: You can reply to comments via `gh pr comment`
 
