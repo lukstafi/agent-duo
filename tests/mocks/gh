@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Mock gh CLI for testing
 
 case "$1" in

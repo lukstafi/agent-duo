@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Unit tests for agent-duo library functions
 # These tests do NOT require real agent CLIs - they test pure bash functions
 

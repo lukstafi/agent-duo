@@ -1429,7 +1429,7 @@ install_notify_hook() {
     local notify_script="$install_dir/agent-duo-and-solo-notify"
 
     cat > "$notify_script" << 'NOTIFY_EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # Unified notify hook for both agent-duo and agent-solo modes
 # Called by agent hooks when they complete a turn
 # Signals the appropriate status based on current phase and mode

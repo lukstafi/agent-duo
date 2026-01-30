@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Integration tests for agent-duo with REAL agent CLIs
 #
 # Prerequisites:
