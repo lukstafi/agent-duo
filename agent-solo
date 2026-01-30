@@ -1404,8 +1404,10 @@ cmd_run() {
             echo "Press Ctrl-C to stop watching."
             echo ""
 
-            # Initialize hash file (first check establishes baseline)
-            get_pr_comment_hash "$pr_url" > "$peer_sync/coder.pr-hash" 2>/dev/null || true
+            # Initialize hash file only if it doesn't exist (preserves baseline across restarts)
+            if [ ! -f "$peer_sync/coder.pr-hash" ]; then
+                get_pr_comment_hash "$pr_url" > "$peer_sync/coder.pr-hash" 2>/dev/null || true
+            fi
 
             while true; do
                 # Check if PR is closed/merged

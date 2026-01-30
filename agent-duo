@@ -2661,9 +2661,13 @@ cmd_run() {
             echo "Press Ctrl-C to stop watching."
             echo ""
 
-            # Initialize hash files (first check establishes baseline)
-            get_pr_comment_hash "$claude_pr" > "$peer_sync/claude.pr-hash" 2>/dev/null || true
-            get_pr_comment_hash "$codex_pr" > "$peer_sync/codex.pr-hash" 2>/dev/null || true
+            # Initialize hash files only if they don't exist (preserves baseline across restarts)
+            if [ ! -f "$peer_sync/claude.pr-hash" ]; then
+                get_pr_comment_hash "$claude_pr" > "$peer_sync/claude.pr-hash" 2>/dev/null || true
+            fi
+            if [ ! -f "$peer_sync/codex.pr-hash" ]; then
+                get_pr_comment_hash "$codex_pr" > "$peer_sync/codex.pr-hash" 2>/dev/null || true
+            fi
 
             while true; do
                 # Check if both PRs are closed/merged
