@@ -99,8 +99,8 @@ Given project directory `myapp` and feature `auth`:
 
 | Concept | Who sets | Values | Purpose |
 |---------|----------|--------|---------|
-| **Phase** | Orchestrator | `clarify`, `pushback`, `work`, `review` | Current stage of the round |
-| **Agent Status** | Agent | `clarifying`, `clarify-done`, `pushing-back`, `pushback-done`, `working`, `done`, `reviewing`, `review-done`, `interrupted`, `error`, `escalated` | What agent is doing |
+| **Phase** | Orchestrator | `clarify`, `pushback`, `work`, `review`, `pr-comments` | Current stage of the round |
+| **Agent Status** | Agent | `clarifying`, `clarify-done`, `pushing-back`, `pushback-done`, `working`, `done`, `reviewing`, `review-done`, `interrupted`, `error`, `escalated`, `pr-created` | What agent is doing |
 | **Session State** | Orchestrator | `active`, `complete` | Overall progress |
 
 ### State Files (in `.peer-sync/`)
@@ -108,7 +108,7 @@ Given project directory `myapp` and feature `auth`:
 ```
 .peer-sync/
 ├── session           # "active" or "complete"
-├── phase             # "clarify", "pushback", "work", or "review"
+├── phase             # "clarify", "pushback", "work", "review", or "pr-comments"
 ├── round             # Current round number (1, 2, 3...)
 ├── feature           # Feature name for this session
 ├── ports             # Port allocations (ORCHESTRATOR_PORT, CLAUDE_PORT, CODEX_PORT)
@@ -124,6 +124,10 @@ Given project directory `myapp` and feature `auth`:
 ├── escalation-claude.md  # Escalation from claude (if any)
 ├── escalation-codex.md   # Escalation from codex (if any)
 ├── escalation-resolved   # Present when escalations have been resolved
+├── claude.pr         # Claude's PR URL (when created)
+├── codex.pr          # Codex's PR URL (when created)
+├── claude.pr-hash    # Hash of claude PR comments (for change detection)
+├── codex.pr-hash     # Hash of codex PR comments (for change detection)
 ├── pids/             # Process IDs for ttyd servers
 └── reviews/          # Review files from each round
     └── round-1-claude-reviews-codex.md
@@ -184,6 +188,24 @@ Given project directory `myapp` and feature `auth`:
 │  8. Orchestrator waits for both review-done                     │
 │                                                                 │
 │  (Repeat for next round or until PRs created)                   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ PR COMMENTS PHASE (automatic after both PRs created)            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. Orchestrator sets phase=pr-comments                         │
+│  2. Polls GitHub PRs for new comments/reviews                   │
+│  3. When new comments detected:                                 │
+│     - Send ntfy notification                                    │
+│     - Trigger duo-pr-comment skill for affected agent           │
+│  4. Agent fetches comments via `gh pr view --json`              │
+│  5. Agent addresses feedback, pushes amendments                 │
+│  6. Agent signals done                                          │
+│  7. Repeat until both PRs are merged/closed                     │
+│                                                                 │
+│  Terminates when: both PRs merged/closed, or Ctrl-C             │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -318,8 +340,8 @@ agent-duo start myfeature --port 8000
 ## Skills
 
 Skills provide phase-specific instructions to agents. Installed to:
-- Claude: `~/.claude/commands/duo-{work,review,clarify,pushback,amend}.md`
-- Codex: `~/.codex/skills/duo-{work,review,clarify,pushback,amend}/SKILL.md`
+- Claude: `~/.claude/commands/duo-{work,review,clarify,pushback,amend,pr-comment}.md`
+- Codex: `~/.codex/skills/duo-{work,review,clarify,pushback,amend,pr-comment}/SKILL.md`
 
 Key skill behaviors:
 - **Clarify phase**: Propose high-level approach, ask clarifying questions, signal `clarify-done`
@@ -327,6 +349,7 @@ Key skill behaviors:
 - **Work phase**: Implement solution, signal `done` when ready
 - **Amend phase**: For agents with PRs — review peer feedback and amend PR if warranted
 - **Review phase**: Read peer's worktree via git, write review, signal `review-done`; agents with PRs still participate
+- **PR Comment phase**: Fetch GitHub PR comments via `gh pr view`, address feedback, push amendments
 - **Divergence**: Maintain distinct approach from peer
 - **Interrupts**: If interrupted, gracefully yield and continue next round
 
@@ -438,12 +461,13 @@ Agent-solo is an alternative mode where one agent codes and another reviews in a
 1. **Coder** implements the solution (work phase)
 2. **Reviewer** examines code and writes review with verdict (APPROVE/REQUEST_CHANGES)
 3. If approved: create PR. If changes requested: loop continues.
+4. After PR created: monitor for GitHub comments and address feedback
 
 **Key differences from duo mode:**
 - Single worktree (both agents work on same branch)
 - Sequential rather than parallel work
 - Clear coder/reviewer roles (swappable with `--coder` and `--reviewer`)
-- Skills: `solo-coder-{work,clarify}.md`, `solo-reviewer-{work,clarify,pushback}.md`
+- Skills: `solo-coder-{work,clarify}.md`, `solo-reviewer-{work,clarify,pushback}.md`, `solo-pr-comment.md`
 
 ## Design Principles
 

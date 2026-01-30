@@ -180,18 +180,20 @@ cmd_setup() {
     install_skill "$templates_dir/duo-clarify.md" "$claude_skills/duo-clarify.md" "/duo-clarify"
     install_skill "$templates_dir/duo-pushback.md" "$claude_skills/duo-pushback.md" "/duo-pushback"
     install_skill "$templates_dir/duo-amend.md" "$claude_skills/duo-amend.md" "/duo-amend"
+    install_skill "$templates_dir/duo-pr-comment.md" "$claude_skills/duo-pr-comment.md" "/duo-pr-comment"
     success "Installed Claude skills to $claude_skills"
 
     # Install Codex skills (uses $command syntax)
     # Codex expects skills as directories with SKILL.md inside
     local codex_skills="$HOME/.codex/skills"
-    mkdir -p "$codex_skills/duo-work" "$codex_skills/duo-review" "$codex_skills/duo-clarify" "$codex_skills/duo-pushback" "$codex_skills/duo-amend"
+    mkdir -p "$codex_skills/duo-work" "$codex_skills/duo-review" "$codex_skills/duo-clarify" "$codex_skills/duo-pushback" "$codex_skills/duo-amend" "$codex_skills/duo-pr-comment"
 
     install_skill "$templates_dir/duo-work.md" "$codex_skills/duo-work/SKILL.md" "\$duo-work"
     install_skill "$templates_dir/duo-review.md" "$codex_skills/duo-review/SKILL.md" "\$duo-review"
     install_skill "$templates_dir/duo-clarify.md" "$codex_skills/duo-clarify/SKILL.md" "\$duo-clarify"
     install_skill "$templates_dir/duo-pushback.md" "$codex_skills/duo-pushback/SKILL.md" "\$duo-pushback"
     install_skill "$templates_dir/duo-amend.md" "$codex_skills/duo-amend/SKILL.md" "\$duo-amend"
+    install_skill "$templates_dir/duo-pr-comment.md" "$codex_skills/duo-pr-comment/SKILL.md" "\$duo-pr-comment"
     success "Installed Codex skills to $codex_skills"
 
     # Install unified notify hook script and configure agent hooks
@@ -2610,6 +2612,124 @@ cmd_run() {
         warn "Reached max rounds ($max_rounds)"
     fi
 
+    # PR Comment Watch Phase
+    # After both PRs are created, monitor for new comments/reviews
+    # This also works for backward compatibility: running on old sessions with PRs
+    if has_pr "claude" "$peer_sync" && has_pr "codex" "$peer_sync"; then
+        local claude_pr codex_pr
+        claude_pr="$(cat "$peer_sync/claude.pr")"
+        codex_pr="$(cat "$peer_sync/codex.pr")"
+
+        # Check if both PRs are already closed/merged before entering watch phase
+        local claude_open=false codex_open=false
+        is_pr_open "$claude_pr" && claude_open=true
+        is_pr_open "$codex_pr" && codex_open=true
+
+        if ! $claude_open && ! $codex_open; then
+            info "Both PRs are already closed/merged. Skipping PR watch phase."
+        else
+            echo ""
+            info "=== PR Comment Watch Phase ==="
+            echo "pr-comments" > "$peer_sync/phase"
+
+            echo "Monitoring PRs for new comments..."
+            echo "  Claude: $claude_pr"
+            echo "  Codex:  $codex_pr"
+            echo ""
+            echo "Press Ctrl-C to stop watching."
+            echo ""
+
+            # Initialize hash files (first check establishes baseline)
+            get_pr_comment_hash "$claude_pr" > "$peer_sync/claude.pr-hash" 2>/dev/null || true
+            get_pr_comment_hash "$codex_pr" > "$peer_sync/codex.pr-hash" 2>/dev/null || true
+
+            while true; do
+                # Check if both PRs are closed/merged
+                claude_open=false codex_open=false
+                is_pr_open "$claude_pr" && claude_open=true
+                is_pr_open "$codex_pr" && codex_open=true
+
+                if ! $claude_open && ! $codex_open; then
+                    success "Both PRs are closed/merged. Session complete!"
+                    break
+                fi
+
+                # Check for new comments on each open PR
+                local claude_needs_attention=false
+                local codex_needs_attention=false
+
+                if $claude_open && pr_has_new_comments "claude" "$peer_sync"; then
+                    claude_needs_attention=true
+                    info "New comments on Claude's PR!"
+                    send_pr_comment_notification "claude" "$feature" "$claude_pr" "duo"
+                fi
+
+                if $codex_open && pr_has_new_comments "codex" "$peer_sync"; then
+                    codex_needs_attention=true
+                    info "New comments on Codex's PR!"
+                    send_pr_comment_notification "codex" "$feature" "$codex_pr" "duo"
+                fi
+
+                # Trigger pr-comment skill for agents with new comments
+                if $claude_needs_attention; then
+                    check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+                    atomic_write "$peer_sync/claude.status" "working|$(date +%s)|addressing PR comments"
+                    info "Triggering duo-pr-comment for claude..."
+                    trigger_skill "claude" "$claude_session" "duo-pr-comment"
+                fi
+
+                if $codex_needs_attention; then
+                    check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+                    atomic_write "$peer_sync/codex.status" "working|$(date +%s)|addressing PR comments"
+                    info "Triggering duo-pr-comment for codex..."
+                    trigger_skill "codex" "$codex_session" "duo-pr-comment"
+                fi
+
+                # Wait for agents to finish if they were triggered
+                if $claude_needs_attention || $codex_needs_attention; then
+                    local pr_watch_start=$SECONDS
+                    local claude_done=true codex_done=true
+                    $claude_needs_attention && claude_done=false
+                    $codex_needs_attention && codex_done=false
+
+                    while ! ($claude_done && $codex_done); do
+                        local elapsed=$((SECONDS - pr_watch_start))
+
+                        local claude_status codex_status
+                        claude_status="$(get_agent_status "claude" "$peer_sync")"
+                        codex_status="$(get_agent_status "codex" "$peer_sync")"
+
+                        # Check for completion
+                        if ! $claude_done && [[ "$claude_status" =~ ^(done|pr-created)$ ]]; then
+                            claude_done=true
+                        fi
+                        if ! $codex_done && [[ "$codex_status" =~ ^(done|pr-created)$ ]]; then
+                            codex_done=true
+                        fi
+
+                        if $claude_done && $codex_done; then
+                            break
+                        fi
+
+                        # Check timeout
+                        if [ "$elapsed" -ge "$DEFAULT_PR_WATCH_TIMEOUT" ]; then
+                            warn "PR comment response timeout (${DEFAULT_PR_WATCH_TIMEOUT}s)"
+                            break
+                        fi
+
+                        printf "\r  Waiting... claude=%s codex=%s (%ds)  " "$claude_status" "$codex_status" "$elapsed"
+                        sleep "$poll_interval"
+                    done
+                    echo ""
+                fi
+
+                # Poll interval before next check
+                printf "\r  Watching for PR comments... (Ctrl-C to stop)  "
+                sleep "$poll_interval"
+            done
+        fi
+    fi
+
     echo ""
     info "=== Final Status ==="
     cmd_status
@@ -2725,8 +2845,9 @@ SESSION COMMANDS
           User can accept, reject, or modify the proposed changes.
 
     run [options]
-        Run the orchestrator loop (work -> review -> work...).
+        Run the orchestrator loop (work -> review -> work... -> pr-comments).
         Automatically manages phase transitions and timeouts.
+        After both PRs are created, monitors for new GitHub comments/reviews.
         Not needed if using 'start --auto-run'.
 
         Options:

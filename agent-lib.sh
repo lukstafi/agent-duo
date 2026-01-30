@@ -1642,3 +1642,93 @@ configure_claude_notify() {
         success "Created Claude settings with Stop hook"
     fi
 }
+
+#------------------------------------------------------------------------------
+# PR Comment Monitoring
+#------------------------------------------------------------------------------
+
+# Default timeout for PR watch phase (in seconds)
+DEFAULT_PR_WATCH_TIMEOUT=600  # 10 minutes per response cycle
+
+# Get PR comment/review count and latest update timestamp as a hash
+# Usage: get_pr_comment_hash <pr_url>
+# Returns: "comment_count|review_count|updated_at" or empty if failed
+get_pr_comment_hash() {
+    local pr_url="$1"
+
+    local json
+    json="$(gh pr view "$pr_url" --json comments,reviews,updatedAt 2>/dev/null)" || return 1
+
+    local comment_count review_count updated_at
+    comment_count="$(echo "$json" | jq -r '.comments | length' 2>/dev/null)" || comment_count=0
+    review_count="$(echo "$json" | jq -r '.reviews | length' 2>/dev/null)" || review_count=0
+    updated_at="$(echo "$json" | jq -r '.updatedAt' 2>/dev/null)" || updated_at=""
+
+    echo "${comment_count}|${review_count}|${updated_at}"
+}
+
+# Check if PR has new comments since last check
+# Usage: pr_has_new_comments <agent> <peer_sync>
+# Returns: 0 if new comments, 1 if no changes or error
+pr_has_new_comments() {
+    local agent="$1"
+    local peer_sync="$2"
+
+    local pr_file="$peer_sync/${agent}.pr"
+    local hash_file="$peer_sync/${agent}.pr-hash"
+
+    [ -f "$pr_file" ] || return 1
+
+    local pr_url
+    pr_url="$(cat "$pr_file")"
+
+    local current_hash
+    current_hash="$(get_pr_comment_hash "$pr_url")" || return 1
+
+    # Check against last known hash
+    if [ -f "$hash_file" ]; then
+        local last_hash
+        last_hash="$(cat "$hash_file")"
+        if [ "$current_hash" = "$last_hash" ]; then
+            return 1  # No changes
+        fi
+    fi
+
+    # Update hash file and return success (new comments)
+    echo "$current_hash" > "$hash_file"
+    return 0
+}
+
+# Check if PR is still open (not merged or closed)
+# Usage: is_pr_open <pr_url>
+# Returns: 0 if open, 1 if merged/closed
+is_pr_open() {
+    local pr_url="$1"
+
+    local state
+    state="$(gh pr view "$pr_url" --json state -q '.state' 2>/dev/null)" || return 1
+
+    [ "$state" = "OPEN" ]
+}
+
+# Send notification when new PR comments are detected
+# Usage: send_pr_comment_notification <agent> <feature> <pr_url> <mode>
+send_pr_comment_notification() {
+    local agent="$1"
+    local feature="$2"
+    local pr_url="$3"
+    local mode="${4:-duo}"
+
+    # Only send via ntfy
+    if ! get_ntfy_topic >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local title="[agent-${mode}] New PR comments: ${feature}"
+    local agent_cap="${agent^}"
+    local message="${agent_cap}'s PR has new comments/reviews
+
+$pr_url"
+
+    send_ntfy "$title" "$message" "default" "speech_balloon,link" 2>/dev/null || true
+}
