@@ -2661,11 +2661,16 @@ cmd_run() {
             echo "Press Ctrl-C to stop watching."
             echo ""
 
-            # Initialize hash files only if they don't exist (preserves baseline across restarts)
+            # Check if this is first entry to PR comment phase (no hash files yet)
+            # If so, assume existing comments/reviews need to be processed
+            local claude_first_entry=false
+            local codex_first_entry=false
             if [ ! -f "$peer_sync/claude.pr-hash" ]; then
+                claude_first_entry=true
                 get_pr_comment_hash "$claude_pr" > "$peer_sync/claude.pr-hash" 2>/dev/null || true
             fi
             if [ ! -f "$peer_sync/codex.pr-hash" ]; then
+                codex_first_entry=true
                 get_pr_comment_hash "$codex_pr" > "$peer_sync/codex.pr-hash" 2>/dev/null || true
             fi
 
@@ -2681,19 +2686,46 @@ cmd_run() {
                 fi
 
                 # Check for new comments on each open PR
+                # On first entry, trigger if PR has any reviews (comment_count|review_count|...)
                 local claude_needs_attention=false
                 local codex_needs_attention=false
 
-                if $claude_open && pr_has_new_comments "claude" "$peer_sync"; then
-                    claude_needs_attention=true
-                    info "New comments on Claude's PR!"
-                    send_pr_comment_notification "claude" "$feature" "$claude_pr" "duo"
+                if $claude_open; then
+                    if $claude_first_entry; then
+                        # First entry: check if PR has any reviews to process
+                        local claude_hash
+                        claude_hash="$(cat "$peer_sync/claude.pr-hash" 2>/dev/null)" || claude_hash=""
+                        local claude_reviews="${claude_hash#*|}"  # remove comment count
+                        claude_reviews="${claude_reviews%%|*}"    # extract review count
+                        if [ -n "$claude_reviews" ] && [ "$claude_reviews" != "0" ]; then
+                            claude_needs_attention=true
+                            info "Claude's PR has $claude_reviews review(s) to process"
+                        fi
+                        claude_first_entry=false
+                    elif pr_has_new_comments "claude" "$peer_sync"; then
+                        claude_needs_attention=true
+                        info "New comments on Claude's PR!"
+                        send_pr_comment_notification "claude" "$feature" "$claude_pr" "duo"
+                    fi
                 fi
 
-                if $codex_open && pr_has_new_comments "codex" "$peer_sync"; then
-                    codex_needs_attention=true
-                    info "New comments on Codex's PR!"
-                    send_pr_comment_notification "codex" "$feature" "$codex_pr" "duo"
+                if $codex_open; then
+                    if $codex_first_entry; then
+                        # First entry: check if PR has any reviews to process
+                        local codex_hash
+                        codex_hash="$(cat "$peer_sync/codex.pr-hash" 2>/dev/null)" || codex_hash=""
+                        local codex_reviews="${codex_hash#*|}"  # remove comment count
+                        codex_reviews="${codex_reviews%%|*}"    # extract review count
+                        if [ -n "$codex_reviews" ] && [ "$codex_reviews" != "0" ]; then
+                            codex_needs_attention=true
+                            info "Codex's PR has $codex_reviews review(s) to process"
+                        fi
+                        codex_first_entry=false
+                    elif pr_has_new_comments "codex" "$peer_sync"; then
+                        codex_needs_attention=true
+                        info "New comments on Codex's PR!"
+                        send_pr_comment_notification "codex" "$feature" "$codex_pr" "duo"
+                    fi
                 fi
 
                 # Trigger pr-comment skill for agents with new comments

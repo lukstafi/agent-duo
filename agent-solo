@@ -1404,8 +1404,11 @@ cmd_run() {
             echo "Press Ctrl-C to stop watching."
             echo ""
 
-            # Initialize hash file only if it doesn't exist (preserves baseline across restarts)
+            # Check if this is first entry to PR comment phase (no hash file yet)
+            # If so, assume existing comments/reviews need to be processed
+            local first_entry=false
             if [ ! -f "$peer_sync/coder.pr-hash" ]; then
+                first_entry=true
                 get_pr_comment_hash "$pr_url" > "$peer_sync/coder.pr-hash" 2>/dev/null || true
             fi
 
@@ -1417,9 +1420,26 @@ cmd_run() {
                 fi
 
                 # Check for new comments
-                if pr_has_new_comments "coder" "$peer_sync"; then
+                # On first entry, trigger if PR has any reviews to process
+                local needs_attention=false
+                if $first_entry; then
+                    # First entry: check if PR has any reviews to process
+                    local pr_hash
+                    pr_hash="$(cat "$peer_sync/coder.pr-hash" 2>/dev/null)" || pr_hash=""
+                    local review_count="${pr_hash#*|}"  # remove comment count
+                    review_count="${review_count%%|*}"  # extract review count
+                    if [ -n "$review_count" ] && [ "$review_count" != "0" ]; then
+                        needs_attention=true
+                        info "PR has $review_count review(s) to process"
+                    fi
+                    first_entry=false
+                elif pr_has_new_comments "coder" "$peer_sync"; then
+                    needs_attention=true
                     info "New comments on PR!"
                     send_pr_comment_notification "coder" "$feature" "$pr_url" "solo"
+                fi
+
+                if $needs_attention; then
 
                     # Trigger pr-comment skill for coder
                     check_tui_health "$coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
