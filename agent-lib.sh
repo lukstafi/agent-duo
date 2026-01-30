@@ -467,18 +467,8 @@ restart_agent_tui() {
 
     info "Starting $agent TUI..."
 
-    # Re-export environment variables (in case session was recreated)
-    local peer_name
-    case "$agent" in
-        claude) peer_name="codex" ;;
-        codex) peer_name="claude" ;;
-        *) peer_name="unknown" ;;
-    esac
-
-    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='$agent'" "PEER_NAME='$peer_name'" "PEER_WORKTREE='$peer_worktree'" "FEATURE='$feature'"; do
-        tmux send-keys -t "$session" "export $var"
-        tmux send-keys -t "$session" C-m
-    done
+    # Note: Environment variables should already be set by cmd_restart or cmd_start
+    # when the tmux session is created. We don't re-export here to avoid duplication.
 
     # Start the agent CLI
     local agent_cmd
