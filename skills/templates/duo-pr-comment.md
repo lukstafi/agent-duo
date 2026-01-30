@@ -42,7 +42,11 @@ git push
 
 ### If no changes needed:
 
-That's fine — just signal done. You may want to reply to comments explaining your reasoning.
+**You must post a PR comment explaining why** — e.g., the issue is already addressed elsewhere in the codebase, or the reviewer's concern is based on a misunderstanding. This keeps the conversation transparent.
+
+```bash
+gh pr comment "$PR_URL" --body "Regarding the feedback: <your explanation of why no changes are needed>"
+```
 
 ## Before You Stop
 
