@@ -1785,7 +1785,9 @@ Then **STOP and wait**.
 EOF
 }
 
-cmd_merge() {
+# Run merge orchestration - starts fresh agent sessions for unbiased voting
+# Called from orchestrator terminal via cmd_merge or automatic trigger
+cmd_run_merge() {
     local root
     root="$(get_project_root)"
     local peer_sync="$root/.peer-sync"
@@ -1821,19 +1823,72 @@ cmd_merge() {
     rm -f "$peer_sync/merge-vote-claude.md" "$peer_sync/merge-vote-codex.md"
     rm -f "$peer_sync/merge-decision"
 
-    # Get tmux session info
     local session_name="duo-${feature}"
-    local claude_session codex_session
 
+    # Find existing agent sessions
+    local claude_session codex_session
     if tmux has-session -t "$session_name" 2>/dev/null; then
+        # Non-ttyd mode: windows in main session
         claude_session="${session_name}:claude"
         codex_session="${session_name}:codex"
     elif tmux has-session -t "${session_name}-claude" 2>/dev/null; then
+        # ttyd mode: separate sessions
         claude_session="${session_name}-claude"
         codex_session="${session_name}-codex"
     else
-        die "No tmux sessions found. Start a session first with 'agent-duo restart'."
+        die "No agent sessions found. Run 'agent-duo restart' first."
     fi
+
+    # Load codex thinking effort from session
+    local codex_thinking
+    codex_thinking="$(cat "$peer_sync/codex-thinking" 2>/dev/null)" || codex_thinking="$DEFAULT_CODEX_THINKING"
+
+    # Restart agents with fresh context for unbiased merge vote
+    # We keep the tmux sessions (for ttyd) but restart the agent CLIs
+    info "Restarting agents with fresh context for unbiased merge vote..."
+
+    # Stop existing agents: Ctrl-C to interrupt, then exit
+    for session in "$claude_session" "$codex_session"; do
+        tmux send-keys -t "$session" C-c
+        sleep 0.3
+        tmux send-keys -t "$session" C-c
+        sleep 0.3
+        # Send /exit for Claude Code, or just exit for shell
+        tmux send-keys -t "$session" "/exit"
+        tmux send-keys -t "$session" C-m
+        sleep 0.5
+    done
+
+    # Wait for agents to fully exit
+    sleep 2
+
+    # Change to project root (main branch) and set up fresh environment
+    for session in "$claude_session" "$codex_session"; do
+        tmux send-keys -t "$session" "cd '$root'"
+        tmux send-keys -t "$session" C-m
+    done
+
+    # Set environment variables for both agents
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "FEATURE='$feature'"; do
+        tmux send-keys -t "$claude_session" "export $var"
+        tmux send-keys -t "$claude_session" C-m
+    done
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "FEATURE='$feature'"; do
+        tmux send-keys -t "$codex_session" "export $var"
+        tmux send-keys -t "$codex_session" C-m
+    done
+
+    # Start fresh agent CLIs
+    info "Starting fresh agent CLIs..."
+    tmux send-keys -t "$claude_session" "$(get_agent_cmd claude)"
+    tmux send-keys -t "$claude_session" C-m
+    tmux send-keys -t "$codex_session" "$(get_agent_cmd codex "$codex_thinking")"
+    tmux send-keys -t "$codex_session" C-m
+
+    # Wait for agents to initialize
+    sleep 3
+    success "Fresh agent sessions started on main branch."
+    echo ""
 
     # Timeouts
     local vote_timeout="${VOTE_TIMEOUT:-600}"
@@ -2148,6 +2203,77 @@ cmd_merge() {
     if [ -f "$peer_sync/merge-review-${reviewer}.md" ]; then
         echo "See merge review: $peer_sync/merge-review-${reviewer}.md"
     fi
+}
+
+#------------------------------------------------------------------------------
+# Command: merge (user-level command - sends merge to orchestrator terminal)
+#------------------------------------------------------------------------------
+
+cmd_merge() {
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+    local feature
+    feature="$(get_feature)"
+
+    # Validate session and PRs exist
+    if [ ! -d "$peer_sync" ]; then
+        die "No session found. Start with 'agent-duo start <feature>' first."
+    fi
+
+    if ! has_pr "claude" "$peer_sync" || ! has_pr "codex" "$peer_sync"; then
+        die "Both PRs must exist before merge phase. Run 'agent-duo pr <agent>' first."
+    fi
+
+    local claude_pr codex_pr
+    claude_pr="$(cat "$peer_sync/claude.pr")"
+    codex_pr="$(cat "$peer_sync/codex.pr")"
+
+    info "=== Starting Merge Phase ==="
+    echo "Feature: $feature"
+    echo "Claude PR: $claude_pr"
+    echo "Codex PR:  $codex_pr"
+    echo ""
+
+    # Check if PRs are still open
+    local claude_open=false codex_open=false
+    is_pr_open "$claude_pr" && claude_open=true
+    is_pr_open "$codex_pr" && codex_open=true
+
+    if ! $claude_open && ! $codex_open; then
+        die "Both PRs are already closed/merged. Nothing to do."
+    fi
+
+    # Find orchestrator session
+    local session_name="duo-${feature}"
+    local orchestrator_session=""
+
+    if tmux has-session -t "${session_name}-orchestrator" 2>/dev/null; then
+        orchestrator_session="${session_name}-orchestrator"
+    elif tmux has-session -t "$session_name" 2>/dev/null; then
+        # Non-ttyd mode: orchestrator is a window in the main session
+        orchestrator_session="${session_name}:orchestrator"
+    else
+        die "No orchestrator session found. Run 'agent-duo restart' first."
+    fi
+
+    info "Sending merge command to orchestrator terminal..."
+
+    # Send Ctrl-C to ensure the terminal is ready (cancel any running command)
+    tmux send-keys -t "$orchestrator_session" C-c
+    sleep 0.5
+
+    # Send the run-merge command
+    tmux send-keys -t "$orchestrator_session" "agent-duo run-merge"
+    tmux send-keys -t "$orchestrator_session" C-m
+
+    success "Merge command sent to orchestrator."
+    echo ""
+    echo "The orchestrator terminal will:"
+    echo "  1. Start fresh agent sessions for unbiased voting"
+    echo "  2. Run the vote → debate → execute → review flow"
+    echo ""
+    echo "Monitor progress in the orchestrator terminal (ttyd or tmux)."
 }
 
 #------------------------------------------------------------------------------
@@ -3244,6 +3370,21 @@ cmd_run() {
                     break
                 fi
 
+                # Check for "Proceed to merge" trigger in either PR
+                local merge_triggered=false
+                if pr_has_merge_trigger "$claude_pr" || pr_has_merge_trigger "$codex_pr"; then
+                    merge_triggered=true
+                fi
+
+                if $merge_triggered; then
+                    echo ""
+                    success "Merge trigger detected ('Proceed to merge' comment found)!"
+                    echo ""
+                    info "Transitioning to merge phase..."
+                    cmd_run_merge
+                    break
+                fi
+
                 # Check for new comments on each open PR
                 # On first entry, trigger if PR has any reviews (comment_count|review_count|...)
                 local claude_needs_attention=false
@@ -3512,8 +3653,20 @@ SESSION COMMANDS
 
     merge
         Start merge phase to consolidate both PRs into main.
+        Sends the merge command to the orchestrator terminal, which then
+        starts fresh agent sessions (unbiased by original implementation).
         Both agents vote on which PR to merge, debate if needed,
         then the losing agent merges and cherry-picks features.
+        Requires both PRs to exist.
+
+        The merge phase can also be triggered automatically during the
+        PR comment watch phase by adding a comment containing "Proceed
+        to merge" on either PR.
+
+    run-merge
+        Run merge orchestration directly (for use in orchestrator terminal).
+        Starts fresh agent sessions on main branch for unbiased voting,
+        then runs the vote → debate → execute → review flow.
         Requires both PRs to exist.
 
     cleanup [--full]
@@ -3648,6 +3801,7 @@ main() {
         escalate-resolve) cmd_escalate_resolve "$@" ;;
         pr)          cmd_pr "$@" ;;
         merge)       cmd_merge "$@" ;;
+        run-merge)   cmd_run_merge "$@" ;;
         cleanup)     cmd_cleanup "$@" ;;
         setup)       cmd_setup "$@" ;;
         doctor)      cmd_doctor "$@" ;;

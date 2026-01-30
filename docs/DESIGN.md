@@ -53,7 +53,8 @@ agent-duo restart [--auto-run]  # Recover session after crash/restart
 agent-duo status                # Show session state
 agent-duo confirm               # Confirm clarify/pushback phase, proceed
 agent-duo pr <agent>            # Create PR for agent's solution
-agent-duo merge                 # Start merge phase to consolidate PRs
+agent-duo merge                 # Start merge phase (fresh sessions)
+agent-duo run-merge             # Run merge with existing sessions
 agent-duo cleanup [--full]      # Remove worktrees (--full: also state)
 agent-duo setup                 # Install agent-duo to PATH and skills
 agent-duo doctor                # Check system configuration
@@ -214,11 +215,25 @@ Given project directory `myapp` and feature `auth`:
 │                                                                 │
 │  Terminates when: both PRs merged/closed, or Ctrl-C             │
 │                                                                 │
+│  AUTOMATIC MERGE TRIGGER                                        │
+│  ───────────────────────                                        │
+│  If a comment containing "Proceed to merge" is detected on      │
+│  either PR, the orchestrator automatically transitions to       │
+│  the merge phase with fresh agent sessions.                     │
+│                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
-│ MERGE PHASE (user-initiated: agent-duo merge)                   │
+│ MERGE PHASE                                                     │
 ├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Three ways to trigger merge:                                   │
+│  1. `agent-duo merge` - User command (from any terminal),       │
+│     sends run-merge to orchestrator terminal                    │
+│  2. `agent-duo run-merge` - Orchestrator command, starts fresh  │
+│     agent sessions and runs merge flow directly                 │
+│  3. Automatic - "Proceed to merge" comment on PR triggers it    │
+│  All methods start fresh sessions for unbiased voting.          │
 │                                                                 │
 │  VOTE PHASE                                                     │
 │  ──────────                                                     │

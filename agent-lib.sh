@@ -1702,6 +1702,24 @@ is_pr_open() {
     [ "$state" = "OPEN" ]
 }
 
+# Check if PR has "Proceed to merge" comment
+# Usage: pr_has_merge_trigger <pr_url>
+# Returns: 0 if trigger found, 1 otherwise
+pr_has_merge_trigger() {
+    local pr_url="$1"
+
+    # Fetch all comments and look for the trigger phrase
+    local comments
+    comments="$(gh pr view "$pr_url" --json comments -q '.comments[].body' 2>/dev/null)" || return 1
+
+    # Case-insensitive search for "Proceed to merge" or similar variations
+    if echo "$comments" | grep -qi "proceed to merge"; then
+        return 0
+    fi
+
+    return 1
+}
+
 # Send notification when new PR comments are detected
 # Usage: send_pr_comment_notification <agent> <feature> <pr_url> <mode>
 send_pr_comment_notification() {
