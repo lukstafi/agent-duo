@@ -130,15 +130,18 @@ Given project directory `myapp` and feature `auth`:
 ├── codex.pr          # Codex's PR URL (when created)
 ├── claude.pr-hash    # Hash of claude PR comments (for change detection)
 ├── codex.pr-hash     # Hash of codex PR comments (for change detection)
-├── merge-round       # Current merge debate round (1, 2)
-├── merge-vote-claude.md  # Claude's merge vote and analysis
-├── merge-vote-codex.md   # Codex's merge vote and analysis
+├── merge-round       # Current merge debate round (0=initial, 1-2=debate)
 ├── merge-decision    # Final decision: "claude" or "codex"
 ├── merge-review-claude.md  # Claude's merge review (if reviewer)
 ├── merge-review-codex.md   # Codex's merge review (if reviewer)
 ├── pids/             # Process IDs for ttyd servers
-└── reviews/          # Review files from each round
-    └── round-1-claude-reviews-codex.md
+├── reviews/          # Review files from each round
+│   └── round-1-claude-reviews-codex.md
+└── merge-votes/      # Versioned merge votes
+    ├── round-0-claude-vote.md   # Claude's initial vote
+    ├── round-0-codex-vote.md    # Codex's initial vote
+    ├── round-1-claude-vote.md   # Claude's debate response (if needed)
+    └── round-1-codex-vote.md    # Codex's debate response (if needed)
 ```
 
 ### Flow
@@ -237,10 +240,10 @@ Given project directory `myapp` and feature `auth`:
 │                                                                 │
 │  VOTE PHASE                                                     │
 │  ──────────                                                     │
-│  1. Orchestrator sets phase=merge                               │
+│  1. Orchestrator sets phase=merge, merge-round=0                │
 │  2. Both agents analyze both PRs (status: voting)               │
 │     - Fresh sessions, no bias from original implementation      │
-│     - Write analysis to .peer-sync/merge-vote-{agent}.md        │
+│     - Write vote to .peer-sync/merge-votes/round-0-{agent}-vote.md │
 │  3. Agents vote: "claude" or "codex" (status: vote-done)        │
 │                                                                 │
 │  CONSENSUS CHECK                                                │
@@ -251,6 +254,7 @@ Given project directory `myapp` and feature `auth`:
 │  DEBATE PHASE (if needed)                                       │
 │  ────────────                                                   │
 │  6. Agents read peer's vote, revise or defend (status: debating)│
+│     - Each round creates new versioned vote file (round-N)      │
 │  7. After 2 rounds, if still no consensus → escalate to user    │
 │                                                                 │
 │  EXECUTION PHASE                                                │

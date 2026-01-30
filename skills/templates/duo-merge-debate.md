@@ -26,32 +26,35 @@ You and your peer voted for different PRs. This debate phase allows you to:
 
 ## Your Task
 
-### 1. Read Your Peer's Vote
+### 1. Read Your Peer's Vote and Your Previous Vote
 
 ```bash
-cat "$PEER_SYNC/merge-vote-${PEER_NAME}.md"
+ROUND=$(cat "$PEER_SYNC/merge-round")
+PREV_ROUND=$((ROUND - 1))
+
+# Read your peer's vote from previous round
+cat "$PEER_SYNC/merge-votes/round-${PREV_ROUND}-${PEER_NAME}-vote.md"
+
+# Read your previous vote
+cat "$PEER_SYNC/merge-votes/round-${PREV_ROUND}-${MY_NAME}-vote.md"
 ```
 
-### 2. Read Your Previous Vote
-
-```bash
-cat "$PEER_SYNC/merge-vote-${MY_NAME}.md"
-```
-
-### 3. Consider the Arguments
+### 2. Consider the Arguments
 
 Think carefully:
 - Did your peer identify strengths you missed?
 - Did they raise valid concerns about your choice?
 - Are their cherry-pick suggestions valuable regardless of which PR wins?
 
-### 4. Write Your Debate Response
+### 3. Write Your Debate Response
 
-Overwrite your vote file with your updated position:
+Create a new vote file for this debate round:
 
 ```bash
-cat > "$PEER_SYNC/merge-vote-${MY_NAME}.md" << 'EOF'
-# Merge Vote from [MY_NAME] (Debate Round [N])
+ROUND=$(cat "$PEER_SYNC/merge-round")
+
+cat > "$PEER_SYNC/merge-votes/round-${ROUND}-${MY_NAME}-vote.md" << 'EOF'
+# Merge Vote from [MY_NAME] (Debate Round [ROUND])
 
 ## Response to [PEER_NAME]'s Arguments
 
@@ -75,7 +78,7 @@ EOF
 
 Edit the file with actual content.
 
-### 5. Signal Completion
+### 4. Signal Completion
 
 ```bash
 agent-duo signal "$MY_NAME" debate-done "debate response submitted"

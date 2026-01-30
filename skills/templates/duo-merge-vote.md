@@ -63,8 +63,11 @@ ls "$PEER_SYNC/reviews/" 2>/dev/null && cat "$PEER_SYNC/reviews/"*.md
 Create your vote file with analysis and decision:
 
 ```bash
-cat > "$PEER_SYNC/merge-vote-${MY_NAME}.md" << 'EOF'
-# Merge Vote from [MY_NAME]
+ROUND=$(cat "$PEER_SYNC/merge-round")
+mkdir -p "$PEER_SYNC/merge-votes"
+
+cat > "$PEER_SYNC/merge-votes/round-${ROUND}-${MY_NAME}-vote.md" << 'EOF'
+# Merge Vote from [MY_NAME] (Round [ROUND])
 
 ## Summary of Claude's PR
 

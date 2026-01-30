@@ -46,11 +46,13 @@ echo "Cherry-picking from: $LOSING_PR"
 
 ### 2. Review Cherry-Pick Recommendations
 
-Read both agents' analyses to understand what to cherry-pick:
+Read both agents' final analyses to understand what to cherry-pick:
 
 ```bash
-cat "$PEER_SYNC/merge-vote-claude.md"
-cat "$PEER_SYNC/merge-vote-codex.md"
+# Read the latest round of votes
+FINAL_ROUND=$(cat "$PEER_SYNC/merge-round")
+cat "$PEER_SYNC/merge-votes/round-${FINAL_ROUND}-claude-vote.md"
+cat "$PEER_SYNC/merge-votes/round-${FINAL_ROUND}-codex-vote.md"
 ```
 
 ### 3. Merge the Winning PR

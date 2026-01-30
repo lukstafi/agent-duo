@@ -63,8 +63,10 @@ git diff main@{upstream}..HEAD
 Compare against what was recommended:
 
 ```bash
-cat "$PEER_SYNC/merge-vote-claude.md"
-cat "$PEER_SYNC/merge-vote-codex.md"
+# Read the final round of votes to see cherry-pick recommendations
+FINAL_ROUND=$(cat "$PEER_SYNC/merge-round")
+cat "$PEER_SYNC/merge-votes/round-${FINAL_ROUND}-claude-vote.md"
+cat "$PEER_SYNC/merge-votes/round-${FINAL_ROUND}-codex-vote.md"
 ```
 
 Were all recommended features cherry-picked? If not, is the omission justified?
