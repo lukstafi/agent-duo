@@ -53,7 +53,7 @@ agent-duo restart [--auto-run]  # Recover session after crash/restart
 agent-duo status                # Show session state
 agent-duo confirm               # Confirm clarify/pushback phase, proceed
 agent-duo pr <agent>            # Create PR for agent's solution
-agent-duo merge                 # Start merge phase (fresh sessions)
+agent-duo merge [--auto-restart]# Start merge phase (fresh sessions)
 agent-duo run-merge             # Run merge with existing sessions
 agent-duo cleanup [--full]      # Remove worktrees (--full: also state)
 agent-duo setup                 # Install agent-duo to PATH and skills

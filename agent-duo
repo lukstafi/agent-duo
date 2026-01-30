@@ -2267,6 +2267,17 @@ cmd_run_merge() {
 #------------------------------------------------------------------------------
 
 cmd_merge() {
+    local auto_restart=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --auto-restart) auto_restart=true; shift ;;
+            -*) die "Unknown option: $1" ;;
+            *) die "Unknown argument: $1" ;;
+        esac
+    done
+
     local root
     root="$(get_project_root)"
     local peer_sync="$root/.peer-sync"
@@ -2311,7 +2322,21 @@ cmd_merge() {
         # Non-ttyd mode: orchestrator is a window in the main session
         orchestrator_session="${session_name}:orchestrator"
     else
-        die "No orchestrator session found. Run 'agent-duo restart' first."
+        if $auto_restart; then
+            info "No orchestrator session found. Auto-restarting..."
+            # Run restart to recreate sessions, then proceed
+            cmd_restart
+            # After restart, find the session again
+            if tmux has-session -t "${session_name}-orchestrator" 2>/dev/null; then
+                orchestrator_session="${session_name}-orchestrator"
+            elif tmux has-session -t "$session_name" 2>/dev/null; then
+                orchestrator_session="${session_name}:orchestrator"
+            else
+                die "Failed to restart sessions."
+            fi
+        else
+            die "No orchestrator session found. Run 'agent-duo restart' or use 'agent-duo merge --auto-restart'."
+        fi
     fi
 
     info "Sending merge command to orchestrator terminal..."
@@ -3708,13 +3733,16 @@ SESSION COMMANDS
         Create a PR for the specified agent (claude or codex).
         Auto-commits uncommitted changes and pushes.
 
-    merge
+    merge [options]
         Start merge phase to consolidate both PRs into main.
         Sends the merge command to the orchestrator terminal, which then
         starts fresh agent sessions (unbiased by original implementation).
         Both agents vote on which PR to merge, debate if needed,
         then the losing agent merges and cherry-picks features.
         Requires both PRs to exist.
+
+        Options:
+          --auto-restart           Restart sessions first if not running
 
         The merge phase can also be triggered automatically during the
         PR comment watch phase by adding a comment containing "Proceed
