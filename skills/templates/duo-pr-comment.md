@@ -17,17 +17,32 @@ cat "$PEER_SYNC/${MY_NAME}.pr"
 
 ## Fetch PR Comments and Reviews
 
-Get all comments and reviews from your PR:
+Get your PR number and repo:
 
 ```bash
 PR_URL=$(cat "$PEER_SYNC/${MY_NAME}.pr")
-gh pr view "$PR_URL" --json comments,reviews,updatedAt
+PR_NUMBER=$(gh pr view "$PR_URL" --json number -q '.number')
+REPO=$(gh pr view "$PR_URL" --json url -q '.url' | sed -E 's|https://github.com/([^/]+/[^/]+)/pull/.*|\1|')
 ```
 
-For a more readable view:
+### 1. PR-level comments (general discussion):
 
 ```bash
 gh pr view "$PR_URL" --comments
+```
+
+### 2. Code review comments (attached to specific lines in the diff):
+
+**This is critical** — most substantive feedback appears as inline code comments:
+
+```bash
+gh api "repos/$REPO/pulls/$PR_NUMBER/comments" --jq '.[] | "---\nFile: \(.path):\(.line // .original_line)\nAuthor: \(.user.login)\nComment: \(.body)\n"'
+```
+
+### 3. Review summaries (approve/request changes/comment):
+
+```bash
+gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.body != "") | "---\nReviewer: \(.user.login)\nState: \(.state)\nBody: \(.body)\n"'
 ```
 
 ## Your Task
