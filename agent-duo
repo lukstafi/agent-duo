@@ -1233,14 +1233,12 @@ cmd_restart() {
     info "Checking agent TUIs..."
 
     # Check claude TUI (thinking effort not used for claude)
-    if ! restart_agent_tui "claude" "${session_name}-claude" \
-            "$worktree_claude" "$peer_sync" "$worktree_codex" "$feature"; then
+    if ! restart_agent_tui "claude" "${session_name}-claude"; then
         errors=$((errors + 1))
     fi
 
     # Check codex TUI (pass thinking effort)
-    if ! restart_agent_tui "codex" "${session_name}-codex" \
-            "$worktree_codex" "$peer_sync" "$worktree_claude" "$feature" "$codex_thinking"; then
+    if ! restart_agent_tui "codex" "${session_name}-codex" "$codex_thinking"; then
         errors=$((errors + 1))
     fi
 

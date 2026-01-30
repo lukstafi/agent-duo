@@ -442,16 +442,17 @@ restart_ttyd_for_session() {
     fi
 }
 
-# Restart an agent TUI in its tmux session (duo mode)
-# Usage: restart_agent_tui <agent> <session> <worktree> <peer_sync> <peer_worktree> <feature> [thinking_effort]
+# Restart an agent TUI in its tmux session
+# Usage: restart_agent_tui <agent> <session> [thinking_effort] [display_name]
+# agent: agent name like "claude" or "codex" (used for get_agent_cmd and agent_tui_is_running)
+# session: tmux session name
+# thinking_effort: optional, for codex reasoning effort (low/medium/high)
+# display_name: optional, for display purposes (e.g., "coder (claude)")
 restart_agent_tui() {
     local agent="$1"
     local session="$2"
-    local worktree="$3"
-    local peer_sync="$4"
-    local peer_worktree="$5"
-    local feature="$6"
-    local thinking="${7:-$DEFAULT_CODEX_THINKING}"
+    local thinking="${3:-$DEFAULT_CODEX_THINKING}"
+    local display_name="${4:-$agent}"
 
     # Check if tmux session exists
     if ! tmux_session_exists "$session"; then
@@ -461,11 +462,11 @@ restart_agent_tui() {
 
     # Check if TUI is already running
     if agent_tui_is_running "$session" "$agent"; then
-        info "$agent TUI already running"
+        info "$display_name TUI already running"
         return 0
     fi
 
-    info "Starting $agent TUI..."
+    info "Starting $display_name TUI..."
 
     # Note: Environment variables should already be set by cmd_restart or cmd_start
     # when the tmux session is created. We don't re-export here to avoid duplication.
@@ -480,10 +481,10 @@ restart_agent_tui() {
 
     # Verify it started
     if agent_tui_is_running "$session" "$agent"; then
-        success "Started $agent TUI"
+        success "Started $display_name TUI"
         return 0
     else
-        warn "Failed to start $agent TUI (may still be initializing)"
+        warn "Failed to start $display_name TUI (may still be initializing)"
         return 0  # Don't treat as failure - CLI may take time to start
     fi
 }

@@ -9,11 +9,13 @@ All notable changes to agent-duo will be documented in this file.
 - `--port` flag for configurable consecutive port allocation
 - Test infrastructure with unit and integration tests
 - `duo-amend` skill and require review before session completion
+- `agent-solo restart` command for session recovery after system restart
 
 ### Changed
 - Require Bash 4+ and use `#!/usr/bin/env bash` for macOS compatibility
 - Use only Escape to interrupt agents, not Ctrl-C
 - Cleanup command now removes session state only by default
+- Refactored `restart_agent_tui` in agent-lib.sh to be generic (works for both duo and solo modes)
 
 ### Fixed
 - Add missing `--yolo` flag to Codex resume command
