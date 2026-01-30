@@ -4,21 +4,41 @@ All notable changes to agent-duo will be documented in this file.
 
 ## [Unreleased]
 
+## [v0.2] - 2026-01-30
+
 ### Added
+- `agent-duo merge` command for consolidating duo PRs into main branch
+  - Vote-based workflow with debate mechanism when agents disagree
+  - Three trigger modes: auto-restart, interactive review, and manual execute
+  - Versioned vote files for complete audit trail
+  - `--auto-restart` flag for automatic session continuation
+  - Explicit APPROVED keyword requirement for merge review approval
 - PR comment monitoring phase after PRs are created
+  - Auto-trigger pr-comment skill on first entry if PR has reviews
+  - Fetch inline code review comments via `gh api`
+  - Shared `fetch-pr-feedback.sh` script for both duo and solo modes
+  - Require PR comment when declining to make changes from feedback
+  - Preserve PR comment hash baseline across session restarts
+- `agent-solo restart` command for session recovery after system restart
 - `--port` flag for configurable consecutive port allocation
 - Test infrastructure with unit and integration tests
 - `duo-amend` skill and require review before session completion
-- `agent-solo restart` command for session recovery after system restart
+- `escalate` command for agents to flag blocking issues
 
 ### Changed
 - Require Bash 4+ and use `#!/usr/bin/env bash` for macOS compatibility
 - Use only Escape to interrupt agents, not Ctrl-C
 - Cleanup command now removes session state only by default
 - Refactored `restart_agent_tui` in agent-lib.sh to be generic (works for both duo and solo modes)
+- Doubled default timeouts for agent operations
 
 ### Fixed
+- macOS compatibility issues
 - Add missing `--yolo` flag to Codex resume command
+- Fix undefined CLAUDE_CMD variable in agent-duo
+- Fix session restart and resume behavior
+- Fail early if session exists when starting new session
+- Remove duplicate env var exports in restart_agent_tui
 
 ## [v0.1] - 2025-01-24
 
