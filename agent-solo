@@ -959,7 +959,7 @@ cmd_run() {
         coder_session="${session_name}:coder"
         reviewer_session="${session_name}:reviewer"
     else
-        die "No tmux session found. Run 'agent-solo start $feature' first."
+        die "No tmux session found. Run 'agent-solo restart' to resume, or 'agent-solo start $feature' to start fresh."
     fi
 
     echo ""
@@ -1754,7 +1754,7 @@ cmd_nudge() {
     elif tmux has-session -t "${session_name}-${agent}" 2>/dev/null; then
         session="${session_name}-${agent}"
     else
-        die "No tmux session found for $agent"
+        die "No tmux session found for $agent. Run 'agent-solo restart' first."
     fi
 
     nudge_agent "$agent" "$session" "$message"
@@ -1785,7 +1785,7 @@ cmd_interrupt() {
     elif tmux has-session -t "${session_name}-${agent}" 2>/dev/null; then
         session="${session_name}-${agent}"
     else
-        die "No tmux session found for $agent"
+        die "No tmux session found for $agent. Run 'agent-solo restart' first."
     fi
 
     interrupt_agent "$agent" "$session" "$peer_sync"

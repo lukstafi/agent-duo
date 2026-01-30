@@ -1269,12 +1269,23 @@ cmd_restart() {
 
     if [ "$session_state" = "complete" ] || ($claude_has_pr && $codex_has_pr); then
         echo ""
-        success "Session is in terminal state (complete). No orchestrator restart needed."
         if [ -f "$peer_sync/claude.pr" ]; then
             echo "  Claude PR: $(cat "$peer_sync/claude.pr")"
         fi
         if [ -f "$peer_sync/codex.pr" ]; then
             echo "  Codex PR:  $(cat "$peer_sync/codex.pr")"
+        fi
+        if [ "$auto_run" = "true" ]; then
+            info "PRs created. Transitioning to pr-comments phase for monitoring..."
+            echo "pr-comments" > "$peer_sync/phase"
+            echo "active" > "$peer_sync/session"
+            tmux send-keys -t "${session_name}-orchestrator" \
+                "agent-duo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
+            tmux send-keys -t "${session_name}-orchestrator" C-m
+            success "Started PR comment monitoring"
+        else
+            info "PRs created. To monitor for PR comments:"
+            echo "  agent-duo restart --auto-run"
         fi
     elif [ "$auto_run" = "true" ]; then
         echo ""
@@ -2054,7 +2065,7 @@ cmd_run() {
             local claude_session="${session_name}-claude"
             local codex_session="${session_name}-codex"
         else
-            die "No tmux session found. Run 'agent-duo start $feature' first."
+            die "No tmux session found. Run 'agent-duo restart' to resume, or 'agent-duo start $feature' to start fresh."
         fi
     else
         local claude_session="${session_name}:claude"
@@ -2363,254 +2374,265 @@ cmd_run() {
         echo ""
     fi
 
-    # Set phase to work if not already set
-    if [ "$(cat "$peer_sync/phase" 2>/dev/null)" != "work" ]; then
-        echo "work" > "$peer_sync/phase"
-    fi
-
-    local round=1
-
-    while [ "$round" -le "$max_rounds" ]; do
-        # Check if session is complete
-        if [ "$(cat "$peer_sync/session" 2>/dev/null)" = "complete" ]; then
-            success "Session complete!"
-            break
-        fi
-
-        # Check if both have PRs AND at least one review cycle completed (round >= 2)
-        # This ensures both agents see at least one review before session ends
-        if has_pr "claude" "$peer_sync" && has_pr "codex" "$peer_sync" && [ "$round" -ge 2 ]; then
-            echo "complete" > "$peer_sync/session"
-            success "Both PRs created - session complete!"
-            echo ""
-            echo "Claude PR: $(cat "$peer_sync/claude.pr")"
-            echo "Codex PR:  $(cat "$peer_sync/codex.pr")"
-            break
-        fi
-
+    # Check if both PRs already exist - skip directly to PR comment watch phase
+    if has_pr "claude" "$peer_sync" && has_pr "codex" "$peer_sync"; then
+        success "Both PRs already created - skipping to PR comment watch phase"
         echo ""
-        info "=== Round $round: Work Phase ==="
-        echo "$round" > "$peer_sync/round"
-        echo "work" > "$peer_sync/phase"
+        echo "Claude PR: $(cat "$peer_sync/claude.pr")"
+        echo "Codex PR:  $(cat "$peer_sync/codex.pr")"
+        # Jump directly to PR comment watch phase (after the main loop)
+    else
+        # Set phase to work if not already set
+        if [ "$(cat "$peer_sync/phase" 2>/dev/null)" != "work" ]; then
+            echo "work" > "$peer_sync/phase"
+        fi
 
-        # Trigger work phase for agents that don't have PRs
-        # Round 1: Send augmented message with full context (avoids skill race condition)
-        # Round 2+: Trigger duo-work skill (agent already has context)
-        if [ "$round" -eq 1 ]; then
-            # Round 1: Send augmented task with full context
-            local task_file
-            local task_content=""
-            if task_file="$(find_task_file "$root" "$feature")"; then
-                task_content="$(cat "$task_file" | head -c 4000)"
+        # Resume from saved round or start at 1
+        local round
+        round="$(cat "$peer_sync/round" 2>/dev/null)" || round=1
+
+        while [ "$round" -le "$max_rounds" ]; do
+            # Check if session is complete
+            if [ "$(cat "$peer_sync/session" 2>/dev/null)" = "complete" ]; then
+                success "Session complete!"
+                break
             fi
 
-            if ! has_pr "claude" "$peer_sync"; then
-                atomic_write "$peer_sync/claude.status" "working|$(date +%s)|round $round work phase"
-                info "Sending augmented task to claude..."
-                local claude_msg
-                claude_msg="$(generate_round1_message "claude" "codex" "$feature" "$task_content" "$worktree_codex" "$peer_sync")"
-                tmux send-keys -t "$claude_session" "$claude_msg"
-                sleep 0.5
-                tmux send-keys -t "$claude_session" C-m
+            # Check if both have PRs AND at least one review cycle completed (round >= 2)
+            # This ensures both agents see at least one review before session ends
+            if has_pr "claude" "$peer_sync" && has_pr "codex" "$peer_sync" && [ "$round" -ge 2 ]; then
+                echo "complete" > "$peer_sync/session"
+                success "Both PRs created - session complete!"
+                echo ""
+                echo "Claude PR: $(cat "$peer_sync/claude.pr")"
+                echo "Codex PR:  $(cat "$peer_sync/codex.pr")"
+                break
             fi
-            if ! has_pr "codex" "$peer_sync"; then
-                atomic_write "$peer_sync/codex.status" "working|$(date +%s)|round $round work phase"
-                info "Sending augmented task to codex..."
-                local codex_msg
-                codex_msg="$(generate_round1_message "codex" "claude" "$feature" "$task_content" "$worktree_claude" "$peer_sync")"
-                tmux send-keys -t "$codex_session" "$codex_msg"
-                sleep 0.5
-                tmux send-keys -t "$codex_session" C-m
-            fi
-        else
-            # Round 2+: Trigger skill (agent already knows the context)
-            # Reset status to working before triggering (in case agent doesn't signal)
-            # Check TUI health before triggering to avoid sending to dead session
-            # Agents with PRs get duo-amend; others get duo-work
-            check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
-            atomic_write "$peer_sync/claude.status" "working|$(date +%s)|round $round work phase"
-            if has_pr "claude" "$peer_sync"; then
-                info "Triggering duo-amend for claude (has PR)..."
-                trigger_skill "claude" "$claude_session" "duo-amend"
+
+            echo ""
+            info "=== Round $round: Work Phase ==="
+            echo "$round" > "$peer_sync/round"
+            echo "work" > "$peer_sync/phase"
+
+            # Trigger work phase for agents that don't have PRs
+            # Round 1: Send augmented message with full context (avoids skill race condition)
+            # Round 2+: Trigger duo-work skill (agent already has context)
+            if [ "$round" -eq 1 ]; then
+                # Round 1: Send augmented task with full context
+                local task_file
+                local task_content=""
+                if task_file="$(find_task_file "$root" "$feature")"; then
+                    task_content="$(cat "$task_file" | head -c 4000)"
+                fi
+
+                if ! has_pr "claude" "$peer_sync"; then
+                    atomic_write "$peer_sync/claude.status" "working|$(date +%s)|round $round work phase"
+                    info "Sending augmented task to claude..."
+                    local claude_msg
+                    claude_msg="$(generate_round1_message "claude" "codex" "$feature" "$task_content" "$worktree_codex" "$peer_sync")"
+                    tmux send-keys -t "$claude_session" "$claude_msg"
+                    sleep 0.5
+                    tmux send-keys -t "$claude_session" C-m
+                fi
+                if ! has_pr "codex" "$peer_sync"; then
+                    atomic_write "$peer_sync/codex.status" "working|$(date +%s)|round $round work phase"
+                    info "Sending augmented task to codex..."
+                    local codex_msg
+                    codex_msg="$(generate_round1_message "codex" "claude" "$feature" "$task_content" "$worktree_claude" "$peer_sync")"
+                    tmux send-keys -t "$codex_session" "$codex_msg"
+                    sleep 0.5
+                    tmux send-keys -t "$codex_session" C-m
+                fi
             else
-                info "Triggering duo-work for claude..."
-                trigger_skill "claude" "$claude_session" "duo-work"
+                # Round 2+: Trigger skill (agent already knows the context)
+                # Reset status to working before triggering (in case agent doesn't signal)
+                # Check TUI health before triggering to avoid sending to dead session
+                # Agents with PRs get duo-amend; others get duo-work
+                check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+                atomic_write "$peer_sync/claude.status" "working|$(date +%s)|round $round work phase"
+                if has_pr "claude" "$peer_sync"; then
+                    info "Triggering duo-amend for claude (has PR)..."
+                    trigger_skill "claude" "$claude_session" "duo-amend"
+                else
+                    info "Triggering duo-work for claude..."
+                    trigger_skill "claude" "$claude_session" "duo-work"
+                fi
+
+                check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+                atomic_write "$peer_sync/codex.status" "working|$(date +%s)|round $round work phase"
+                if has_pr "codex" "$peer_sync"; then
+                    info "Triggering duo-amend for codex (has PR)..."
+                    trigger_skill "codex" "$codex_session" "duo-amend"
+                else
+                    info "Triggering duo-work for codex..."
+                    trigger_skill "codex" "$codex_session" "duo-work"
+                fi
             fi
+
+            # Wait for work phase completion with timeout
+            # Note: Agents with PRs still participate to respond to peer reviews
+            local work_start=$SECONDS
+            local claude_done=false
+            local codex_done=false
+
+            while ! ($claude_done && $codex_done); do
+                local elapsed=$((SECONDS - work_start))
+
+                # Check for completion
+                local claude_status
+                claude_status="$(get_agent_status "claude" "$peer_sync")"
+                local codex_status
+                codex_status="$(get_agent_status "codex" "$peer_sync")"
+
+                # Accept done, review-done (agent jumped ahead), or pr-created
+                [[ "$claude_status" =~ ^(done|review-done|pr-created)$ ]] && claude_done=true
+                [[ "$codex_status" =~ ^(done|review-done|pr-created)$ ]] && codex_done=true
+
+                # Check for PRs created mid-phase
+                has_pr "claude" "$peer_sync" && claude_done=true
+                has_pr "codex" "$peer_sync" && codex_done=true
+
+                if $claude_done && $codex_done; then
+                    break
+                fi
+
+                # Check if agent TUIs have exited unexpectedly
+                if ! $claude_done; then
+                    check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+                fi
+                if ! $codex_done; then
+                    check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+                fi
+
+                # Check timeout
+                if [ "$elapsed" -ge "$work_timeout" ]; then
+                    warn "Work phase timeout (${work_timeout}s)"
+
+                    # Interrupt agents that aren't done
+                    if ! $claude_done; then
+                        interrupt_agent "claude" "$claude_session" "$peer_sync"
+                        claude_done=true
+                    fi
+                    if ! $codex_done; then
+                        interrupt_agent "codex" "$codex_session" "$peer_sync"
+                        codex_done=true
+                    fi
+                    break
+                fi
+
+                printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$work_timeout"
+                sleep "$poll_interval"
+            done
+            echo ""
+
+            # Check again if both have PRs (might have been created during work)
+            # Require round >= 2 to ensure at least one review cycle
+            if has_pr "claude" "$peer_sync" && has_pr "codex" "$peer_sync" && [ "$round" -ge 2 ]; then
+                echo "complete" > "$peer_sync/session"
+                success "Both PRs created - session complete!"
+                break
+            fi
+
+            # Check for escalations before transitioning to review phase
+            # If user chooses to defer, escalations remain but we continue to review phase
+            # They'll be checked again at the next phase boundary
+            if has_pending_escalations "$peer_sync" >/dev/null; then
+                handle_escalation_block "$peer_sync" "$feature" "duo" || true
+            fi
+
+            # Review phase
+            info "=== Round $round: Review Phase ==="
+            echo "review" > "$peer_sync/phase"
+
+            # Trigger review phase for all agents (including those with PRs)
+            # Agents with PRs still review peer's work and can see peer's review of their PR
+            # Reset status to reviewing before triggering (in case agent doesn't signal)
+            # Check TUI health before triggering to avoid sending to dead session
+            check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+            atomic_write "$peer_sync/claude.status" "reviewing|$(date +%s)|round $round review phase"
+            info "Triggering duo-review for claude..."
+            trigger_skill "claude" "$claude_session" "duo-review"
 
             check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
-            atomic_write "$peer_sync/codex.status" "working|$(date +%s)|round $round work phase"
-            if has_pr "codex" "$peer_sync"; then
-                info "Triggering duo-amend for codex (has PR)..."
-                trigger_skill "codex" "$codex_session" "duo-amend"
-            else
-                info "Triggering duo-work for codex..."
-                trigger_skill "codex" "$codex_session" "duo-work"
-            fi
-        fi
+            atomic_write "$peer_sync/codex.status" "reviewing|$(date +%s)|round $round review phase"
+            info "Triggering duo-review for codex..."
+            trigger_skill "codex" "$codex_session" "duo-review"
 
-        # Wait for work phase completion with timeout
-        # Note: Agents with PRs still participate to respond to peer reviews
-        local work_start=$SECONDS
-        local claude_done=false
-        local codex_done=false
+            # Wait for review phase completion with timeout
+            # Note: Agents with PRs still participate in reviews
+            local review_start=$SECONDS
+            claude_done=false
+            codex_done=false
 
-        while ! ($claude_done && $codex_done); do
-            local elapsed=$((SECONDS - work_start))
+            while ! ($claude_done && $codex_done); do
+                local elapsed=$((SECONDS - review_start))
 
-            # Check for completion
-            local claude_status
-            claude_status="$(get_agent_status "claude" "$peer_sync")"
-            local codex_status
-            codex_status="$(get_agent_status "codex" "$peer_sync")"
+                local claude_status
+                claude_status="$(get_agent_status "claude" "$peer_sync")"
+                local codex_status
+                codex_status="$(get_agent_status "codex" "$peer_sync")"
 
-            # Accept done, review-done (agent jumped ahead), or pr-created
-            [[ "$claude_status" =~ ^(done|review-done|pr-created)$ ]] && claude_done=true
-            [[ "$codex_status" =~ ^(done|review-done|pr-created)$ ]] && codex_done=true
+                # Accept review-done, done (agent skipped review), or pr-created
+                [[ "$claude_status" =~ ^(done|review-done|pr-created)$ ]] && claude_done=true
+                [[ "$codex_status" =~ ^(done|review-done|pr-created)$ ]] && codex_done=true
 
-            # Check for PRs created mid-phase
-            has_pr "claude" "$peer_sync" && claude_done=true
-            has_pr "codex" "$peer_sync" && codex_done=true
+                has_pr "claude" "$peer_sync" && claude_done=true
+                has_pr "codex" "$peer_sync" && codex_done=true
 
-            if $claude_done && $codex_done; then
-                break
-            fi
+                if $claude_done && $codex_done; then
+                    break
+                fi
 
-            # Check if agent TUIs have exited unexpectedly
-            if ! $claude_done; then
-                check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
-            fi
-            if ! $codex_done; then
-                check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
-            fi
-
-            # Check timeout
-            if [ "$elapsed" -ge "$work_timeout" ]; then
-                warn "Work phase timeout (${work_timeout}s)"
-
-                # Interrupt agents that aren't done
+                # Check if agent TUIs have exited unexpectedly
                 if ! $claude_done; then
-                    interrupt_agent "claude" "$claude_session" "$peer_sync"
-                    claude_done=true
+                    check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
                 fi
                 if ! $codex_done; then
-                    interrupt_agent "codex" "$codex_session" "$peer_sync"
-                    codex_done=true
+                    check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
                 fi
+
+                # Check timeout
+                if [ "$elapsed" -ge "$review_timeout" ]; then
+                    warn "Review phase timeout (${review_timeout}s)"
+
+                    if ! $claude_done; then
+                        interrupt_agent "claude" "$claude_session" "$peer_sync"
+                        claude_done=true
+                    fi
+                    if ! $codex_done; then
+                        interrupt_agent "codex" "$codex_session" "$peer_sync"
+                        codex_done=true
+                    fi
+                    break
+                fi
+
+                printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$review_timeout"
+                sleep "$poll_interval"
+            done
+            echo ""
+
+            # Check if both have PRs after review phase (before starting next round)
+            # Require round >= 2 to ensure at least one review cycle
+            if has_pr "claude" "$peer_sync" && has_pr "codex" "$peer_sync" && [ "$round" -ge 2 ]; then
+                echo "complete" > "$peer_sync/session"
+                success "Both PRs created - session complete!"
                 break
             fi
 
-            printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$work_timeout"
-            sleep "$poll_interval"
+            # Check for escalations before transitioning to next work round
+            # If user chooses to defer, escalations remain but we continue to next round
+            # They'll be checked again at the next phase boundary
+            if has_pending_escalations "$peer_sync" >/dev/null; then
+                handle_escalation_block "$peer_sync" "$feature" "duo" || true
+            fi
+
+            round=$((round + 1))
         done
-        echo ""
 
-        # Check again if both have PRs (might have been created during work)
-        # Require round >= 2 to ensure at least one review cycle
-        if has_pr "claude" "$peer_sync" && has_pr "codex" "$peer_sync" && [ "$round" -ge 2 ]; then
-            echo "complete" > "$peer_sync/session"
-            success "Both PRs created - session complete!"
-            break
+        if [ "$round" -gt "$max_rounds" ]; then
+            warn "Reached max rounds ($max_rounds)"
         fi
-
-        # Check for escalations before transitioning to review phase
-        # If user chooses to defer, escalations remain but we continue to review phase
-        # They'll be checked again at the next phase boundary
-        if has_pending_escalations "$peer_sync" >/dev/null; then
-            handle_escalation_block "$peer_sync" "$feature" "duo" || true
-        fi
-
-        # Review phase
-        info "=== Round $round: Review Phase ==="
-        echo "review" > "$peer_sync/phase"
-
-        # Trigger review phase for all agents (including those with PRs)
-        # Agents with PRs still review peer's work and can see peer's review of their PR
-        # Reset status to reviewing before triggering (in case agent doesn't signal)
-        # Check TUI health before triggering to avoid sending to dead session
-        check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
-        atomic_write "$peer_sync/claude.status" "reviewing|$(date +%s)|round $round review phase"
-        info "Triggering duo-review for claude..."
-        trigger_skill "claude" "$claude_session" "duo-review"
-
-        check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
-        atomic_write "$peer_sync/codex.status" "reviewing|$(date +%s)|round $round review phase"
-        info "Triggering duo-review for codex..."
-        trigger_skill "codex" "$codex_session" "duo-review"
-
-        # Wait for review phase completion with timeout
-        # Note: Agents with PRs still participate in reviews
-        local review_start=$SECONDS
-        claude_done=false
-        codex_done=false
-
-        while ! ($claude_done && $codex_done); do
-            local elapsed=$((SECONDS - review_start))
-
-            local claude_status
-            claude_status="$(get_agent_status "claude" "$peer_sync")"
-            local codex_status
-            codex_status="$(get_agent_status "codex" "$peer_sync")"
-
-            # Accept review-done, done (agent skipped review), or pr-created
-            [[ "$claude_status" =~ ^(done|review-done|pr-created)$ ]] && claude_done=true
-            [[ "$codex_status" =~ ^(done|review-done|pr-created)$ ]] && codex_done=true
-
-            has_pr "claude" "$peer_sync" && claude_done=true
-            has_pr "codex" "$peer_sync" && codex_done=true
-
-            if $claude_done && $codex_done; then
-                break
-            fi
-
-            # Check if agent TUIs have exited unexpectedly
-            if ! $claude_done; then
-                check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
-            fi
-            if ! $codex_done; then
-                check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
-            fi
-
-            # Check timeout
-            if [ "$elapsed" -ge "$review_timeout" ]; then
-                warn "Review phase timeout (${review_timeout}s)"
-
-                if ! $claude_done; then
-                    interrupt_agent "claude" "$claude_session" "$peer_sync"
-                    claude_done=true
-                fi
-                if ! $codex_done; then
-                    interrupt_agent "codex" "$codex_session" "$peer_sync"
-                    codex_done=true
-                fi
-                break
-            fi
-
-            printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$review_timeout"
-            sleep "$poll_interval"
-        done
-        echo ""
-
-        # Check if both have PRs after review phase (before starting next round)
-        # Require round >= 2 to ensure at least one review cycle
-        if has_pr "claude" "$peer_sync" && has_pr "codex" "$peer_sync" && [ "$round" -ge 2 ]; then
-            echo "complete" > "$peer_sync/session"
-            success "Both PRs created - session complete!"
-            break
-        fi
-
-        # Check for escalations before transitioning to next work round
-        # If user chooses to defer, escalations remain but we continue to next round
-        # They'll be checked again at the next phase boundary
-        if has_pending_escalations "$peer_sync" >/dev/null; then
-            handle_escalation_block "$peer_sync" "$feature" "duo" || true
-        fi
-
-        round=$((round + 1))
-    done
-
-    if [ "$round" -gt "$max_rounds" ]; then
-        warn "Reached max rounds ($max_rounds)"
-    fi
+    fi  # end of else block (PRs not already created)
 
     # PR Comment Watch Phase
     # After both PRs are created, monitor for new comments/reviews
