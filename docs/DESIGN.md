@@ -53,6 +53,7 @@ agent-duo restart [--auto-run]  # Recover session after crash/restart
 agent-duo status                # Show session state
 agent-duo confirm               # Confirm clarify/pushback phase, proceed
 agent-duo pr <agent>            # Create PR for agent's solution
+agent-duo merge                 # Start merge phase to consolidate PRs
 agent-duo cleanup [--full]      # Remove worktrees (--full: also state)
 agent-duo setup                 # Install agent-duo to PATH and skills
 agent-duo doctor                # Check system configuration
@@ -99,8 +100,8 @@ Given project directory `myapp` and feature `auth`:
 
 | Concept | Who sets | Values | Purpose |
 |---------|----------|--------|---------|
-| **Phase** | Orchestrator | `clarify`, `pushback`, `work`, `review`, `pr-comments` | Current stage of the round |
-| **Agent Status** | Agent | `clarifying`, `clarify-done`, `pushing-back`, `pushback-done`, `working`, `done`, `reviewing`, `review-done`, `interrupted`, `error`, `escalated`, `pr-created` | What agent is doing |
+| **Phase** | Orchestrator | `clarify`, `pushback`, `work`, `review`, `pr-comments`, `merge` | Current stage of the round |
+| **Agent Status** | Agent | `clarifying`, `clarify-done`, `pushing-back`, `pushback-done`, `working`, `done`, `reviewing`, `review-done`, `interrupted`, `error`, `escalated`, `pr-created`, `voting`, `vote-done`, `debating`, `debate-done`, `merging`, `merge-done`, `merge-reviewing`, `merge-review-done` | What agent is doing |
 | **Session State** | Orchestrator | `active`, `complete` | Overall progress |
 
 ### State Files (in `.peer-sync/`)
@@ -108,7 +109,7 @@ Given project directory `myapp` and feature `auth`:
 ```
 .peer-sync/
 ├── session           # "active" or "complete"
-├── phase             # "clarify", "pushback", "work", "review", or "pr-comments"
+├── phase             # "clarify", "pushback", "work", "review", "pr-comments", or "merge"
 ├── round             # Current round number (1, 2, 3...)
 ├── feature           # Feature name for this session
 ├── ports             # Port allocations (ORCHESTRATOR_PORT, CLAUDE_PORT, CODEX_PORT)
@@ -128,6 +129,12 @@ Given project directory `myapp` and feature `auth`:
 ├── codex.pr          # Codex's PR URL (when created)
 ├── claude.pr-hash    # Hash of claude PR comments (for change detection)
 ├── codex.pr-hash     # Hash of codex PR comments (for change detection)
+├── merge-round       # Current merge debate round (1, 2)
+├── merge-vote-claude.md  # Claude's merge vote and analysis
+├── merge-vote-codex.md   # Codex's merge vote and analysis
+├── merge-decision    # Final decision: "claude" or "codex"
+├── merge-review-claude.md  # Claude's merge review (if reviewer)
+├── merge-review-codex.md   # Codex's merge review (if reviewer)
 ├── pids/             # Process IDs for ttyd servers
 └── reviews/          # Review files from each round
     └── round-1-claude-reviews-codex.md
@@ -208,6 +215,46 @@ Given project directory `myapp` and feature `auth`:
 │  Terminates when: both PRs merged/closed, or Ctrl-C             │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ MERGE PHASE (user-initiated: agent-duo merge)                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  VOTE PHASE                                                     │
+│  ──────────                                                     │
+│  1. Orchestrator sets phase=merge                               │
+│  2. Both agents analyze both PRs (status: voting)               │
+│     - Fresh sessions, no bias from original implementation      │
+│     - Write analysis to .peer-sync/merge-vote-{agent}.md        │
+│  3. Agents vote: "claude" or "codex" (status: vote-done)        │
+│                                                                 │
+│  CONSENSUS CHECK                                                │
+│  ───────────────                                                │
+│  4. If votes agree → proceed to execution                       │
+│  5. If votes differ → debate phase (max 2 rounds)               │
+│                                                                 │
+│  DEBATE PHASE (if needed)                                       │
+│  ────────────                                                   │
+│  6. Agents read peer's vote, revise or defend (status: debating)│
+│  7. After 2 rounds, if still no consensus → escalate to user    │
+│                                                                 │
+│  EXECUTION PHASE                                                │
+│  ───────────────                                                │
+│  8. "Losing" agent merges winning PR (status: merging)          │
+│     - Squash merge the winning PR                               │
+│     - Cherry-pick valuable features from losing PR              │
+│     - Close losing PR with explanation                          │
+│  9. "Winning" agent reviews merge (status: merge-reviewing)     │
+│                                                                 │
+│  AMEND LOOP (if review requests changes)                        │
+│  ─────────────────────────────────────────                      │
+│  10. "Losing" agent addresses feedback (duo-merge-amend skill)  │
+│  11. "Winning" agent re-reviews                                 │
+│  12. Repeat until approved (max 3 rounds)                       │
+│                                                                 │
+│  Roles: Losing agent = implementer, Winning agent = reviewer    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Recoverable Interrupts
@@ -267,6 +314,14 @@ This differs from clarify/pushback phases which are enforced blocking points. Es
 | `error` | Something failed | Agent or Orchestrator |
 | `escalated` | Issue needs user input | Agent (after `agent-duo escalate`) |
 | `pr-created` | PR submitted | Agent (after `agent-duo pr`) |
+| `voting` | Analyzing PRs for merge vote | Agent (start of merge vote) |
+| `vote-done` | Submitted merge vote | Agent |
+| `debating` | Responding to peer's vote | Agent (merge debate round) |
+| `debate-done` | Finished debate response | Agent |
+| `merging` | Executing merge + cherry-pick | Agent (losing agent) |
+| `merge-done` | Merge execution complete | Agent |
+| `merge-reviewing` | Reviewing merge result | Agent (winning agent) |
+| `merge-review-done` | Finished merge review | Agent |
 
 ## Reading Peer's Work
 
@@ -340,8 +395,8 @@ agent-duo start myfeature --port 8000
 ## Skills
 
 Skills provide phase-specific instructions to agents. Installed to:
-- Claude: `~/.claude/commands/duo-{work,review,clarify,pushback,amend,pr-comment}.md`
-- Codex: `~/.codex/skills/duo-{work,review,clarify,pushback,amend,pr-comment}/SKILL.md`
+- Claude: `~/.claude/commands/duo-{work,review,clarify,pushback,amend,pr-comment,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}.md`
+- Codex: `~/.codex/skills/duo-{work,review,clarify,pushback,amend,pr-comment,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}/SKILL.md`
 
 Key skill behaviors:
 - **Clarify phase**: Propose high-level approach, ask clarifying questions, signal `clarify-done`
@@ -350,6 +405,11 @@ Key skill behaviors:
 - **Amend phase**: For agents with PRs — review peer feedback and amend PR if warranted
 - **Review phase**: Read peer's worktree via git, write review, signal `review-done`; agents with PRs still participate
 - **PR Comment phase**: Fetch GitHub PR comments via `gh pr view`, address feedback, push amendments
+- **Merge Vote phase**: Analyze both PRs objectively, vote on which to merge, signal `vote-done`
+- **Merge Debate phase**: Read peer's vote, reconsider or defend position, signal `debate-done`
+- **Merge Execute phase**: For losing agent — merge winning PR, cherry-pick from losing PR, signal `merge-done`
+- **Merge Review phase**: For winning agent — verify merge was done correctly, signal `merge-review-done`
+- **Merge Amend phase**: For losing agent — address review feedback on merge, signal `merge-done`
 - **Divergence**: Maintain distinct approach from peer
 - **Interrupts**: If interrupted, gracefully yield and continue next round
 

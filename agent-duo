@@ -191,12 +191,18 @@ cmd_setup() {
     install_skill "$templates_dir/duo-pushback.md" "$claude_skills/duo-pushback.md" "/duo-pushback"
     install_skill "$templates_dir/duo-amend.md" "$claude_skills/duo-amend.md" "/duo-amend"
     install_skill "$templates_dir/duo-pr-comment.md" "$claude_skills/duo-pr-comment.md" "/duo-pr-comment"
+    install_skill "$templates_dir/duo-merge-vote.md" "$claude_skills/duo-merge-vote.md" "/duo-merge-vote"
+    install_skill "$templates_dir/duo-merge-debate.md" "$claude_skills/duo-merge-debate.md" "/duo-merge-debate"
+    install_skill "$templates_dir/duo-merge-execute.md" "$claude_skills/duo-merge-execute.md" "/duo-merge-execute"
+    install_skill "$templates_dir/duo-merge-review.md" "$claude_skills/duo-merge-review.md" "/duo-merge-review"
+    install_skill "$templates_dir/duo-merge-amend.md" "$claude_skills/duo-merge-amend.md" "/duo-merge-amend"
     success "Installed Claude skills to $claude_skills"
 
     # Install Codex skills (uses $command syntax)
     # Codex expects skills as directories with SKILL.md inside
     local codex_skills="$HOME/.codex/skills"
     mkdir -p "$codex_skills/duo-work" "$codex_skills/duo-review" "$codex_skills/duo-clarify" "$codex_skills/duo-pushback" "$codex_skills/duo-amend" "$codex_skills/duo-pr-comment"
+    mkdir -p "$codex_skills/duo-merge-vote" "$codex_skills/duo-merge-debate" "$codex_skills/duo-merge-execute" "$codex_skills/duo-merge-review" "$codex_skills/duo-merge-amend"
 
     install_skill "$templates_dir/duo-work.md" "$codex_skills/duo-work/SKILL.md" "\$duo-work"
     install_skill "$templates_dir/duo-review.md" "$codex_skills/duo-review/SKILL.md" "\$duo-review"
@@ -204,6 +210,11 @@ cmd_setup() {
     install_skill "$templates_dir/duo-pushback.md" "$codex_skills/duo-pushback/SKILL.md" "\$duo-pushback"
     install_skill "$templates_dir/duo-amend.md" "$codex_skills/duo-amend/SKILL.md" "\$duo-amend"
     install_skill "$templates_dir/duo-pr-comment.md" "$codex_skills/duo-pr-comment/SKILL.md" "\$duo-pr-comment"
+    install_skill "$templates_dir/duo-merge-vote.md" "$codex_skills/duo-merge-vote/SKILL.md" "\$duo-merge-vote"
+    install_skill "$templates_dir/duo-merge-debate.md" "$codex_skills/duo-merge-debate/SKILL.md" "\$duo-merge-debate"
+    install_skill "$templates_dir/duo-merge-execute.md" "$codex_skills/duo-merge-execute/SKILL.md" "\$duo-merge-execute"
+    install_skill "$templates_dir/duo-merge-review.md" "$codex_skills/duo-merge-review/SKILL.md" "\$duo-merge-review"
+    install_skill "$templates_dir/duo-merge-amend.md" "$codex_skills/duo-merge-amend/SKILL.md" "\$duo-merge-amend"
     success "Installed Codex skills to $codex_skills"
 
     # Install unified notify hook script and configure agent hooks
@@ -1600,6 +1611,546 @@ cmd_cleanup() {
 }
 
 #------------------------------------------------------------------------------
+# Command: merge - Start merge phase to consolidate PRs
+#------------------------------------------------------------------------------
+
+# Extract vote from a merge-vote file (returns "claude" or "codex")
+extract_vote() {
+    local vote_file="$1"
+    if [ ! -f "$vote_file" ]; then
+        echo ""
+        return
+    fi
+    # Look for "## My Vote: claude" or "## My Vote: codex" pattern
+    grep -i "^## My Vote:" "$vote_file" | head -1 | sed 's/.*: *\([a-z]*\).*/\1/' | tr '[:upper:]' '[:lower:]'
+}
+
+# Check if both agents have voted
+both_voted() {
+    local peer_sync="$1"
+    [ -f "$peer_sync/merge-vote-claude.md" ] && [ -f "$peer_sync/merge-vote-codex.md" ]
+}
+
+# Check if votes agree
+votes_agree() {
+    local peer_sync="$1"
+    local claude_vote codex_vote
+    claude_vote="$(extract_vote "$peer_sync/merge-vote-claude.md")"
+    codex_vote="$(extract_vote "$peer_sync/merge-vote-codex.md")"
+    [ -n "$claude_vote" ] && [ "$claude_vote" = "$codex_vote" ]
+}
+
+# Get the agreed vote (or empty if no agreement)
+get_agreed_vote() {
+    local peer_sync="$1"
+    local claude_vote codex_vote
+    claude_vote="$(extract_vote "$peer_sync/merge-vote-claude.md")"
+    codex_vote="$(extract_vote "$peer_sync/merge-vote-codex.md")"
+    if [ -n "$claude_vote" ] && [ "$claude_vote" = "$codex_vote" ]; then
+        echo "$claude_vote"
+    else
+        echo ""
+    fi
+}
+
+# Generate merge vote message for agents (sent at start of merge phase)
+generate_merge_vote_message() {
+    local agent="$1"
+    local peer="$2"
+    local feature="$3"
+    local peer_sync="$4"
+    local claude_pr="$5"
+    local codex_pr="$6"
+
+    cat <<EOF
+# Merge Phase: Vote on PR to Merge
+
+Both PRs are ready. You must analyze them and vote on which one to merge.
+
+---
+## Agent-Duo Context - MERGE VOTE PHASE
+
+You are **$agent** in a fresh merge session. This is NOT the agent who created either PR.
+
+**Your Task**: Objectively evaluate both solutions and vote.
+
+### PRs to Evaluate
+
+- **Claude's PR**: $claude_pr
+- **Codex's PR**: $codex_pr
+
+### Environment
+
+- **Working directory**: Main branch (project root)
+- **Sync directory**: $peer_sync
+- **Feature**: $feature
+
+### Steps
+
+1. Read the original task: \`cat "$feature.md"\`
+2. View both PRs: \`gh pr view <url>\` and \`gh pr diff <url>\`
+3. Read previous reviews: \`ls "$peer_sync/reviews/" && cat "$peer_sync/reviews/"*.md\`
+
+### Write Your Vote
+
+\`\`\`bash
+cat > "$peer_sync/merge-vote-${agent}.md" << 'VOTE_EOF'
+# Merge Vote from $agent
+
+## Summary of Claude's PR
+[2-3 sentences on approach and key decisions]
+
+## Summary of Codex's PR
+[2-3 sentences on approach and key decisions]
+
+## Comparison
+| Aspect | Claude's PR | Codex's PR |
+|--------|-------------|------------|
+| Code quality | | |
+| Test coverage | | |
+| Alignment with task | | |
+
+## My Vote: [claude / codex]
+
+### Rationale
+[3-5 sentences explaining your choice]
+
+### Features to Cherry-Pick from Losing PR
+[List specific features that should be incorporated]
+
+VOTE_EOF
+\`\`\`
+
+Edit with actual content, then signal:
+
+\`\`\`bash
+agent-duo signal "$agent" vote-done "merge vote submitted"
+\`\`\`
+
+Then **STOP and wait** for consensus check.
+EOF
+}
+
+# Generate merge debate message for agents (triggered when votes disagree)
+generate_merge_debate_message() {
+    local agent="$1"
+    local peer="$2"
+    local feature="$3"
+    local peer_sync="$4"
+    local debate_round="$5"
+
+    cat <<EOF
+# Merge Phase: Debate Round $debate_round
+
+Your vote differs from $peer's. Review their reasoning and respond.
+
+---
+## Agent-Duo Context - MERGE DEBATE
+
+Read your peer's vote and reconsider:
+
+\`\`\`bash
+cat "$peer_sync/merge-vote-${peer}.md"
+\`\`\`
+
+Then update your vote file:
+
+\`\`\`bash
+cat > "$peer_sync/merge-vote-${agent}.md" << 'VOTE_EOF'
+# Merge Vote from $agent (Debate Round $debate_round)
+
+## Response to $peer's Arguments
+[Address their key points. What do you agree/disagree with?]
+
+## My Vote: [claude / codex]
+
+### Position: [CHANGED / UNCHANGED]
+
+### Rationale
+[If changed: what convinced you. If unchanged: why their arguments don't outweigh yours]
+
+### Features to Cherry-Pick from Losing PR
+[Updated list combining insights from both analyses]
+
+VOTE_EOF
+\`\`\`
+
+Edit with actual content, then signal:
+
+\`\`\`bash
+agent-duo signal "$agent" debate-done "debate response submitted"
+\`\`\`
+
+Then **STOP and wait**.
+EOF
+}
+
+cmd_merge() {
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+    local feature
+    feature="$(get_feature)"
+
+    # Validate both PRs exist
+    if ! has_pr "claude" "$peer_sync" || ! has_pr "codex" "$peer_sync"; then
+        die "Both PRs must exist before merge phase. Run 'agent-duo pr <agent>' first."
+    fi
+
+    local claude_pr codex_pr
+    claude_pr="$(cat "$peer_sync/claude.pr")"
+    codex_pr="$(cat "$peer_sync/codex.pr")"
+
+    info "=== Merge Phase ==="
+    echo "Claude PR: $claude_pr"
+    echo "Codex PR:  $codex_pr"
+    echo ""
+
+    # Check if PRs are still open
+    local claude_open=false codex_open=false
+    is_pr_open "$claude_pr" && claude_open=true
+    is_pr_open "$codex_pr" && codex_open=true
+
+    if ! $claude_open && ! $codex_open; then
+        die "Both PRs are already closed/merged. Nothing to do."
+    fi
+
+    # Initialize merge phase state
+    echo "merge" > "$peer_sync/phase"
+    echo "1" > "$peer_sync/merge-round"
+    rm -f "$peer_sync/merge-vote-claude.md" "$peer_sync/merge-vote-codex.md"
+    rm -f "$peer_sync/merge-decision"
+
+    # Get tmux session info
+    local session_name="duo-${feature}"
+    local claude_session codex_session
+
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+        claude_session="${session_name}:claude"
+        codex_session="${session_name}:codex"
+    elif tmux has-session -t "${session_name}-claude" 2>/dev/null; then
+        claude_session="${session_name}-claude"
+        codex_session="${session_name}-codex"
+    else
+        die "No tmux sessions found. Start a session first with 'agent-duo restart'."
+    fi
+
+    # Timeouts
+    local vote_timeout="${VOTE_TIMEOUT:-600}"
+    local debate_timeout="${DEBATE_TIMEOUT:-300}"
+    local max_debate_rounds=2
+    local poll_interval=5
+
+    # === VOTE PHASE ===
+    info "=== Vote Phase ==="
+
+    # Send vote messages to both agents
+    atomic_write "$peer_sync/claude.status" "voting|$(date +%s)|merge vote phase"
+    info "Sending vote request to claude..."
+    local claude_vote_msg
+    claude_vote_msg="$(generate_merge_vote_message "claude" "codex" "$feature" "$peer_sync" "$claude_pr" "$codex_pr")"
+    tmux send-keys -t "$claude_session" "$claude_vote_msg"
+    sleep 0.5
+    tmux send-keys -t "$claude_session" C-m
+
+    atomic_write "$peer_sync/codex.status" "voting|$(date +%s)|merge vote phase"
+    info "Sending vote request to codex..."
+    local codex_vote_msg
+    codex_vote_msg="$(generate_merge_vote_message "codex" "claude" "$feature" "$peer_sync" "$claude_pr" "$codex_pr")"
+    tmux send-keys -t "$codex_session" "$codex_vote_msg"
+    sleep 0.5
+    tmux send-keys -t "$codex_session" C-m
+
+    # Wait for both votes
+    local vote_start=$SECONDS
+    local claude_voted=false codex_voted=false
+
+    while ! ($claude_voted && $codex_voted); do
+        local elapsed=$((SECONDS - vote_start))
+
+        local claude_status codex_status
+        claude_status="$(get_agent_status "claude" "$peer_sync")"
+        codex_status="$(get_agent_status "codex" "$peer_sync")"
+
+        [ "$claude_status" = "vote-done" ] && claude_voted=true
+        [ "$codex_status" = "vote-done" ] && codex_voted=true
+
+        if $claude_voted && $codex_voted; then
+            break
+        fi
+
+        if [ "$elapsed" -ge "$vote_timeout" ]; then
+            warn "Vote phase timeout (${vote_timeout}s)"
+            break
+        fi
+
+        printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$vote_timeout"
+        sleep "$poll_interval"
+    done
+    echo ""
+
+    # Check if we have votes
+    if ! both_voted "$peer_sync"; then
+        die "Not all agents submitted votes. Check agent terminals."
+    fi
+
+    # === CONSENSUS CHECK ===
+    local debate_round=0
+    local decision=""
+
+    while [ -z "$decision" ] && [ "$debate_round" -lt "$max_debate_rounds" ]; do
+        if votes_agree "$peer_sync"; then
+            decision="$(get_agreed_vote "$peer_sync")"
+            success "Consensus reached: merge $decision's PR"
+            break
+        fi
+
+        # Votes disagree - start debate
+        debate_round=$((debate_round + 1))
+        echo "$debate_round" > "$peer_sync/merge-round"
+
+        info "=== Debate Round $debate_round ==="
+        local claude_vote codex_vote
+        claude_vote="$(extract_vote "$peer_sync/merge-vote-claude.md")"
+        codex_vote="$(extract_vote "$peer_sync/merge-vote-codex.md")"
+        echo "  Claude votes: $claude_vote"
+        echo "  Codex votes:  $codex_vote"
+        echo ""
+
+        # Send debate messages
+        atomic_write "$peer_sync/claude.status" "debating|$(date +%s)|debate round $debate_round"
+        local claude_debate_msg
+        claude_debate_msg="$(generate_merge_debate_message "claude" "codex" "$feature" "$peer_sync" "$debate_round")"
+        tmux send-keys -t "$claude_session" "$claude_debate_msg"
+        sleep 0.5
+        tmux send-keys -t "$claude_session" C-m
+
+        atomic_write "$peer_sync/codex.status" "debating|$(date +%s)|debate round $debate_round"
+        local codex_debate_msg
+        codex_debate_msg="$(generate_merge_debate_message "codex" "claude" "$feature" "$peer_sync" "$debate_round")"
+        tmux send-keys -t "$codex_session" "$codex_debate_msg"
+        sleep 0.5
+        tmux send-keys -t "$codex_session" C-m
+
+        # Wait for debate responses
+        local debate_start=$SECONDS
+        local claude_debated=false codex_debated=false
+
+        while ! ($claude_debated && $codex_debated); do
+            local elapsed=$((SECONDS - debate_start))
+
+            local claude_status codex_status
+            claude_status="$(get_agent_status "claude" "$peer_sync")"
+            codex_status="$(get_agent_status "codex" "$peer_sync")"
+
+            [ "$claude_status" = "debate-done" ] && claude_debated=true
+            [ "$codex_status" = "debate-done" ] && codex_debated=true
+
+            if $claude_debated && $codex_debated; then
+                break
+            fi
+
+            if [ "$elapsed" -ge "$debate_timeout" ]; then
+                warn "Debate timeout (${debate_timeout}s)"
+                break
+            fi
+
+            printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$debate_timeout"
+            sleep "$poll_interval"
+        done
+        echo ""
+    done
+
+    # === ESCALATE TO USER IF NO CONSENSUS ===
+    if [ -z "$decision" ]; then
+        warn "No consensus after $max_debate_rounds debate rounds."
+        echo ""
+        echo "--- Claude's Final Vote ---"
+        cat "$peer_sync/merge-vote-claude.md"
+        echo ""
+        echo "--- Codex's Final Vote ---"
+        cat "$peer_sync/merge-vote-codex.md"
+        echo ""
+        echo "=================================="
+        echo ""
+        info "Options:"
+        echo "  [c] - Merge Claude's PR"
+        echo "  [x] - Merge Codex's PR"
+        echo ""
+        read -r -p "Your decision: " user_choice
+
+        case "$user_choice" in
+            c|C) decision="claude" ;;
+            x|X) decision="codex" ;;
+            *) die "Invalid choice. Run 'agent-duo merge' again." ;;
+        esac
+        info "User decided: merge $decision's PR"
+    fi
+
+    # Record decision
+    echo "$decision" > "$peer_sync/merge-decision"
+
+    # === EXECUTION PHASE ===
+    info "=== Merge Execution Phase ==="
+
+    # Determine roles based on decision
+    # "Losing" agent does the merge + cherry-pick work
+    # "Winning" agent reviews
+    local executor reviewer
+    if [ "$decision" = "claude" ]; then
+        executor="codex"
+        reviewer="claude"
+    else
+        executor="claude"
+        reviewer="codex"
+    fi
+
+    info "Executor (merge + cherry-pick): $executor"
+    info "Reviewer: $reviewer"
+
+    # Trigger merge-execute skill for executor
+    local executor_session
+    [ "$executor" = "claude" ] && executor_session="$claude_session" || executor_session="$codex_session"
+
+    atomic_write "$peer_sync/${executor}.status" "merging|$(date +%s)|executing merge"
+    info "Triggering duo-merge-execute for $executor..."
+    trigger_skill "$executor" "$executor_session" "duo-merge-execute"
+
+    # Wait for merge execution
+    local merge_timeout="${MERGE_TIMEOUT:-900}"
+    local merge_start=$SECONDS
+    local merge_done=false
+
+    while ! $merge_done; do
+        local elapsed=$((SECONDS - merge_start))
+        local executor_status
+        executor_status="$(get_agent_status "$executor" "$peer_sync")"
+
+        [ "$executor_status" = "merge-done" ] && merge_done=true
+
+        if $merge_done; then
+            break
+        fi
+
+        if [ "$elapsed" -ge "$merge_timeout" ]; then
+            warn "Merge execution timeout (${merge_timeout}s)"
+            break
+        fi
+
+        printf "\r  Waiting for merge... %s=%s (%ds/%ds)  " "$executor" "$executor_status" "$elapsed" "$merge_timeout"
+        sleep "$poll_interval"
+    done
+    echo ""
+
+    # === REVIEW/AMEND LOOP ===
+    local reviewer_session executor_session
+    [ "$reviewer" = "claude" ] && reviewer_session="$claude_session" || reviewer_session="$codex_session"
+    [ "$executor" = "claude" ] && executor_session="$claude_session" || executor_session="$codex_session"
+
+    local review_timeout="${MERGE_REVIEW_TIMEOUT:-600}"
+    local amend_timeout="${MERGE_AMEND_TIMEOUT:-600}"
+    local max_amend_rounds=3
+    local amend_round=0
+    local merge_approved=false
+
+    while ! $merge_approved && [ "$amend_round" -lt "$max_amend_rounds" ]; do
+        # === REVIEW PHASE ===
+        info "=== Merge Review Phase ==="
+
+        atomic_write "$peer_sync/${reviewer}.status" "merge-reviewing|$(date +%s)|reviewing merge"
+        info "Triggering duo-merge-review for $reviewer..."
+        trigger_skill "$reviewer" "$reviewer_session" "duo-merge-review"
+
+        # Wait for review
+        local review_start=$SECONDS
+        local review_done=false
+
+        while ! $review_done; do
+            local elapsed=$((SECONDS - review_start))
+            local reviewer_status
+            reviewer_status="$(get_agent_status "$reviewer" "$peer_sync")"
+
+            [ "$reviewer_status" = "merge-review-done" ] && review_done=true
+
+            if $review_done; then
+                break
+            fi
+
+            if [ "$elapsed" -ge "$review_timeout" ]; then
+                warn "Merge review timeout (${review_timeout}s)"
+                break
+            fi
+
+            printf "\r  Waiting for review... %s=%s (%ds/%ds)  " "$reviewer" "$reviewer_status" "$elapsed" "$review_timeout"
+            sleep "$poll_interval"
+        done
+        echo ""
+
+        # Check review result
+        if [ -f "$peer_sync/merge-review-${reviewer}.md" ]; then
+            if grep -qi "CHANGES REQUESTED" "$peer_sync/merge-review-${reviewer}.md"; then
+                amend_round=$((amend_round + 1))
+                warn "Review requested changes (round $amend_round/$max_amend_rounds)"
+
+                if [ "$amend_round" -ge "$max_amend_rounds" ]; then
+                    warn "Max amend rounds reached. Manual intervention needed."
+                    break
+                fi
+
+                # === AMEND PHASE ===
+                info "=== Merge Amend Phase (round $amend_round) ==="
+
+                atomic_write "$peer_sync/${executor}.status" "merging|$(date +%s)|addressing review feedback"
+                info "Triggering duo-merge-amend for $executor..."
+                trigger_skill "$executor" "$executor_session" "duo-merge-amend"
+
+                # Wait for amend
+                local amend_start=$SECONDS
+                local amend_done=false
+
+                while ! $amend_done; do
+                    local elapsed=$((SECONDS - amend_start))
+                    local executor_status
+                    executor_status="$(get_agent_status "$executor" "$peer_sync")"
+
+                    [ "$executor_status" = "merge-done" ] && amend_done=true
+
+                    if $amend_done; then
+                        break
+                    fi
+
+                    if [ "$elapsed" -ge "$amend_timeout" ]; then
+                        warn "Merge amend timeout (${amend_timeout}s)"
+                        break
+                    fi
+
+                    printf "\r  Waiting for amend... %s=%s (%ds/%ds)  " "$executor" "$executor_status" "$elapsed" "$amend_timeout"
+                    sleep "$poll_interval"
+                done
+                echo ""
+
+                # Clear the old review for next round
+                rm -f "$peer_sync/merge-review-${reviewer}.md"
+            else
+                merge_approved=true
+                success "Merge approved!"
+            fi
+        else
+            # No review file - assume approved
+            merge_approved=true
+            success "Merge complete (no review file found)"
+        fi
+    done
+
+    echo ""
+    info "=== Merge Phase Complete ==="
+    echo "Decision: $decision's PR was merged"
+    if [ -f "$peer_sync/merge-review-${reviewer}.md" ]; then
+        echo "See merge review: $peer_sync/merge-review-${reviewer}.md"
+    fi
+}
+
+#------------------------------------------------------------------------------
 # Command: signal (for agents)
 #------------------------------------------------------------------------------
 
@@ -1616,8 +2167,8 @@ cmd_signal() {
 
     # Validate status
     case "$status" in
-        clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|interrupted|error|pr-created|escalated) ;;
-        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, interrupted, error, pr-created, escalated)" ;;
+        clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|interrupted|error|pr-created|escalated|voting|vote-done|debating|debate-done|merging|merge-done|merge-reviewing|merge-review-done) ;;
+        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, interrupted, error, pr-created, escalated, voting, vote-done, debating, debate-done, merging, merge-done, merge-reviewing, merge-review-done)" ;;
     esac
 
     local content="${status}|$(date +%s)|${message}"
@@ -2959,6 +3510,12 @@ SESSION COMMANDS
         Create a PR for the specified agent (claude or codex).
         Auto-commits uncommitted changes and pushes.
 
+    merge
+        Start merge phase to consolidate both PRs into main.
+        Both agents vote on which PR to merge, debate if needed,
+        then the losing agent merges and cherry-picks features.
+        Requires both PRs to exist.
+
     cleanup [--full]
         Remove session state (.peer-sync). With --full, also removes
         worktrees and deletes the feature branches.
@@ -3002,13 +3559,15 @@ AGENT COMMANDS (used by AI agents)
     signal <agent> <status> [message]
         Signal a status change. Status values:
         clarifying, clarify-done, pushing-back, pushback-done, working, done,
-        reviewing, review-done, interrupted, error, pr-created, escalated
+        reviewing, review-done, interrupted, error, pr-created, escalated,
+        voting, vote-done, debating, debate-done, merging, merge-done,
+        merge-reviewing, merge-review-done
 
     peer-status
         Read peer's current status (requires PEER_NAME env var).
 
     phase
-        Read current phase (clarify, pushback, work, or review).
+        Read current phase (clarify, pushback, work, review, or merge).
 
     escalate <reason> [message]
         Escalate an issue requiring user input. Does not interrupt the agent.
@@ -3061,6 +3620,10 @@ EXAMPLES
     # Create PR when done
     agent-duo pr claude
 
+    # After both PRs created: merge phase
+    agent-duo merge
+    # Agents vote, debate if needed, then execute merge
+
     # Clean up
     agent-duo cleanup --full
 EOF
@@ -3084,6 +3647,7 @@ main() {
         escalate)    cmd_escalate "$@" ;;
         escalate-resolve) cmd_escalate_resolve "$@" ;;
         pr)          cmd_pr "$@" ;;
+        merge)       cmd_merge "$@" ;;
         cleanup)     cmd_cleanup "$@" ;;
         setup)       cmd_setup "$@" ;;
         doctor)      cmd_doctor "$@" ;;
