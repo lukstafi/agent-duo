@@ -188,6 +188,12 @@ agent-duo start <feature> --auto-run \
   --codex-thinking high     # Codex reasoning effort (low, medium, high)
 ```
 
+Or configure globally:
+```bash
+agent-duo config claude_model opus
+agent-duo config codex_model gpt-5.2-codex
+```
+
 ### Manual Control
 
 ```bash
