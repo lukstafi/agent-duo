@@ -442,3 +442,269 @@ Review Phase
 3. **Elegant-retry branch cleanup**: How long to keep archived attempt branches?
 
 4. **Integration with solo mode**: Do these features apply to agent-solo, and if so, how?
+
+---
+
+## 4. Spec-As-Test Feedback Loop
+
+**Problem**: Task descriptions in `<feature>.md` are prose. Agents may implement something that "works" but doesn't match the user's intent. Validation happens late (at PR review).
+
+**Solution**: Structured specs that become executable acceptance tests, validated automatically before review phase.
+
+### Spec Format
+
+````markdown
+# feature.md
+
+## Requirements
+
+- [ ] User can login with email/password
+- [ ] Failed login shows error message after 3 attempts
+- [ ] Successful login redirects to dashboard
+- [ ] Session expires after 30 minutes of inactivity
+
+## Acceptance Tests
+
+```gherkin
+Feature: User Authentication
+
+Scenario: Successful login
+  Given a registered user with email "test@example.com"
+  When they enter valid credentials
+  Then they are redirected to /dashboard
+  And a session cookie is set
+
+Scenario: Failed login lockout
+  Given a registered user
+  When they enter wrong password 3 times
+  Then login is blocked for 5 minutes
+  And an error message is displayed
+```
+````
+
+### Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ SPEC-AS-TEST INTEGRATION                                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. User writes feature.md with Requirements + Acceptance Tests │
+│                                                                 │
+│  2. Orchestrator extracts tests at session start                │
+│     - Parses gherkin/structured test blocks                     │
+│     - Generates test stubs in .peer-sync/acceptance-tests/      │
+│                                                                 │
+│  3. Work phase: Agents implement feature                        │
+│     - Can run acceptance tests anytime: `agent-duo test`        │
+│     - Tests provide concrete feedback on progress               │
+│                                                                 │
+│  4. Before review phase transition                              │
+│     - Orchestrator runs acceptance tests automatically          │
+│     - If tests fail: agent stays in work phase, gets feedback   │
+│     - If tests pass: proceed to review phase                    │
+│                                                                 │
+│  5. Review phase: Peer reviews code knowing tests pass          │
+│     - Can focus on design/approach rather than correctness      │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### New Commands
+
+```bash
+agent-duo test              # Run acceptance tests for current feature
+agent-duo test --watch      # Run tests on file changes
+agent-duo test --generate   # Generate test stubs from spec
+```
+
+### New State Files
+
+```
+.peer-sync/
+├── acceptance-tests/
+│   ├── generated/          # Auto-generated from spec
+│   │   └── auth.test.js
+│   └── results/
+│       ├── claude-round-1.json
+│       └── codex-round-1.json
+└── spec-validated          # Present when tests pass
+```
+
+### Skill Addition to `duo-work.md`
+
+```markdown
+## Acceptance Tests
+
+Your task file includes acceptance tests. Use them to validate your implementation:
+
+1. Run tests periodically: `agent-duo test`
+2. Tests must pass before you can signal `done`
+3. If tests fail, fix the implementation before proceeding
+
+The orchestrator will block review phase transition until tests pass.
+```
+
+### Test Framework Integration
+
+The orchestrator detects the project's test framework and generates appropriate test files:
+
+| Framework | Detection | Generated Format |
+|-----------|-----------|------------------|
+| Jest | `package.json` has jest | `.test.js` with describe/it |
+| pytest | `pyproject.toml` or `pytest.ini` | `test_*.py` with pytest fixtures |
+| Go testing | `go.mod` present | `*_test.go` with table-driven tests |
+| Generic | fallback | Shell script with assertions |
+
+### Benefits
+
+- **Early validation**: Catch misunderstandings before code review
+- **Concrete progress**: "3/5 tests passing" is clearer than "mostly done"
+- **Reduced review burden**: Reviewers know functionality works, can focus on design
+- **Documentation**: Specs serve as living documentation
+
+### Open Questions
+
+1. **Test generation quality**: How much can be auto-generated vs. requiring human refinement?
+2. **Gherkin vs. simpler format**: Is gherkin too heavyweight? Consider simpler checkbox-based specs.
+3. **Partial test passage**: Should agents proceed to review if 80% of tests pass?
+
+---
+
+## 5. Update Project Documentation Phase
+
+**Problem**: Agents learn project-specific patterns during implementation but this knowledge is lost when the session ends. The project's `CLAUDE.md` or `AGENTS.md` files become stale.
+
+**Solution**: A non-optional phase at session end where agents propose updates to project documentation based on what they learned.
+
+### Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ UPDATE-DOCS PHASE (automatic, after PR creation)                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Triggers when: Both PRs created OR session completing          │
+│                                                                 │
+│  1. Each agent reviews what they learned during implementation: │
+│     - New patterns discovered in the codebase                   │
+│     - Gotchas or pitfalls encountered                           │
+│     - Conventions that weren't documented                       │
+│     - Tool-specific knowledge (build commands, test patterns)   │
+│                                                                 │
+│  2. Agent reads current CLAUDE.md / AGENTS.md                   │
+│                                                                 │
+│  3. Agent proposes updates (or "no changes needed"):            │
+│     - Writes to .peer-sync/docs-update-{agent}.md               │
+│     - Includes: section, proposed text, rationale               │
+│                                                                 │
+│  4. Orchestrator notifies user of proposed updates              │
+│                                                                 │
+│  5. User reviews and applies (or discards) suggestions          │
+│     - Can cherry-pick from both agents' proposals               │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Proposal Format
+
+```markdown
+# Documentation Update Proposal
+
+**Agent:** claude
+**Session:** auth-feature
+**Date:** 2026-02-01
+
+## Proposed Updates
+
+### 1. Add to "Testing" section
+
+**Rationale:** Discovered that integration tests require a running Redis instance, not documented.
+
+**Proposed text:**
+```
+## Testing
+
+Integration tests require Redis running on localhost:6379:
+\`\`\`bash
+docker run -d -p 6379:6379 redis:alpine
+npm run test:integration
+\`\`\`
+```
+
+### 2. Add to "Conventions" section
+
+**Rationale:** The codebase uses a specific error handling pattern I had to discover.
+
+**Proposed text:**
+```
+## Error Handling
+
+All API endpoints use the `ApiError` class from `src/errors.ts`:
+- Throw `new ApiError(400, "message")` for client errors
+- Throw `new ApiError(500, "message")` for server errors
+- The global error handler formats these consistently
+```
+
+### 3. No changes needed
+
+**Section:** Build commands
+**Rationale:** Current documentation is accurate and complete.
+```
+
+### New Status Values
+
+| Status | Meaning | Set by |
+|--------|---------|--------|
+| `updating-docs` | Reviewing and proposing doc updates | Agent |
+| `docs-update-done` | Finished doc update proposal | Agent |
+
+### Skill: `duo-update-docs.md`
+
+```markdown
+# Update Documentation Phase
+
+Your implementation work is complete. Before the session ends, review what you learned and propose updates to the project's documentation.
+
+## What to Look For
+
+1. **Undocumented patterns**: Conventions you discovered by reading code
+2. **Gotchas**: Things that tripped you up or took time to figure out
+3. **Missing setup steps**: Dependencies, environment variables, services
+4. **Outdated information**: Docs that contradict current code
+5. **Useful commands**: Build, test, or debug commands you found helpful
+
+## What NOT to Include
+
+- Implementation details of your specific feature (that goes in the PR)
+- Opinions on how code "should" be written
+- Temporary workarounds or hacks
+
+## Output
+
+Write your proposals to `.peer-sync/docs-update-{your-name}.md` using the format specified.
+
+If you have no meaningful updates to propose, write "No changes needed" with a brief rationale.
+
+Signal completion: `agent-duo signal $MY_NAME docs-update-done "proposal ready"`
+```
+
+### CLI Changes
+
+```bash
+agent-duo start <feature> --skip-docs-update  # Opt out of docs phase
+```
+
+### Benefits
+
+- **Institutional knowledge capture**: Learnings don't disappear with the session
+- **Continuous documentation improvement**: Docs evolve with the codebase
+- **Two perspectives**: Both agents may notice different things
+- **Low overhead**: Agents already have context; just need to externalize it
+
+### Integration with pai-lite
+
+If pai-lite is configured, proposed doc updates can be:
+- Routed to the Mayor for consolidation with other learnings
+- Tracked as low-priority tasks if not immediately applied
+- Used to update Mayor's project-specific memory files

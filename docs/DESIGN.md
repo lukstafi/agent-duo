@@ -560,6 +560,40 @@ Agent-solo is an alternative mode where one agent codes and another reviews in a
 
 ---
 
+## ⚠️ Security Considerations
+
+**Agent-duo runs agents without permission restrictions.** Both Claude Code (`--dangerously-skip-permissions`) and Codex (`--yolo`) operate with full filesystem and shell access. This is by design—agents need unrestricted access to implement features, run tests, and coordinate via `.peer-sync/`.
+
+### Risks
+
+| Risk | Description |
+|------|-------------|
+| **Arbitrary code execution** | Agents can run any shell command |
+| **Filesystem access** | Agents can read/write any file the user can access |
+| **Network access** | Agents can make network requests (APIs, package installs) |
+| **Credential exposure** | `.env` files, SSH keys, API tokens are accessible |
+| **Supply chain** | Agents may install packages with malicious dependencies |
+
+### Current Mitigations
+
+- **Git worktrees**: Agent work is isolated to separate directories
+- **Branch isolation**: Each agent works on a dedicated branch
+- **Human review**: PRs require human approval before merge
+- **Orchestrator oversight**: Timeouts and interrupts limit runaway behavior
+
+### Future: Sandboxed Execution
+
+For higher-security scenarios, consider:
+
+1. **Container isolation**: Run each agent in a Docker container with limited mounts
+2. **VM isolation**: Dedicated VMs per agent (see pai-lite's architecture notes)
+3. **Network restrictions**: Firewall rules limiting outbound connections
+4. **Credential isolation**: Mount only necessary secrets, use short-lived tokens
+
+**Not yet implemented.** Current agent-duo assumes a trusted environment where agents operate on your behalf. If running on sensitive codebases or with untrusted task descriptions, consider additional isolation measures.
+
+---
+
 ## Historical Notes
 
 ### First Duo Run (2026-01-21)
