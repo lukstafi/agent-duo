@@ -196,6 +196,7 @@ cmd_setup() {
     install_skill "$templates_dir/duo-merge-execute.md" "$claude_skills/duo-merge-execute.md" "/duo-merge-execute"
     install_skill "$templates_dir/duo-merge-review.md" "$claude_skills/duo-merge-review.md" "/duo-merge-review"
     install_skill "$templates_dir/duo-merge-amend.md" "$claude_skills/duo-merge-amend.md" "/duo-merge-amend"
+    install_skill "$templates_dir/duo-integrate.md" "$claude_skills/duo-integrate.md" "/duo-integrate"
     success "Installed Claude skills to $claude_skills"
 
     # Install Codex skills (uses $command syntax)
@@ -203,6 +204,7 @@ cmd_setup() {
     local codex_skills="$HOME/.codex/skills"
     mkdir -p "$codex_skills/duo-work" "$codex_skills/duo-review" "$codex_skills/duo-clarify" "$codex_skills/duo-pushback" "$codex_skills/duo-amend" "$codex_skills/duo-pr-comment"
     mkdir -p "$codex_skills/duo-merge-vote" "$codex_skills/duo-merge-debate" "$codex_skills/duo-merge-execute" "$codex_skills/duo-merge-review" "$codex_skills/duo-merge-amend"
+    mkdir -p "$codex_skills/duo-integrate"
 
     install_skill "$templates_dir/duo-work.md" "$codex_skills/duo-work/SKILL.md" "\$duo-work"
     install_skill "$templates_dir/duo-review.md" "$codex_skills/duo-review/SKILL.md" "\$duo-review"
@@ -215,6 +217,7 @@ cmd_setup() {
     install_skill "$templates_dir/duo-merge-execute.md" "$codex_skills/duo-merge-execute/SKILL.md" "\$duo-merge-execute"
     install_skill "$templates_dir/duo-merge-review.md" "$codex_skills/duo-merge-review/SKILL.md" "\$duo-merge-review"
     install_skill "$templates_dir/duo-merge-amend.md" "$codex_skills/duo-merge-amend/SKILL.md" "\$duo-merge-amend"
+    install_skill "$templates_dir/duo-integrate.md" "$codex_skills/duo-integrate/SKILL.md" "\$duo-integrate"
     success "Installed Codex skills to $codex_skills"
 
     # Install unified notify hook script and configure agent hooks

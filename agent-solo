@@ -166,6 +166,7 @@ cmd_setup() {
     install_skill "$templates_dir/solo-reviewer-gather.md" "$claude_skills/solo-reviewer-gather.md" "/solo-reviewer-gather"
     install_skill "$templates_dir/solo-reviewer-pushback.md" "$claude_skills/solo-reviewer-pushback.md" "/solo-reviewer-pushback"
     install_skill "$templates_dir/solo-pr-comment.md" "$claude_skills/solo-pr-comment.md" "/solo-pr-comment"
+    install_skill "$templates_dir/solo-integrate.md" "$claude_skills/solo-integrate.md" "/solo-integrate"
     success "Installed Claude solo skills to $claude_skills"
 
     # Install Codex skills (uses $command syntax)
@@ -173,6 +174,7 @@ cmd_setup() {
     mkdir -p "$codex_skills/solo-coder-work" "$codex_skills/solo-coder-clarify"
     mkdir -p "$codex_skills/solo-reviewer-work" "$codex_skills/solo-reviewer-clarify" "$codex_skills/solo-reviewer-gather" "$codex_skills/solo-reviewer-pushback"
     mkdir -p "$codex_skills/solo-pr-comment"
+    mkdir -p "$codex_skills/solo-integrate"
 
     install_skill "$templates_dir/solo-coder-work.md" "$codex_skills/solo-coder-work/SKILL.md" "\$solo-coder-work"
     install_skill "$templates_dir/solo-coder-clarify.md" "$codex_skills/solo-coder-clarify/SKILL.md" "\$solo-coder-clarify"
@@ -181,6 +183,7 @@ cmd_setup() {
     install_skill "$templates_dir/solo-reviewer-gather.md" "$codex_skills/solo-reviewer-gather/SKILL.md" "\$solo-reviewer-gather"
     install_skill "$templates_dir/solo-reviewer-pushback.md" "$codex_skills/solo-reviewer-pushback/SKILL.md" "\$solo-reviewer-pushback"
     install_skill "$templates_dir/solo-pr-comment.md" "$codex_skills/solo-pr-comment/SKILL.md" "\$solo-pr-comment"
+    install_skill "$templates_dir/solo-integrate.md" "$codex_skills/solo-integrate/SKILL.md" "\$solo-integrate"
     success "Installed Codex solo skills to $codex_skills"
 
     # Install unified notify hook script and configure agent hooks
