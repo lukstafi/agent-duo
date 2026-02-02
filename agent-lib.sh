@@ -670,20 +670,22 @@ restart_agent_tui() {
     # Note: Environment variables should already be set by cmd_restart or cmd_start
     # when the tmux session is created. We don't re-export here to avoid duplication.
 
+    # Clear any stale input before sending command
+    tmux send-keys -t "$session" C-c
+    tmux send-keys -t "$session" C-u
+    sleep 0.2
+
     # Start the agent CLI
     local agent_cmd
     agent_cmd="$(get_agent_cmd "$agent" "$thinking")"
-    tmux send-keys -t "$session" "$agent_cmd"
-    tmux send-keys -t "$session" C-m
+    tmux send-keys -t "$session" -l "$agent_cmd"
+    tmux send-keys -t "$session" Enter
 
     sleep 2
 
     # Verify it started
     if agent_tui_is_running "$session" "$agent"; then
         success "Started $display_name TUI"
-        # Send a standalone Enter to clear any stale input buffer
-        sleep 0.5
-        tmux send-keys -t "$session" C-m
         return 0
     else
         warn "Failed to start $display_name TUI (may still be initializing)"

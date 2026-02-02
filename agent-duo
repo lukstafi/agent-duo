@@ -3339,13 +3339,17 @@ cmd_run() {
     local codex_thinking
     codex_thinking="$(cat "$peer_sync/codex-thinking" 2>/dev/null)" || codex_thinking="$DEFAULT_CODEX_THINKING"
 
-    # Optionally auto-start agents
+    # Optionally auto-start agents (only if not already running)
     if $auto_start; then
         info "Starting agents..."
-        tmux send-keys -t "$claude_session" "$(get_agent_cmd claude)"
-        tmux send-keys -t "$claude_session" C-m
-        tmux send-keys -t "$codex_session" "$(get_agent_cmd codex "$codex_thinking")"
-        tmux send-keys -t "$codex_session" C-m
+        if ! agent_tui_is_running "$claude_session" "claude"; then
+            tmux send-keys -t "$claude_session" "$(get_agent_cmd claude)"
+            tmux send-keys -t "$claude_session" C-m
+        fi
+        if ! agent_tui_is_running "$codex_session" "codex"; then
+            tmux send-keys -t "$codex_session" "$(get_agent_cmd codex "$codex_thinking")"
+            tmux send-keys -t "$codex_session" C-m
+        fi
         sleep 3
         # Task will be sent as augmented round 1 message or clarify message below
     fi

@@ -1655,13 +1655,17 @@ cmd_run() {
     local codex_thinking
     codex_thinking="$(cat "$peer_sync/codex-thinking" 2>/dev/null)" || codex_thinking="$DEFAULT_CODEX_THINKING"
 
-    # Optionally auto-start agents
+    # Optionally auto-start agents (only if not already running)
     if $auto_start; then
         info "Starting agents..."
-        tmux send-keys -t "$coder_session" "$(get_agent_cmd "$coder" "$codex_thinking")"
-        tmux send-keys -t "$coder_session" C-m
-        tmux send-keys -t "$reviewer_session" "$(get_agent_cmd "$reviewer" "$codex_thinking")"
-        tmux send-keys -t "$reviewer_session" C-m
+        if ! agent_tui_is_running "$coder_session" "$coder"; then
+            tmux send-keys -t "$coder_session" "$(get_agent_cmd "$coder" "$codex_thinking")"
+            tmux send-keys -t "$coder_session" C-m
+        fi
+        if ! agent_tui_is_running "$reviewer_session" "$reviewer"; then
+            tmux send-keys -t "$reviewer_session" "$(get_agent_cmd "$reviewer" "$codex_thinking")"
+            tmux send-keys -t "$reviewer_session" C-m
+        fi
         sleep 3
     fi
 
