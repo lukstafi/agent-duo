@@ -496,6 +496,7 @@ restart_agent_tui() {
 # Default timeouts in seconds
 DEFAULT_WORK_TIMEOUT=1200    # 20 minutes
 DEFAULT_REVIEW_TIMEOUT=600   # 10 minutes
+DEFAULT_GATHER_TIMEOUT=600   # 10 minutes
 DEFAULT_CLARIFY_TIMEOUT=600  # 10 minutes
 DEFAULT_PUSHBACK_TIMEOUT=600 # 10 minutes
 DEFAULT_POLL_INTERVAL=10     # Check every 10 seconds
@@ -707,8 +708,8 @@ lib_cmd_signal() {
 
     # Validate status
     case "$status" in
-        clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|interrupted|error|pr-created|escalated) ;;
-        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, interrupted, error, pr-created, escalated)" ;;
+        gathering|gather-done|clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|interrupted|error|pr-created|escalated) ;;
+        *) die "Invalid status: $status (valid: gathering, gather-done, clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, interrupted, error, pr-created, escalated)" ;;
     esac
 
     local content="${status}|$(date +%s)|${message}"
@@ -1502,6 +1503,19 @@ log_debug "phase=$phase status=$current_status"
 
 # Determine what status to signal based on phase
 case "$phase" in
+    gather)
+        # Don't override if already gather-done or beyond
+        case "$current_status" in
+            gather-done|clarify-done|pushback-done|done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
+        esac
+        # In solo mode, only reviewer gathers in gather phase
+        if [ "$mode" = "solo" ] && [ "$agent" != "reviewer" ]; then
+            log_debug "skipping (not reviewer in gather phase)"
+            exit 0
+        fi
+        log_debug "signaling gather-done"
+        $signal_cmd signal "$agent" gather-done "completed via hook"
+        ;;
     clarify)
         # Don't override if already clarify-done or beyond
         case "$current_status" in

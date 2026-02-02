@@ -163,6 +163,7 @@ cmd_setup() {
     install_skill "$templates_dir/solo-coder-clarify.md" "$claude_skills/solo-coder-clarify.md" "/solo-coder-clarify"
     install_skill "$templates_dir/solo-reviewer-work.md" "$claude_skills/solo-reviewer-work.md" "/solo-reviewer-work"
     install_skill "$templates_dir/solo-reviewer-clarify.md" "$claude_skills/solo-reviewer-clarify.md" "/solo-reviewer-clarify"
+    install_skill "$templates_dir/solo-reviewer-gather.md" "$claude_skills/solo-reviewer-gather.md" "/solo-reviewer-gather"
     install_skill "$templates_dir/solo-reviewer-pushback.md" "$claude_skills/solo-reviewer-pushback.md" "/solo-reviewer-pushback"
     install_skill "$templates_dir/solo-pr-comment.md" "$claude_skills/solo-pr-comment.md" "/solo-pr-comment"
     success "Installed Claude solo skills to $claude_skills"
@@ -170,13 +171,14 @@ cmd_setup() {
     # Install Codex skills (uses $command syntax)
     local codex_skills="$HOME/.codex/skills"
     mkdir -p "$codex_skills/solo-coder-work" "$codex_skills/solo-coder-clarify"
-    mkdir -p "$codex_skills/solo-reviewer-work" "$codex_skills/solo-reviewer-clarify" "$codex_skills/solo-reviewer-pushback"
+    mkdir -p "$codex_skills/solo-reviewer-work" "$codex_skills/solo-reviewer-clarify" "$codex_skills/solo-reviewer-gather" "$codex_skills/solo-reviewer-pushback"
     mkdir -p "$codex_skills/solo-pr-comment"
 
     install_skill "$templates_dir/solo-coder-work.md" "$codex_skills/solo-coder-work/SKILL.md" "\$solo-coder-work"
     install_skill "$templates_dir/solo-coder-clarify.md" "$codex_skills/solo-coder-clarify/SKILL.md" "\$solo-coder-clarify"
     install_skill "$templates_dir/solo-reviewer-work.md" "$codex_skills/solo-reviewer-work/SKILL.md" "\$solo-reviewer-work"
     install_skill "$templates_dir/solo-reviewer-clarify.md" "$codex_skills/solo-reviewer-clarify/SKILL.md" "\$solo-reviewer-clarify"
+    install_skill "$templates_dir/solo-reviewer-gather.md" "$codex_skills/solo-reviewer-gather/SKILL.md" "\$solo-reviewer-gather"
     install_skill "$templates_dir/solo-reviewer-pushback.md" "$codex_skills/solo-reviewer-pushback/SKILL.md" "\$solo-reviewer-pushback"
     install_skill "$templates_dir/solo-pr-comment.md" "$codex_skills/solo-pr-comment/SKILL.md" "\$solo-pr-comment"
     success "Installed Codex solo skills to $codex_skills"
@@ -200,10 +202,12 @@ cmd_start() {
     local feature=""
     local ttyd_mode=true
     local auto_run=false
+    local gather_mode=false
     local clarify_mode=false
     local pushback_mode=false
     local work_timeout=$DEFAULT_WORK_TIMEOUT
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
+    local gather_timeout=$DEFAULT_GATHER_TIMEOUT
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
     local pushback_timeout=$DEFAULT_PUSHBACK_TIMEOUT
     local max_rounds=10
@@ -219,10 +223,12 @@ cmd_start() {
         case "$1" in
             --no-ttyd) ttyd_mode=false; shift ;;
             --auto-run) auto_run=true; shift ;;
+            --gather) gather_mode=true; shift ;;
             --clarify) clarify_mode=true; shift ;;
             --pushback) pushback_mode=true; shift ;;
             --work-timeout) work_timeout="$2"; shift 2 ;;
             --review-timeout) review_timeout="$2"; shift 2 ;;
+            --gather-timeout) gather_timeout="$2"; shift 2 ;;
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
             --pushback-timeout) pushback_timeout="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
@@ -321,8 +327,12 @@ To start fresh: agent-solo cleanup && agent-solo start $feature"
     echo "solo" > "$peer_sync/mode"
     echo "$coder" > "$peer_sync/coder-agent"
     echo "$reviewer" > "$peer_sync/reviewer-agent"
-    # Determine initial phase: clarify -> pushback -> work
-    if $clarify_mode; then
+    # Determine initial phase: gather -> clarify -> pushback -> work
+    if $gather_mode; then
+        echo "gather" > "$peer_sync/phase"
+        echo "waiting|$(date +%s)|waiting for reviewer to gather context" > "$peer_sync/coder.status"
+        echo "gathering|$(date +%s)|starting" > "$peer_sync/reviewer.status"
+    elif $clarify_mode; then
         echo "clarify" > "$peer_sync/phase"
         echo "clarifying|$(date +%s)|starting" > "$peer_sync/coder.status"
         echo "waiting|$(date +%s)|waiting for coder" > "$peer_sync/reviewer.status"
@@ -335,6 +345,7 @@ To start fresh: agent-solo cleanup && agent-solo start $feature"
         echo "working|$(date +%s)|starting" > "$peer_sync/coder.status"
         echo "waiting|$(date +%s)|waiting for coder" > "$peer_sync/reviewer.status"
     fi
+    echo "$gather_mode" > "$peer_sync/gather-mode"
     echo "$clarify_mode" > "$peer_sync/clarify-mode"
     echo "$pushback_mode" > "$peer_sync/pushback-mode"
     echo "1" > "$peer_sync/round"
@@ -362,9 +373,9 @@ To start fresh: agent-solo cleanup && agent-solo start $feature"
 
     if $ttyd_mode; then
         start_ttyd_mode_solo "$feature" "$project_root" "$worktree" "$peer_sync" \
-            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" "$clarify_mode" "$clarify_timeout" "$coder" "$reviewer" "$pushback_mode" "$pushback_timeout"
+            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" "$clarify_mode" "$clarify_timeout" "$coder" "$reviewer" "$pushback_mode" "$pushback_timeout" "$gather_mode" "$gather_timeout"
     else
-        start_tmux_mode_solo "$feature" "$project_root" "$worktree" "$peer_sync" "$codex_thinking" "$clarify_mode" "$coder" "$reviewer" "$pushback_mode"
+        start_tmux_mode_solo "$feature" "$project_root" "$worktree" "$peer_sync" "$codex_thinking" "$clarify_mode" "$coder" "$reviewer" "$pushback_mode" "$gather_mode"
     fi
 }
 
@@ -378,6 +389,7 @@ start_tmux_mode_solo() {
     local coder="${7:-$DEFAULT_CODER}"
     local reviewer="${8:-$DEFAULT_REVIEWER}"
     local pushback_mode="${9:-false}"
+    local gather_mode="${10:-false}"
 
     local session_name="solo-${feature}"
 
@@ -429,6 +441,12 @@ start_tmux_mode_solo() {
     echo "To start agents, in each window run their CLI:"
     echo "  coder window:    $(get_agent_cmd "$coder" "$codex_thinking")"
     echo "  reviewer window: $(get_agent_cmd "$reviewer" "$codex_thinking")"
+    if [ "$gather_mode" = "true" ]; then
+        echo ""
+        echo "Gather stage enabled. The reviewer will first:"
+        echo "  1. Collect context: links to relevant code and documentation with notes"
+        echo "  2. Write context to .peer-sync/task-context.md for the coder to read"
+    fi
     if [ "$clarify_mode" = "true" ]; then
         echo ""
         echo "Clarify stage enabled. After coder submits approach and reviewer comments:"
@@ -460,6 +478,8 @@ start_ttyd_mode_solo() {
     local reviewer="${13:-$DEFAULT_REVIEWER}"
     local pushback_mode="${14:-false}"
     local pushback_timeout="${15:-$DEFAULT_PUSHBACK_TIMEOUT}"
+    local gather_mode="${16:-false}"
+    local gather_timeout="${17:-$DEFAULT_GATHER_TIMEOUT}"
 
     local session_name="solo-${feature}"
 
@@ -522,6 +542,9 @@ start_ttyd_mode_solo() {
     if [ "$auto_run" = "true" ]; then
         info "Starting orchestrator with --auto-start..."
         local run_cmd="agent-solo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
+        if [ "$gather_mode" = "true" ]; then
+            run_cmd="$run_cmd --gather-timeout $gather_timeout"
+        fi
         if [ "$clarify_mode" = "true" ]; then
             run_cmd="$run_cmd --clarify-timeout $clarify_timeout"
         fi
@@ -534,6 +557,12 @@ start_ttyd_mode_solo() {
         echo "Start orchestrator with: agent-solo run --auto-start"
     fi
     echo "Stop with: agent-solo stop"
+    if [ "$gather_mode" = "true" ]; then
+        echo ""
+        echo "Gather stage enabled. The reviewer will first:"
+        echo "  1. Collect context: links to relevant code and documentation with notes"
+        echo "  2. Write context to .peer-sync/task-context.md for the coder to read"
+    fi
     if [ "$clarify_mode" = "true" ]; then
         echo ""
         echo "Clarify stage enabled. Coder proposes approach, reviewer comments."
@@ -1177,14 +1206,92 @@ Do NOT provide implementation guidance yet - wait for the work phase.
 EOF
 }
 
+# Generate gather message for reviewer (reviewer gathers context before coder starts)
+generate_reviewer_gather_message() {
+    local feature="$1"
+    local task_content="$2"
+    local peer_sync="$3"
+
+    cat <<EOF
+# Task: $feature
+
+$task_content
+
+---
+## Agent-Solo Context - GATHER PHASE (Reviewer)
+
+You are the **REVIEWER** in a solo workflow. Before the coder starts implementing, you will gather relevant context from the codebase to help them.
+
+- **Sync directory**: $peer_sync
+
+### Purpose
+
+The coder will benefit from knowing which files and code sections are relevant to this task. Your job is to explore the codebase and document:
+1. **Relevant source files** - code that will need to be modified or understood
+2. **Documentation** - existing docs that explain the relevant systems
+3. **Tests** - existing tests that demonstrate expected behavior
+4. **Dependencies** - related code that the implementation must integrate with
+
+### Your Task
+
+1. **Explore the codebase** to find relevant files and code sections
+2. **Document your findings** with file paths, line numbers, and brief notes explaining why each is relevant
+
+### Write the Task Context
+
+Create a context file that the coder will read before starting work:
+
+\`\`\`bash
+cat > "$peer_sync/task-context.md" << 'CONTEXT_EOF'
+# Task Context for $feature
+
+## Relevant Source Files
+
+- [path/to/file.ext:line-range](path/to/file.ext) - Brief note on why this is relevant
+- [path/to/another.ext:42-60](path/to/another.ext) - What this code does and why it matters
+
+## Documentation
+
+- [docs/relevant.md](docs/relevant.md) - Description of relevant documentation
+
+## Tests
+
+- [tests/relevant_test.ext](tests/relevant_test.ext) - Tests that demonstrate expected behavior
+
+## Key Dependencies
+
+- [path/to/dependency.ext](path/to/dependency.ext) - How this relates to the task
+
+## Notes
+
+[Any additional context, gotchas, or suggestions for the coder]
+
+CONTEXT_EOF
+\`\`\`
+
+Edit the file with actual content based on your exploration. Use specific file:line references.
+
+### Signal Completion
+
+\`\`\`bash
+agent-solo signal reviewer gather-done "task context collected"
+\`\`\`
+
+Then **STOP and wait**. The coder will read your context file before starting work.
+Do NOT start implementing - that's the coder's job in the work phase.
+EOF
+}
+
 cmd_run() {
     local work_timeout=$DEFAULT_WORK_TIMEOUT
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
+    local gather_timeout=$DEFAULT_GATHER_TIMEOUT
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
     local pushback_timeout=$DEFAULT_PUSHBACK_TIMEOUT
     local poll_interval=$DEFAULT_POLL_INTERVAL
     local max_rounds=10
     local auto_start=false
+    local enable_gather=""
     local enable_clarify=""
     local enable_pushback=""
 
@@ -1193,8 +1300,10 @@ cmd_run() {
         case "$1" in
             --work-timeout) work_timeout="$2"; shift 2 ;;
             --review-timeout) review_timeout="$2"; shift 2 ;;
+            --gather-timeout) gather_timeout="$2"; shift 2 ;;
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
             --pushback-timeout) pushback_timeout="$2"; shift 2 ;;
+            --gather) enable_gather="true"; shift ;;
             --clarify) enable_clarify="true"; shift ;;
             --pushback) enable_pushback="true"; shift ;;
             --poll) poll_interval="$2"; shift 2 ;;
@@ -1260,6 +1369,87 @@ cmd_run() {
         tmux send-keys -t "$reviewer_session" "$(get_agent_cmd "$reviewer" "$codex_thinking")"
         tmux send-keys -t "$reviewer_session" C-m
         sleep 3
+    fi
+
+    # Check if gather mode is enabled
+    local gather_mode
+    if [ -n "$enable_gather" ]; then
+        gather_mode="$enable_gather"
+        echo "$enable_gather" > "$peer_sync/gather-mode"
+    else
+        gather_mode="$(cat "$peer_sync/gather-mode" 2>/dev/null)" || gather_mode="false"
+    fi
+
+    # Handle gather phase if enabled and not already confirmed
+    # Gather phase: reviewer collects context for the coder
+    if [ "$gather_mode" = "true" ] && [ ! -f "$peer_sync/gather-confirmed" ]; then
+        info "=== Gather Phase ==="
+        echo "gather" > "$peer_sync/phase"
+
+        # Read task content
+        local task_file
+        local task_content=""
+        if task_file="$(find_task_file "$root" "$feature")"; then
+            task_content="$(cat "$task_file" | head -c 4000)"
+        fi
+
+        # Reviewer gathers context
+        atomic_write "$peer_sync/coder.status" "waiting|$(date +%s)|waiting for reviewer to gather context"
+        atomic_write "$peer_sync/reviewer.status" "gathering|$(date +%s)|gather phase"
+        info "Reviewer: gather relevant context for the coder..."
+        local reviewer_gather_msg
+        reviewer_gather_msg="$(generate_reviewer_gather_message "$feature" "$task_content" "$peer_sync")"
+        tmux send-keys -t "$reviewer_session" "$reviewer_gather_msg"
+        sleep 0.5
+        tmux send-keys -t "$reviewer_session" C-m
+
+        # Wait for reviewer to complete gather
+        local gather_start=$SECONDS
+        while true; do
+            local elapsed=$((SECONDS - gather_start))
+            local reviewer_status
+            reviewer_status="$(get_agent_status "reviewer" "$peer_sync")"
+
+            if [ "$reviewer_status" = "gather-done" ]; then
+                break
+            fi
+
+            if [ "$elapsed" -ge "$gather_timeout" ]; then
+                warn "Reviewer gather timeout (${gather_timeout}s)"
+                break
+            fi
+
+            printf "\r  Waiting for reviewer... status=%s (%ds/%ds)  " "$reviewer_status" "$elapsed" "$gather_timeout"
+            sleep "$poll_interval"
+        done
+        echo ""
+
+        # Display gather results
+        echo ""
+        info "=== Gather Phase Results ==="
+        echo ""
+
+        if [ -f "$peer_sync/task-context.md" ]; then
+            echo "--- Task Context ---"
+            cat "$peer_sync/task-context.md"
+            echo ""
+        else
+            warn "Reviewer did not create task-context.md"
+        fi
+
+        echo ""
+        echo "=================================="
+        echo ""
+        info "The task context has been collected."
+        info "The coder will read this context before starting work."
+        echo ""
+        read -r -p "Press Enter to proceed to the next phase... "
+
+        # Mark gather as confirmed
+        echo "confirmed" > "$peer_sync/gather-confirmed"
+
+        success "Gather phase complete!"
+        echo ""
     fi
 
     # Check if clarify mode is enabled
@@ -2104,10 +2294,12 @@ SESSION COMMANDS
           --reviewer <agent>     Agent for reviewing (default: codex)
           --auto-run             Start orchestrator immediately
           --no-ttyd              Use single tmux session instead of web terminals
+          --gather               Enable gather stage (reviewer collects task context)
           --clarify              Enable clarify stage before work starts
           --pushback             Enable pushback stage (reviewer proposes task improvements)
           --work-timeout <secs>  Work phase timeout (default: 1200)
           --review-timeout <secs> Review phase timeout (default: 600)
+          --gather-timeout <secs> Gather stage timeout (default: 600)
           --clarify-timeout <secs> Clarify stage timeout (default: 600)
           --pushback-timeout <secs> Pushback stage timeout (default: 600)
           --max-rounds <n>       Maximum rounds (default: 10)
@@ -2122,10 +2314,12 @@ SESSION COMMANDS
         Run the orchestrator loop (coder work -> reviewer review -> repeat).
 
         Options:
+          --gather               Enable gather stage (reviewer collects task context)
           --clarify              Enable clarify stage
           --pushback             Enable pushback stage (reviewer proposes task improvements)
           --work-timeout <secs>  Work phase timeout (default: 1200)
           --review-timeout <secs> Review phase timeout (default: 600)
+          --gather-timeout <secs> Gather stage timeout (default: 600)
           --clarify-timeout <secs> Clarify stage timeout (default: 600)
           --pushback-timeout <secs> Pushback stage timeout (default: 600)
           --poll <secs>          Status poll interval (default: 10)
@@ -2143,6 +2337,7 @@ SESSION COMMANDS
           --auto-run             Restart the orchestrator loop automatically
           --work-timeout <secs>  Work phase timeout (default: 1200)
           --review-timeout <secs> Review phase timeout (default: 600)
+          --gather-timeout <secs> Gather stage timeout (default: 600)
           --clarify-timeout <secs> Clarify stage timeout (default: 600)
           --pushback-timeout <secs> Pushback stage timeout (default: 600)
           --max-rounds <n>       Maximum rounds (default: 10)
@@ -2179,14 +2374,15 @@ CONTROL COMMANDS
 AGENT COMMANDS (used by AI agents)
     signal <agent> <status> [message]
         Signal a status change. Agent is 'coder' or 'reviewer'.
-        Status values: clarifying, clarify-done, working, done,
-        reviewing, review-done, interrupted, error, pr-created, escalated
+        Status values: gathering, gather-done, clarifying, clarify-done,
+        pushing-back, pushback-done, working, done, reviewing, review-done,
+        interrupted, error, pr-created, escalated
 
     peer-status
         Read peer's current status (requires PEER_NAME env var).
 
     phase
-        Read current phase (clarify, work, or review).
+        Read current phase (gather, clarify, pushback, work, or review).
 
     escalate <reason> [message]
         Escalate an issue requiring user input. Does not interrupt the agent.
@@ -2199,6 +2395,11 @@ AGENT COMMANDS (used by AI agents)
 
 WORKFLOW
     Solo mode uses a sequential workflow:
+
+    GATHER PHASE (if --gather):
+      1. Reviewer explores codebase and collects relevant context
+      2. Reviewer writes task-context.md with file links and notes
+      3. Coder reads context before starting work
 
     CLARIFY PHASE (if --clarify):
       1. Coder proposes approach and questions
@@ -2217,8 +2418,14 @@ EXAMPLES
     # Start with auto-run (opens 3 web terminals, starts everything)
     agent-solo start auth --auto-run
 
+    # With gather phase (reviewer collects context first)
+    agent-solo start auth --auto-run --gather
+
     # With clarify phase
     agent-solo start auth --auto-run --clarify
+
+    # With all optional phases (gather -> clarify -> pushback -> work)
+    agent-solo start auth --auto-run --gather --clarify --pushback
 
     # Swap agent roles (codex codes, claude reviews)
     agent-solo start auth --coder codex --reviewer claude

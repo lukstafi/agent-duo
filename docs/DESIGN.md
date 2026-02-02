@@ -101,8 +101,8 @@ Given project directory `myapp` and feature `auth`:
 
 | Concept | Who sets | Values | Purpose |
 |---------|----------|--------|---------|
-| **Phase** | Orchestrator | `clarify`, `pushback`, `work`, `review`, `pr-comments`, `merge` | Current stage of the round |
-| **Agent Status** | Agent | `clarifying`, `clarify-done`, `pushing-back`, `pushback-done`, `working`, `done`, `reviewing`, `review-done`, `interrupted`, `error`, `escalated`, `pr-created`, `voting`, `vote-done`, `debating`, `debate-done`, `merging`, `merge-done`, `merge-reviewing`, `merge-review-done` | What agent is doing |
+| **Phase** | Orchestrator | `gather`, `clarify`, `pushback`, `work`, `review`, `pr-comments`, `merge` | Current stage of the round |
+| **Agent Status** | Agent | `gathering`, `gather-done`, `clarifying`, `clarify-done`, `pushing-back`, `pushback-done`, `working`, `done`, `reviewing`, `review-done`, `interrupted`, `error`, `escalated`, `pr-created`, `voting`, `vote-done`, `debating`, `debate-done`, `merging`, `merge-done`, `merge-reviewing`, `merge-review-done` | What agent is doing |
 | **Session State** | Orchestrator | `active`, `complete` | Overall progress |
 
 ### State Files (in `.peer-sync/`)
@@ -110,14 +110,17 @@ Given project directory `myapp` and feature `auth`:
 ```
 .peer-sync/
 ├── session           # "active" or "complete"
-├── phase             # "clarify", "pushback", "work", "review", "pr-comments", or "merge"
+├── phase             # "gather", "clarify", "pushback", "work", "review", "pr-comments", or "merge"
 ├── round             # Current round number (1, 2, 3...)
 ├── feature           # Feature name for this session
 ├── ports             # Port allocations (ORCHESTRATOR_PORT, CLAUDE_PORT, CODEX_PORT)
+├── gather-mode       # "true" or "false" - whether gather phase is enabled (solo mode)
 ├── clarify-mode      # "true" or "false" - whether clarify phase is enabled
 ├── pushback-mode     # "true" or "false" - whether pushback phase is enabled
+├── gather-confirmed  # Present when gather phase is complete (solo mode)
 ├── clarify-confirmed # Present when user confirms clarify phase
 ├── pushback-confirmed # Present when user confirms pushback phase
+├── task-context.md   # Reviewer's gathered context for the coder (solo mode gather phase)
 ├── clarify-claude.md # Claude's approach and questions (clarify phase)
 ├── clarify-codex.md  # Codex's approach and questions (clarify phase)
 ├── codex-thinking    # Codex reasoning effort level
@@ -147,6 +150,23 @@ Given project directory `myapp` and feature `auth`:
 ### Flow
 
 ```
+┌─────────────────────────────────────────────────────────────────┐
+│ GATHER PHASE (solo mode only, optional, --gather flag)          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. Orchestrator sets phase=gather                              │
+│  2. Reviewer explores codebase (status: gathering)              │
+│     - Searches for relevant source files, docs, tests           │
+│     - Write context to .peer-sync/task-context.md               │
+│  3. Reviewer signals completion (status: gather-done)           │
+│  4. User reviews context and proceeds                           │
+│  5. Coder will read task-context.md before starting work        │
+│                                                                 │
+│  Note: This phase is only available in solo mode. The reviewer  │
+│  gathers context to help the coder understand the codebase.     │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
 ┌─────────────────────────────────────────────────────────────────┐
 │ CLARIFY PHASE (optional, --clarify flag)                        │
 ├─────────────────────────────────────────────────────────────────┤
@@ -321,6 +341,8 @@ This differs from clarify/pushback phases which are enforced blocking points. Es
 
 | Status | Meaning | Set by |
 |--------|---------|--------|
+| `gathering` | Collecting task context (solo mode) | Agent (start of gather phase) |
+| `gather-done` | Finished gather phase | Agent |
 | `clarifying` | Proposing approach and questions | Agent (start of clarify phase) |
 | `clarify-done` | Finished clarify phase | Agent |
 | `pushing-back` | Proposing task improvements | Agent (start of pushback phase) |
@@ -418,6 +440,7 @@ Skills provide phase-specific instructions to agents. Installed to:
 - Codex: `~/.codex/skills/duo-{work,review,clarify,pushback,amend,pr-comment,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}/SKILL.md`
 
 Key skill behaviors:
+- **Gather phase** (solo mode): Explore codebase, collect relevant file links and notes, write `task-context.md`, signal `gather-done`
 - **Clarify phase**: Propose high-level approach, ask clarifying questions, signal `clarify-done`
 - **Pushback phase**: Propose improvements to the task file, signal `pushback-done`
 - **Work phase**: Implement solution, signal `done` when ready
@@ -443,7 +466,7 @@ Both hooks run `~/.local/bin/agent-duo-notify <agent-name>` which:
 1. Receives agent name as `$1` (required - hooks don't inherit shell environment variables)
 2. Discovers `PEER_SYNC` from `$PWD/.peer-sync` symlink (present in worktrees)
 3. Reads the current phase from `$PEER_SYNC/phase`
-4. Signals appropriate status: `done` (work), `review-done` (review), `clarify-done` (clarify), `pushback-done` (pushback)
+4. Signals appropriate status: `gather-done` (gather), `done` (work), `review-done` (review), `clarify-done` (clarify), `pushback-done` (pushback)
 5. Skips if already in a terminal state
 
 ## Notifications
@@ -537,16 +560,20 @@ Agent-solo is an alternative mode where one agent codes and another reviews in a
 ```
 
 **Workflow:**
-1. **Coder** implements the solution (work phase)
-2. **Reviewer** examines code and writes review with verdict (APPROVE/REQUEST_CHANGES)
-3. If approved: create PR. If changes requested: loop continues.
-4. After PR created: monitor for GitHub comments and address feedback
+1. **Gather phase** (optional, `--gather`): Reviewer explores codebase and collects task context
+2. **Clarify phase** (optional, `--clarify`): Coder proposes approach, reviewer comments
+3. **Pushback phase** (optional, `--pushback`): Reviewer proposes task improvements
+4. **Coder** implements the solution (work phase)
+5. **Reviewer** examines code and writes review with verdict (APPROVE/REQUEST_CHANGES)
+6. If approved: create PR. If changes requested: loop continues.
+7. After PR created: monitor for GitHub comments and address feedback
 
 **Key differences from duo mode:**
 - Single worktree (both agents work on same branch)
 - Sequential rather than parallel work
 - Clear coder/reviewer roles (swappable with `--coder` and `--reviewer`)
-- Skills: `solo-coder-{work,clarify}.md`, `solo-reviewer-{work,clarify,pushback}.md`, `solo-pr-comment.md`
+- Gather phase available (reviewer collects context for coder)
+- Skills: `solo-coder-{work,clarify}.md`, `solo-reviewer-{work,clarify,gather,pushback}.md`, `solo-pr-comment.md`
 
 ## Design Principles
 
