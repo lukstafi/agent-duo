@@ -1792,7 +1792,12 @@ cmd_cleanup() {
 
     # Try to resolve session from current directory
     if resolve_session 2>/dev/null; then
-        cleanup_single_session "$RESOLVED_FEATURE" "$main_root" "$full"
+        # Check if this is a legacy session (RESOLVED_ROOT == main_root)
+        if [ "$RESOLVED_ROOT" = "$main_root" ] && [ -d "$main_root/.peer-sync" ]; then
+            cleanup_legacy_session "$RESOLVED_FEATURE" "$main_root" "$full"
+        else
+            cleanup_single_session "$RESOLVED_FEATURE" "$main_root" "$full"
+        fi
         return
     fi
 
@@ -1920,10 +1925,7 @@ cleanup_legacy_session() {
     info "Cleaning up legacy session: $feature"
 
     # Stop any running processes first
-    RESOLVED_ROOT="$root"
-    RESOLVED_PEER_SYNC="$peer_sync"
-    RESOLVED_FEATURE="$feature"
-    cmd_stop --feature "$feature" 2>/dev/null || true
+    stop_single_session "$feature" "$root" "$peer_sync" 2>/dev/null || true
 
     # Remove session state
     rm -rf "$peer_sync"
