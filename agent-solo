@@ -10,7 +10,7 @@
 #   start <feature> [--auto-run] [--no-ttyd] [--clarify]  Start session
 #   run [options]        Run orchestrator loop with timeouts
 #   stop                 Stop ttyd servers, keep worktree
-#   restart [--auto-run] Restart session after system restart/crash
+#   restart [--auto-run] [--no-ttyd]  Restart session after system restart/crash
 #   status               Show session state
 #   confirm              Confirm clarify phase completion (proceed to work)
 #   pr                   Create PR for coder's solution
@@ -443,6 +443,9 @@ start_single_solo_session() {
         cp "$task_file" "$worktree/"
     fi
 
+    # Save ttyd mode setting for restart command
+    echo "$ttyd_mode" > "$peer_sync/ttyd-mode"
+
     if [ "$ttyd_mode" = "true" ]; then
         start_ttyd_mode_solo "$feature" "$worktree" "$worktree" "$peer_sync" \
             "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" "$clarify_mode" "$clarify_timeout" "$coder" "$reviewer" "$pushback_mode" "$pushback_timeout" "$gather_mode" "$gather_timeout"
@@ -754,11 +757,13 @@ cmd_restart() {
     local pushback_timeout=$DEFAULT_PUSHBACK_TIMEOUT
     local max_rounds=10
     local feature_arg=""
+    local ttyd_mode_override=""  # Empty means use recorded setting
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --auto-run) auto_run=true; shift ;;
+            --no-ttyd) ttyd_mode_override="false"; shift ;;
             --work-timeout) work_timeout="$2"; shift 2 ;;
             --review-timeout) review_timeout="$2"; shift 2 ;;
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
@@ -802,6 +807,7 @@ cmd_restart() {
                     cmd_args+=(--pushback-timeout "$pushback_timeout")
                     cmd_args+=(--max-rounds "$max_rounds")
                     [ "$auto_run" = true ] && cmd_args+=(--auto-run)
+                    [ "$ttyd_mode_override" = "false" ] && cmd_args+=(--no-ttyd)
 
                     if ! "$0" restart "${cmd_args[@]}"; then
                         failed=$((failed + 1))
@@ -825,7 +831,20 @@ cmd_restart() {
 
     # Check we have an active session
     [ -f "$peer_sync/feature" ] || die "No active session (missing .peer-sync/feature)"
-    [ -f "$peer_sync/ports" ] || die "No port allocations found. Was this a ttyd session? Use 'agent-solo run' for tmux mode."
+
+    # Check ttyd mode (default to true for backward compatibility with old sessions)
+    # Command-line override takes precedence over recorded setting
+    local ttyd_mode="true"
+    if [ -n "$ttyd_mode_override" ]; then
+        ttyd_mode="$ttyd_mode_override"
+    elif [ -f "$peer_sync/ttyd-mode" ]; then
+        ttyd_mode="$(cat "$peer_sync/ttyd-mode")"
+    fi
+
+    # For ttyd mode, we need ports
+    if [ "$ttyd_mode" = "true" ]; then
+        [ -f "$peer_sync/ports" ] || die "No port allocations found. Was this a ttyd session?"
+    fi
 
     local feature="$RESOLVED_FEATURE"
     local project_name
@@ -835,11 +854,14 @@ cmd_restart() {
     local worktree="$root"
     local session_name="solo-${feature}"
 
-    # Load ports
-    get_ports "$peer_sync"
-    local orchestrator_port=$ORCHESTRATOR_PORT
-    local coder_port=$CODER_PORT
-    local reviewer_port=$REVIEWER_PORT
+    # Load ports (only for ttyd mode)
+    local orchestrator_port="" coder_port="" reviewer_port=""
+    if [ "$ttyd_mode" = "true" ]; then
+        get_ports "$peer_sync"
+        orchestrator_port=$ORCHESTRATOR_PORT
+        coder_port=$CODER_PORT
+        reviewer_port=$REVIEWER_PORT
+    fi
 
     # Load agent assignments
     local coder_agent reviewer_agent
@@ -857,9 +879,10 @@ cmd_restart() {
     echo "Project:  $project_name"
     echo "Coder:    $coder_agent"
     echo "Reviewer: $reviewer_agent"
+    echo "Mode:     $([ "$ttyd_mode" = "true" ] && echo "ttyd (web terminals)" || echo "tmux (single session)")"
     echo ""
 
-    # Ensure pids directory exists
+    # Ensure pids directory exists (only needed for ttyd mode, but harmless otherwise)
     mkdir -p "$peer_sync/pids"
 
     local errors=0
@@ -870,77 +893,122 @@ cmd_restart() {
     #---------------------------------------------------------------------------
     info "Checking tmux sessions..."
 
-    # Check orchestrator tmux session
-    if ! tmux_session_exists "${session_name}-orchestrator"; then
-        info "Creating tmux session: ${session_name}-orchestrator"
-        tmux new-session -d -s "${session_name}-orchestrator" -c "$root"
-        for var in "PEER_SYNC='$peer_sync'" "FEATURE='$feature'"; do
-            tmux send-keys -t "${session_name}-orchestrator" "export $var"
-            tmux send-keys -t "${session_name}-orchestrator" C-m
-        done
-        restarted=$((restarted + 1))
-    else
-        success "  orchestrator tmux session: OK"
-    fi
+    # Tmux target names depend on mode
+    local orchestrator_target coder_target reviewer_target
+    if [ "$ttyd_mode" = "true" ]; then
+        # ttyd mode: separate sessions
+        orchestrator_target="${session_name}-orchestrator"
+        coder_target="${session_name}-coder"
+        reviewer_target="${session_name}-reviewer"
 
-    # Check coder tmux session
-    if ! tmux_session_exists "${session_name}-coder"; then
-        if [ ! -d "$worktree" ]; then
-            warn "  worktree missing: $worktree"
-            errors=$((errors + 1))
-        else
-            info "Creating tmux session: ${session_name}-coder"
-            tmux new-session -d -s "${session_name}-coder" -c "$worktree"
-            for var in "PEER_SYNC='$peer_sync'" "MY_NAME='coder'" "MY_ROLE='coder'" "PEER_NAME='reviewer'" "FEATURE='$feature'" "WORKTREE='$worktree'"; do
-                tmux send-keys -t "${session_name}-coder" "export $var"
-                tmux send-keys -t "${session_name}-coder" C-m
+        # Check orchestrator tmux session
+        if ! tmux_session_exists "$orchestrator_target"; then
+            info "Creating tmux session: $orchestrator_target"
+            tmux new-session -d -s "$orchestrator_target" -c "$root"
+            for var in "PEER_SYNC='$peer_sync'" "FEATURE='$feature'"; do
+                tmux send-keys -t "$orchestrator_target" "export $var"
+                tmux send-keys -t "$orchestrator_target" C-m
             done
             restarted=$((restarted + 1))
-        fi
-    else
-        success "  coder tmux session: OK"
-    fi
-
-    # Check reviewer tmux session
-    if ! tmux_session_exists "${session_name}-reviewer"; then
-        if [ ! -d "$worktree" ]; then
-            warn "  worktree missing: $worktree"
-            errors=$((errors + 1))
         else
-            info "Creating tmux session: ${session_name}-reviewer"
-            tmux new-session -d -s "${session_name}-reviewer" -c "$worktree"
-            for var in "PEER_SYNC='$peer_sync'" "MY_NAME='reviewer'" "MY_ROLE='reviewer'" "PEER_NAME='coder'" "FEATURE='$feature'" "WORKTREE='$worktree'"; do
-                tmux send-keys -t "${session_name}-reviewer" "export $var"
-                tmux send-keys -t "${session_name}-reviewer" C-m
-            done
-            restarted=$((restarted + 1))
+            success "  orchestrator tmux session: OK"
+        fi
+
+        # Check coder tmux session
+        if ! tmux_session_exists "$coder_target"; then
+            if [ ! -d "$worktree" ]; then
+                warn "  worktree missing: $worktree"
+                errors=$((errors + 1))
+            else
+                info "Creating tmux session: $coder_target"
+                tmux new-session -d -s "$coder_target" -c "$worktree"
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='coder'" "MY_ROLE='coder'" "PEER_NAME='reviewer'" "FEATURE='$feature'" "WORKTREE='$worktree'"; do
+                    tmux send-keys -t "$coder_target" "export $var"
+                    tmux send-keys -t "$coder_target" C-m
+                done
+                restarted=$((restarted + 1))
+            fi
+        else
+            success "  coder tmux session: OK"
+        fi
+
+        # Check reviewer tmux session
+        if ! tmux_session_exists "$reviewer_target"; then
+            if [ ! -d "$worktree" ]; then
+                warn "  worktree missing: $worktree"
+                errors=$((errors + 1))
+            else
+                info "Creating tmux session: $reviewer_target"
+                tmux new-session -d -s "$reviewer_target" -c "$worktree"
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='reviewer'" "MY_ROLE='reviewer'" "PEER_NAME='coder'" "FEATURE='$feature'" "WORKTREE='$worktree'"; do
+                    tmux send-keys -t "$reviewer_target" "export $var"
+                    tmux send-keys -t "$reviewer_target" C-m
+                done
+                restarted=$((restarted + 1))
+            fi
+        else
+            success "  reviewer tmux session: OK"
         fi
     else
-        success "  reviewer tmux session: OK"
+        # no-ttyd mode: single session with windows
+        orchestrator_target="${session_name}:orchestrator"
+        coder_target="${session_name}:coder"
+        reviewer_target="${session_name}:reviewer"
+
+        if ! tmux_session_exists "$session_name"; then
+            info "Creating tmux session: $session_name"
+            # Create session with orchestrator window
+            tmux new-session -d -s "$session_name" -n "orchestrator" -c "$root"
+
+            if [ -d "$worktree" ]; then
+                # Create coder window
+                tmux new-window -t "$session_name" -n "coder" -c "$worktree"
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='coder'" "MY_ROLE='coder'" "PEER_NAME='reviewer'" "FEATURE='$feature'" "WORKTREE='$worktree'"; do
+                    tmux send-keys -t "$coder_target" "export $var"
+                    tmux send-keys -t "$coder_target" C-m
+                done
+
+                # Create reviewer window
+                tmux new-window -t "$session_name" -n "reviewer" -c "$worktree"
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='reviewer'" "MY_ROLE='reviewer'" "PEER_NAME='coder'" "FEATURE='$feature'" "WORKTREE='$worktree'"; do
+                    tmux send-keys -t "$reviewer_target" "export $var"
+                    tmux send-keys -t "$reviewer_target" C-m
+                done
+            else
+                warn "  worktree missing: $worktree"
+                errors=$((errors + 1))
+            fi
+
+            restarted=$((restarted + 1))
+        else
+            success "  tmux session $session_name: OK"
+        fi
     fi
 
     #---------------------------------------------------------------------------
-    # Phase 2: Check and restart ttyd servers
+    # Phase 2: Check and restart ttyd servers (only for ttyd mode)
     #---------------------------------------------------------------------------
-    echo ""
-    info "Checking ttyd servers..."
+    if [ "$ttyd_mode" = "true" ]; then
+        echo ""
+        info "Checking ttyd servers..."
 
-    # Check orchestrator ttyd
-    if ! restart_ttyd_for_session "orchestrator" "$orchestrator_port" \
-            "${session_name}-orchestrator" "$peer_sync/pids/ttyd-orchestrator.pid"; then
-        errors=$((errors + 1))
-    fi
+        # Check orchestrator ttyd
+        if ! restart_ttyd_for_session "orchestrator" "$orchestrator_port" \
+                "$orchestrator_target" "$peer_sync/pids/ttyd-orchestrator.pid"; then
+            errors=$((errors + 1))
+        fi
 
-    # Check coder ttyd
-    if ! restart_ttyd_for_session "coder" "$coder_port" \
-            "${session_name}-coder" "$peer_sync/pids/ttyd-coder.pid"; then
-        errors=$((errors + 1))
-    fi
+        # Check coder ttyd
+        if ! restart_ttyd_for_session "coder" "$coder_port" \
+                "$coder_target" "$peer_sync/pids/ttyd-coder.pid"; then
+            errors=$((errors + 1))
+        fi
 
-    # Check reviewer ttyd
-    if ! restart_ttyd_for_session "reviewer" "$reviewer_port" \
-            "${session_name}-reviewer" "$peer_sync/pids/ttyd-reviewer.pid"; then
-        errors=$((errors + 1))
+        # Check reviewer ttyd
+        if ! restart_ttyd_for_session "reviewer" "$reviewer_port" \
+                "$reviewer_target" "$peer_sync/pids/ttyd-reviewer.pid"; then
+            errors=$((errors + 1))
+        fi
     fi
 
     #---------------------------------------------------------------------------
@@ -955,12 +1023,12 @@ cmd_restart() {
     [ "$reviewer_agent" = "codex" ] && reviewer_thinking="$codex_thinking"
 
     # Check coder TUI
-    if ! restart_agent_tui "$coder_agent" "${session_name}-coder" "$coder_thinking" "coder ($coder_agent)"; then
+    if ! restart_agent_tui "$coder_agent" "$coder_target" "$coder_thinking" "coder ($coder_agent)"; then
         errors=$((errors + 1))
     fi
 
     # Check reviewer TUI
-    if ! restart_agent_tui "$reviewer_agent" "${session_name}-reviewer" "$reviewer_thinking" "reviewer ($reviewer_agent)"; then
+    if ! restart_agent_tui "$reviewer_agent" "$reviewer_target" "$reviewer_thinking" "reviewer ($reviewer_agent)"; then
         errors=$((errors + 1))
     fi
 
@@ -996,8 +1064,8 @@ cmd_restart() {
             echo "active" > "$peer_sync/session"
             local run_cmd="agent-solo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
             run_cmd="$run_cmd --clarify-timeout $clarify_timeout --pushback-timeout $pushback_timeout"
-            tmux send-keys -t "${session_name}-orchestrator" "$run_cmd"
-            tmux send-keys -t "${session_name}-orchestrator" C-m
+            tmux send-keys -t "$orchestrator_target" "$run_cmd"
+            tmux send-keys -t "$orchestrator_target" C-m
             success "Started PR comment monitoring"
         else
             info "PR created. To monitor for PR comments:"
@@ -1009,15 +1077,15 @@ cmd_restart() {
 
         # Determine if orchestrator is already running
         local orchestrator_running=false
-        if agent_tui_is_running "${session_name}-orchestrator" "orchestrator"; then
+        if agent_tui_is_running "$orchestrator_target" "orchestrator"; then
             orchestrator_running=true
         fi
 
         if ! $orchestrator_running; then
             local run_cmd="agent-solo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
             run_cmd="$run_cmd --clarify-timeout $clarify_timeout --pushback-timeout $pushback_timeout"
-            tmux send-keys -t "${session_name}-orchestrator" "$run_cmd"
-            tmux send-keys -t "${session_name}-orchestrator" C-m
+            tmux send-keys -t "$orchestrator_target" "$run_cmd"
+            tmux send-keys -t "$orchestrator_target" C-m
             success "Started orchestrator loop"
         else
             info "Orchestrator appears to already be running"
@@ -1034,10 +1102,16 @@ cmd_restart() {
     # Summary
     #---------------------------------------------------------------------------
     echo ""
-    echo "--- Web Terminals ---"
-    echo "Orchestrator: http://localhost:$orchestrator_port"
-    echo "Coder ($coder_agent):       http://localhost:$coder_port"
-    echo "Reviewer ($reviewer_agent): http://localhost:$reviewer_port"
+    if [ "$ttyd_mode" = "true" ]; then
+        echo "--- Web Terminals ---"
+        echo "Orchestrator: http://localhost:$orchestrator_port"
+        echo "Coder ($coder_agent):       http://localhost:$coder_port"
+        echo "Reviewer ($reviewer_agent): http://localhost:$reviewer_port"
+    else
+        echo "--- tmux Session ---"
+        echo "Attach with: tmux attach -t $session_name"
+        echo "Windows: orchestrator, coder, reviewer"
+    fi
     echo ""
 
     if [ "$errors" -gt 0 ]; then
@@ -2708,11 +2782,12 @@ SESSION COMMANDS
         Stop ttyd servers and tmux sessions, keep worktree.
 
     restart [options]
-        Restart a ttyd session after a system restart or if terminals crash.
-        Checks and recreates tmux sessions, ttyd servers, and agent TUIs.
+        Restart a session after a system restart or if terminals crash.
+        Checks and recreates tmux sessions, ttyd servers (if applicable), and agent TUIs.
 
         Options:
           --auto-run             Restart the orchestrator loop automatically
+          --no-ttyd              Force tmux-only mode (override recorded setting)
           --work-timeout <secs>  Work phase timeout (default: 1200)
           --review-timeout <secs> Review phase timeout (default: 600)
           --gather-timeout <secs> Gather stage timeout (default: 600)

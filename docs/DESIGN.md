@@ -51,7 +51,7 @@ agent-duo start <f> --pushback  # Start with pushback phase (task improvement)
 agent-duo start <f> --auto-run  # Start and run orchestrator immediately
 agent-duo run [options]         # Run orchestrator loop (from orchestrator worktree)
 agent-duo stop                  # Stop ttyd servers, keep worktrees
-agent-duo restart [--auto-run] [--feature <name>]  # Recover session(s) after crash/restart
+agent-duo restart [--auto-run] [--no-ttyd] [--feature <name>]  # Recover session(s)
 agent-duo status                # Show session state
 agent-duo confirm               # Confirm clarify/pushback phase, proceed
 agent-duo pr <agent>            # Create PR for agent's solution
@@ -774,8 +774,9 @@ The escalation mechanism allows agents to flag issues discovered during work/rev
 
 The `restart` command is DWIM (Do What I Mean):
 - Recreates tmux sessions if they're missing
-- Restarts ttyd servers if they're down
+- Restarts ttyd servers if they're down (skipped for `--no-ttyd` sessions)
 - Restarts agent TUIs if needed
 - With `--auto-run`: also restarts the orchestrator loop
+- With `--no-ttyd`: forces tmux-only mode regardless of how session was started
 
-When run from the main branch without `--feature`, it iterates through all active sessions and restarts each one. Use `--feature <name>` to restart a specific session.
+The session's ttyd mode is recorded in `.peer-sync/ttyd-mode` during start. When run from the main branch without `--feature`, it iterates through all active sessions and restarts each one. Use `--feature <name>` to restart a specific session.
