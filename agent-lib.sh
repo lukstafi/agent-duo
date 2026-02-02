@@ -915,8 +915,8 @@ lib_cmd_signal() {
 
     # Validate status
     case "$status" in
-        gathering|gather-done|clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|interrupted|error|pr-created|escalated) ;;
-        *) die "Invalid status: $status (valid: gathering, gather-done, clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, interrupted, error, pr-created, escalated)" ;;
+        gathering|gather-done|clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|integrating|integrate-done|interrupted|error|pr-created|escalated) ;;
+        *) die "Invalid status: $status (valid: gathering, gather-done, clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, integrating, integrate-done, interrupted, error, pr-created, escalated)" ;;
     esac
 
     local content="${status}|$(date +%s)|${message}"
