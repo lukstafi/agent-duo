@@ -681,6 +681,9 @@ restart_agent_tui() {
     # Verify it started
     if agent_tui_is_running "$session" "$agent"; then
         success "Started $display_name TUI"
+        # Send a standalone Enter to clear any stale input buffer
+        sleep 0.5
+        tmux send-keys -t "$session" C-m
         return 0
     else
         warn "Failed to start $display_name TUI (may still be initializing)"
