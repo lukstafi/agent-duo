@@ -744,6 +744,8 @@ has_pr() {
     if [ -n "$pr_url" ]; then
         # Cache the result in the .pr file
         echo "$pr_url" > "$peer_sync/${agent}.pr"
+        # Send notification (low priority since GitHub email is primary)
+        send_pr_notification "$agent" "$feature" "$pr_url" "$mode"
         return 0
     fi
 
@@ -1432,7 +1434,7 @@ send_pr_notification() {
 
 $pr_url"
 
-    if send_ntfy "$title" "$message" "default" "rocket,link"; then
+    if send_ntfy "$title" "$message" "low" "rocket,link"; then
         return 0
     else
         return 1
