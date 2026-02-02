@@ -2082,8 +2082,8 @@ cmd_run() {
                             fi
 
                             # Check timeout
-                            if [ "$elapsed" -ge "$DEFAULT_TIMEOUT" ]; then
-                                warn "Integration timeout (${DEFAULT_TIMEOUT}s)"
+                            if [ "$elapsed" -ge "$DEFAULT_INTEGRATE_TIMEOUT" ]; then
+                                warn "Integration timeout (${DEFAULT_INTEGRATE_TIMEOUT}s)"
                                 break
                             fi
 
