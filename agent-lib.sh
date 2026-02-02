@@ -1915,6 +1915,107 @@ is_pr_open() {
     [ "$state" = "OPEN" ]
 }
 
+# Check if PR was merged (not just closed)
+# Usage: is_pr_merged <pr_url>
+# Returns: 0 if merged, 1 otherwise
+is_pr_merged() {
+    local pr_url="$1"
+    local merged_at
+    merged_at="$(gh pr view "$pr_url" --json mergedAt -q '.mergedAt' 2>/dev/null)" || return 1
+    [ -n "$merged_at" ] && [ "$merged_at" != "null" ]
+}
+
+#------------------------------------------------------------------------------
+# Integration detection (for parallel sessions rebasing onto updated main)
+#------------------------------------------------------------------------------
+
+# Get the main branch name for the repository
+# Returns: main branch name (usually "main" or "master")
+get_main_branch() {
+    local peer_sync="$1"
+
+    # Check if we have it cached
+    if [ -f "$peer_sync/main-branch" ]; then
+        cat "$peer_sync/main-branch"
+        return 0
+    fi
+
+    # Try to detect from remote HEAD
+    local main_branch
+    main_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')"
+
+    # Fallback to common names
+    if [ -z "$main_branch" ]; then
+        if git show-ref --verify --quiet refs/remotes/origin/main 2>/dev/null; then
+            main_branch="main"
+        elif git show-ref --verify --quiet refs/remotes/origin/master 2>/dev/null; then
+            main_branch="master"
+        else
+            main_branch="main"  # Default
+        fi
+    fi
+
+    # Cache it
+    echo "$main_branch" > "$peer_sync/main-branch"
+    echo "$main_branch"
+}
+
+# Get current HEAD commit of origin/main
+# Usage: get_main_head <peer_sync>
+# Returns: commit SHA
+get_main_head() {
+    local peer_sync="$1"
+    local main_branch
+    main_branch="$(get_main_branch "$peer_sync")"
+
+    git fetch origin "$main_branch" --quiet 2>/dev/null || true
+    git rev-parse "origin/$main_branch" 2>/dev/null
+}
+
+# Check if main has advanced since we last checked
+# Usage: main_has_advanced <peer_sync>
+# Returns: 0 if main has new commits, 1 otherwise
+# Side effect: updates last-main-commit file
+main_has_advanced() {
+    local peer_sync="$1"
+    local last_main_file="$peer_sync/last-main-commit"
+
+    local current_main
+    current_main="$(get_main_head "$peer_sync")" || return 1
+
+    if [ -f "$last_main_file" ]; then
+        local previous
+        previous="$(cat "$last_main_file")"
+        if [ "$current_main" != "$previous" ]; then
+            echo "$current_main" > "$last_main_file"
+            return 0  # Main has advanced
+        fi
+        return 1  # No change
+    else
+        # First check - record current state
+        echo "$current_main" > "$last_main_file"
+        return 1
+    fi
+}
+
+# Check if a branch needs rebasing (is behind origin/main)
+# Usage: branch_needs_rebase <branch> <peer_sync>
+# Returns: 0 if branch needs rebase, 1 if up-to-date
+branch_needs_rebase() {
+    local branch="$1"
+    local peer_sync="$2"
+    local main_branch
+    main_branch="$(get_main_branch "$peer_sync")"
+
+    # Check if origin/main is an ancestor of the branch
+    # If it is, branch is up-to-date (no rebase needed)
+    # If not, branch is behind and needs rebase
+    if git merge-base --is-ancestor "origin/$main_branch" "$branch" 2>/dev/null; then
+        return 1  # Up-to-date, no rebase needed
+    fi
+    return 0  # Behind, needs rebase
+}
+
 # Check if PR has "Proceed to merge" comment
 # Usage: pr_has_merge_trigger <pr_url>
 # Returns: 0 if trigger found, 1 otherwise

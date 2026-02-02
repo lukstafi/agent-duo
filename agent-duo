@@ -3823,8 +3823,94 @@ cmd_run() {
                 is_pr_open "$codex_pr" && codex_open=true
 
                 if ! $claude_open && ! $codex_open; then
-                    success "Both PRs are closed/merged. Session complete!"
+                    # Distinguish between merged and closed-without-merge
+                    if is_pr_merged "$claude_pr" || is_pr_merged "$codex_pr"; then
+                        success "PR accepted and merged to main. Session complete!"
+                        echo "accepted" > "$peer_sync/session"
+                    else
+                        info "PRs closed without merging. Session complete."
+                        echo "closed" > "$peer_sync/session"
+                    fi
                     break
+                fi
+
+                # Check if main has advanced (another feature was merged)
+                # and our branches need rebasing
+                if main_has_advanced "$peer_sync"; then
+                    info "Main branch has advanced - checking if rebase needed..."
+
+                    local claude_branch codex_branch
+                    claude_branch="${feature}-claude"
+                    codex_branch="${feature}-codex"
+
+                    local needs_integrate=false
+                    if $claude_open && branch_needs_rebase "$claude_branch" "$peer_sync"; then
+                        needs_integrate=true
+                    fi
+                    if $codex_open && branch_needs_rebase "$codex_branch" "$peer_sync"; then
+                        needs_integrate=true
+                    fi
+
+                    if $needs_integrate; then
+                        info "Branches need rebasing onto updated main"
+                        echo "integrate" > "$peer_sync/phase"
+
+                        # Trigger integrate skill for agents with open PRs
+                        if $claude_open; then
+                            check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+                            atomic_write "$peer_sync/claude.status" "working|$(date +%s)|integrating (rebasing onto main)"
+                            info "Triggering duo-integrate for claude..."
+                            trigger_skill "claude" "$claude_session" "duo-integrate"
+                        fi
+                        if $codex_open; then
+                            check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+                            atomic_write "$peer_sync/codex.status" "working|$(date +%s)|integrating (rebasing onto main)"
+                            info "Triggering duo-integrate for codex..."
+                            trigger_skill "codex" "$codex_session" "duo-integrate"
+                        fi
+
+                        # Wait for integration to complete
+                        local integrate_start=$SECONDS
+                        local claude_integrated=$claude_open codex_integrated=$codex_open
+                        $claude_open && claude_integrated=false
+                        $codex_open && codex_integrated=false
+
+                        while ! ($claude_integrated && $codex_integrated); do
+                            local elapsed=$((SECONDS - integrate_start))
+
+                            local claude_status codex_status
+                            claude_status="$(get_agent_status "claude" "$peer_sync")"
+                            codex_status="$(get_agent_status "codex" "$peer_sync")"
+
+                            # Check for completion
+                            if ! $claude_integrated && [[ "$claude_status" =~ ^(integrate-done|done)$ ]]; then
+                                claude_integrated=true
+                                info "Claude completed integration"
+                            fi
+                            if ! $codex_integrated && [[ "$codex_status" =~ ^(integrate-done|done)$ ]]; then
+                                codex_integrated=true
+                                info "Codex completed integration"
+                            fi
+
+                            if $claude_integrated && $codex_integrated; then
+                                break
+                            fi
+
+                            # Check timeout
+                            if [ "$elapsed" -ge "$DEFAULT_TIMEOUT" ]; then
+                                warn "Integration timeout (${DEFAULT_TIMEOUT}s)"
+                                break
+                            fi
+
+                            printf "\r  Integrating... claude=%s codex=%s (%ds)  " "$claude_status" "$codex_status" "$elapsed"
+                            sleep "$poll_interval"
+                        done
+                        echo ""
+
+                        # Resume pr-comments phase
+                        echo "pr-comments" > "$peer_sync/phase"
+                        info "Integration complete, resuming PR comment watch"
+                    fi
                 fi
 
                 # Check for "Proceed to merge" trigger in either PR

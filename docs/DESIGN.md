@@ -438,8 +438,8 @@ agent-duo start myfeature --port 8000
 ## Skills
 
 Skills provide phase-specific instructions to agents. Installed to:
-- Claude: `~/.claude/commands/duo-{work,review,clarify,pushback,amend,pr-comment,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}.md`
-- Codex: `~/.codex/skills/duo-{work,review,clarify,pushback,amend,pr-comment,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}/SKILL.md`
+- Claude: `~/.claude/commands/duo-{work,review,clarify,pushback,amend,pr-comment,integrate,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}.md`
+- Codex: `~/.codex/skills/duo-{work,review,clarify,pushback,amend,pr-comment,integrate,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}/SKILL.md`
 
 Key skill behaviors:
 - **Gather phase** (solo mode): Explore codebase, collect relevant file links and notes, write `task-context.md`, signal `gather-done`
@@ -449,6 +449,7 @@ Key skill behaviors:
 - **Amend phase**: For agents with PRs — review peer feedback and amend PR if warranted
 - **Review phase**: Read peer's worktree via git, write review, signal `review-done`; agents with PRs still participate
 - **PR Comment phase**: Fetch GitHub PR comments via `gh pr view`, address feedback, push amendments
+- **Integrate phase**: Rebase branch onto updated main after another feature was merged, signal `integrate-done`
 - **Merge Vote phase**: Analyze both PRs objectively, vote on which to merge, signal `vote-done`
 - **Merge Debate phase**: Read peer's vote, reconsider or defend position, signal `debate-done`
 - **Merge Execute phase**: For losing agent — merge winning PR, cherry-pick from losing PR, signal `merge-done`
@@ -640,6 +641,40 @@ Commands resolve which session to operate on:
 - Legacy sessions (`.peer-sync` in main project) still work
 - Single-session workflow unchanged (no `--feature` needed)
 - Commands auto-detect the appropriate mode
+
+### Integrate Phase (Cross-Session Rebasing)
+
+When running multiple features in parallel, after one PR is merged to main:
+
+1. **Detection**: Orchestrator polls `origin/main` for changes
+2. **Check**: If main advanced, check if agent branches need rebasing
+3. **Trigger**: If behind, trigger `duo-integrate` or `solo-integrate` skill
+4. **Rebase**: Agent rebases onto main, resolves conflicts, force-pushes
+5. **Resume**: Orchestrator returns to PR comment watch phase
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    PR Comment Watch Loop                      │
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Poll: has origin/main advanced?                             │
+│    YES → Check if branches behind main                       │
+│          YES → Trigger integrate skill                       │
+│                Wait for integrate-done                       │
+│                Resume PR watch                               │
+│                                                              │
+│  Poll: PR comments changed?                                  │
+│    YES → Trigger pr-comment skill                            │
+│                                                              │
+│  Check: PRs closed?                                          │
+│    YES → Session complete (accepted/closed)                  │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**State files:**
+- `.peer-sync/last-main-commit` — Last known origin/main SHA (for change detection)
+- `.peer-sync/main-branch` — Cached main branch name (main/master)
 
 ## Design Principles
 

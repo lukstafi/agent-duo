@@ -2040,8 +2040,62 @@ cmd_run() {
             while true; do
                 # Check if PR is closed/merged
                 if ! is_pr_open "$pr_url"; then
-                    success "PR is closed/merged. Session complete!"
+                    # Distinguish between merged and closed-without-merge
+                    if is_pr_merged "$pr_url"; then
+                        success "PR accepted and merged to main. Session complete!"
+                        echo "accepted" > "$peer_sync/session"
+                    else
+                        info "PR closed without merging. Session complete."
+                        echo "closed" > "$peer_sync/session"
+                    fi
                     break
+                fi
+
+                # Check if main has advanced (another feature was merged)
+                # and our branch needs rebasing
+                if main_has_advanced "$peer_sync"; then
+                    info "Main branch has advanced - checking if rebase needed..."
+
+                    local coder_branch="${feature}"
+
+                    if branch_needs_rebase "$coder_branch" "$peer_sync"; then
+                        info "Branch needs rebasing onto updated main"
+                        echo "integrate" > "$peer_sync/phase"
+
+                        # Trigger integrate skill for coder
+                        check_tui_health "$coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
+                        atomic_write "$peer_sync/coder.status" "working|$(date +%s)|integrating (rebasing onto main)"
+                        info "Triggering solo-integrate for coder..."
+                        trigger_skill "$coder" "$coder_session" "solo-integrate"
+
+                        # Wait for integration to complete
+                        local integrate_start=$SECONDS
+                        while true; do
+                            local elapsed=$((SECONDS - integrate_start))
+                            local coder_status
+                            coder_status="$(get_agent_status "coder" "$peer_sync")"
+
+                            # Check for completion
+                            if [[ "$coder_status" =~ ^(integrate-done|done)$ ]]; then
+                                info "Coder completed integration"
+                                break
+                            fi
+
+                            # Check timeout
+                            if [ "$elapsed" -ge "$DEFAULT_TIMEOUT" ]; then
+                                warn "Integration timeout (${DEFAULT_TIMEOUT}s)"
+                                break
+                            fi
+
+                            printf "\r  Integrating... coder=%s (%ds)  " "$coder_status" "$elapsed"
+                            sleep "$poll_interval"
+                        done
+                        echo ""
+
+                        # Resume pr-comments phase
+                        echo "pr-comments" > "$peer_sync/phase"
+                        info "Integration complete, resuming PR comment watch"
+                    fi
                 fi
 
                 # Check for new comments
