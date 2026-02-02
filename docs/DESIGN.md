@@ -49,9 +49,9 @@ agent-duo start <feature>       # Start session, creates worktrees
 agent-duo start <f> --clarify   # Start with clarify phase before work
 agent-duo start <f> --pushback  # Start with pushback phase (task improvement)
 agent-duo start <f> --auto-run  # Start and run orchestrator immediately
-agent-duo run [options]         # Run orchestrator loop
+agent-duo run [options]         # Run orchestrator loop (from orchestrator worktree)
 agent-duo stop                  # Stop ttyd servers, keep worktrees
-agent-duo restart [--auto-run]  # Recover session after crash/restart
+agent-duo restart [--auto-run] [--feature <name>]  # Recover session(s) after crash/restart
 agent-duo status                # Show session state
 agent-duo confirm               # Confirm clarify/pushback phase, proceed
 agent-duo pr <agent>            # Create PR for agent's solution
@@ -759,7 +759,7 @@ Major feature additions since the initial bootstrap:
 | Feature | Description |
 |---------|-------------|
 | **Pushback phase** | New `--pushback` flag, `pushing-back`/`pushback-done` statuses, `duo-pushback` skill |
-| **`restart` command** | Recover sessions after system restart/crash (DWIM behavior) |
+| **`restart` command** | Recover sessions after system restart/crash (DWIM behavior, multi-session support) |
 | **`doctor` command** | Diagnose configuration issues, test email/ntfy delivery |
 | **`config` command** | Get/set configuration values |
 | **ntfy.sh notifications** | Push notifications via ntfy.sh service |
@@ -771,3 +771,11 @@ Major feature additions since the initial bootstrap:
 The pushback phase allows agents to propose improvements to the task file before implementation begins, enabling iterative task refinement.
 
 The escalation mechanism allows agents to flag issues discovered during work/review without interrupting their progress. Unlike clarify/pushback which are enforced phases, escalation is ad-hoc and blocks phase transitions until the user resolves.
+
+The `restart` command is DWIM (Do What I Mean):
+- Recreates tmux sessions if they're missing
+- Restarts ttyd servers if they're down
+- Restarts agent TUIs if needed
+- With `--auto-run`: also restarts the orchestrator loop
+
+When run from the main branch without `--feature`, it iterates through all active sessions and restarts each one. Use `--feature <name>` to restart a specific session.

@@ -1257,6 +1257,45 @@ cmd_restart() {
         resolve_session --feature "$feature_arg"
     else
         if ! resolve_session 2>/dev/null; then
+            # Check if we're in main project with multiple sessions
+            local main_root
+            main_root="$(get_main_project_root)"
+            local sessions
+            sessions="$(list_active_sessions "$main_root")"
+            if [ -n "$sessions" ]; then
+                # Restart all sessions
+                local session_count=0
+                local features=()
+                while IFS=: read -r feat root state; do
+                    features+=("$feat")
+                    session_count=$((session_count + 1))
+                done <<< "$sessions"
+
+                info "Restarting $session_count sessions..."
+                local failed=0
+                for feat in "${features[@]}"; do
+                    echo ""
+                    info "=== Restarting session: $feat ==="
+                    # Build command with all the options
+                    local cmd_args=(--feature "$feat")
+                    cmd_args+=(--work-timeout "$work_timeout")
+                    cmd_args+=(--review-timeout "$review_timeout")
+                    cmd_args+=(--max-rounds "$max_rounds")
+                    [ "$auto_run" = true ] && cmd_args+=(--auto-run)
+
+                    if ! "$0" restart "${cmd_args[@]}"; then
+                        failed=$((failed + 1))
+                    fi
+                done
+
+                echo ""
+                if [ $failed -eq 0 ]; then
+                    success "All $session_count sessions restarted"
+                else
+                    warn "$failed of $session_count sessions failed"
+                fi
+                return $failed
+            fi
             die "No active session found. Use --feature <name> or cd to a session worktree."
         fi
     fi
@@ -3153,7 +3192,6 @@ cmd_run() {
     local enable_clarify=""  # empty means use session default
     local enable_pushback="" # empty means use session default
     local tui_exit_behavior=$DEFAULT_TUI_EXIT_BEHAVIOR
-    local feature_arg=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -3168,36 +3206,19 @@ cmd_run() {
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --auto-start) auto_start=true; shift ;;
             --on-tui-exit) tui_exit_behavior="$2"; shift 2 ;;
-            --feature) feature_arg="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
             *) die "Unknown argument: $1" ;;
         esac
     done
 
-    # Resolve session
-    if [ -n "$feature_arg" ]; then
-        resolve_session --feature "$feature_arg"
-    else
-        # Check if multiple sessions and we're in main project
-        if ! resolve_session 2>/dev/null; then
-            local main_root
-            main_root="$(get_main_project_root)"
-            local sessions
-            sessions="$(list_active_sessions "$main_root")"
-            if [ -n "$sessions" ]; then
-                echo "Multiple sessions found. Please specify which one:"
-                echo "$sessions" | while IFS=: read -r feat root state; do
-                    echo "  --feature $feat"
-                done
-                die "Use --feature <name> to specify which session to run"
-            fi
-            die "No active session found. Start one with: agent-duo start <feature>"
-        fi
-    fi
+    # Must be run from within a session worktree
+    local root
+    root="$(get_project_root 2>/dev/null)" || die "Not in an agent-duo session. Run from the orchestrator worktree."
+    local peer_sync="$root/.peer-sync"
+    [ -f "$peer_sync/feature" ] || die "No active session (missing .peer-sync/feature)"
 
-    local root="$RESOLVED_ROOT"
-    local peer_sync="$RESOLVED_PEER_SYNC"
-    local feature="$RESOLVED_FEATURE"
+    local feature
+    feature="$(get_feature)"
 
     # Determine tmux session name
     local session_name="duo-${feature}"

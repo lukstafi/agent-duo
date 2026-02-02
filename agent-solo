@@ -750,6 +750,7 @@ cmd_restart() {
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
     local pushback_timeout=$DEFAULT_PUSHBACK_TIMEOUT
     local max_rounds=10
+    local feature_arg=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -760,28 +761,75 @@ cmd_restart() {
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
             --pushback-timeout) pushback_timeout="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
+            --feature) feature_arg="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
             *) die "Unknown argument: $1" ;;
         esac
     done
 
-    local root
-    root="$(get_project_root 2>/dev/null)" || die "Not in an agent-solo session (no .peer-sync found)"
-    local peer_sync="$root/.peer-sync"
+    # Resolve session
+    if [ -n "$feature_arg" ]; then
+        resolve_session --feature "$feature_arg"
+    else
+        if ! resolve_session 2>/dev/null; then
+            # Check if we're in main project with multiple sessions
+            local main_root
+            main_root="$(get_main_project_root)"
+            local sessions
+            sessions="$(list_active_sessions "$main_root")"
+            if [ -n "$sessions" ]; then
+                # Restart all sessions
+                local session_count=0
+                local features=()
+                while IFS=: read -r feat root state; do
+                    features+=("$feat")
+                    session_count=$((session_count + 1))
+                done <<< "$sessions"
+
+                info "Restarting $session_count sessions..."
+                local failed=0
+                for feat in "${features[@]}"; do
+                    echo ""
+                    info "=== Restarting session: $feat ==="
+                    # Build command with all the options
+                    local cmd_args=(--feature "$feat")
+                    cmd_args+=(--work-timeout "$work_timeout")
+                    cmd_args+=(--review-timeout "$review_timeout")
+                    cmd_args+=(--clarify-timeout "$clarify_timeout")
+                    cmd_args+=(--pushback-timeout "$pushback_timeout")
+                    cmd_args+=(--max-rounds "$max_rounds")
+                    [ "$auto_run" = true ] && cmd_args+=(--auto-run)
+
+                    if ! "$0" restart "${cmd_args[@]}"; then
+                        failed=$((failed + 1))
+                    fi
+                done
+
+                echo ""
+                if [ $failed -eq 0 ]; then
+                    success "All $session_count sessions restarted"
+                else
+                    warn "$failed of $session_count sessions failed"
+                fi
+                return $failed
+            fi
+            die "No active session found. Use --feature <name> or cd to a session worktree."
+        fi
+    fi
+
+    local root="$RESOLVED_ROOT"
+    local peer_sync="$RESOLVED_PEER_SYNC"
 
     # Check we have an active session
     [ -f "$peer_sync/feature" ] || die "No active session (missing .peer-sync/feature)"
     [ -f "$peer_sync/ports" ] || die "No port allocations found. Was this a ttyd session? Use 'agent-solo run' for tmux mode."
 
-    local feature
-    feature="$(get_feature)"
+    local feature="$RESOLVED_FEATURE"
     local project_name
     project_name="$(basename "$root")"
-    local parent_dir
-    parent_dir="$(dirname "$root")"
 
-    # Calculate worktree path (single shared worktree in solo mode)
-    local worktree="$parent_dir/${project_name}-${feature}"
+    # In agent-solo, the root worktree IS the shared worktree (contains .peer-sync/)
+    local worktree="$root"
     local session_name="solo-${feature}"
 
     # Load ports
@@ -1480,9 +1528,12 @@ cmd_run() {
         esac
     done
 
+    # Must be run from within a session worktree
     local root
-    root="$(get_project_root)"
+    root="$(get_project_root 2>/dev/null)" || die "Not in an agent-solo session. Run from the orchestrator worktree."
     local peer_sync="$root/.peer-sync"
+    [ -f "$peer_sync/feature" ] || die "No active session (missing .peer-sync/feature)"
+
     local feature
     feature="$(get_feature)"
 
