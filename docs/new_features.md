@@ -62,68 +62,68 @@ These features extend agent-duo's workflow with additional phases and triggers i
 ### Skill: `duo-plan.md`
 
 ```markdown
-# Plan Phase Instructions
+  # Plan Phase Instructions
 
-You are writing an implementation plan for the task. Be thorough and specific.
+  You are writing an implementation plan for the task. Be thorough and specific.
 
-## Plan Structure
+  ## Plan Structure
 
-1. **Summary**: One-paragraph overview of the approach
-2. **Key Decisions**: Architectural choices and rationale
-3. **File Changes**: List of files to create/modify with brief descriptions
-4. **Risks**: What could go wrong, edge cases to handle
-5. **Test Strategy**: How you'll verify the implementation works
-6. **Open Questions**: Anything you're uncertain about
+  1. **Summary**: One-paragraph overview of the approach
+  2. **Key Decisions**: Architectural choices and rationale
+  3. **File Changes**: List of files to create/modify with brief descriptions
+  4. **Risks**: What could go wrong, edge cases to handle
+  5. **Test Strategy**: How you'll verify the implementation works
+  6. **Open Questions**: Anything you're uncertain about
 
-## Guidelines
+  ## Guidelines
 
-- Be specific about file paths and function names
-- Consider error handling and edge cases
-- Think about backwards compatibility
-- Identify dependencies between changes
+  - Be specific about file paths and function names
+  - Consider error handling and edge cases
+  - Think about backwards compatibility
+  - Identify dependencies between changes
 
-When done, signal: `agent-duo signal $MY_NAME plan-done "plan complete"`
+  When done, signal: `agent-duo signal $MY_NAME plan-done "plan complete"`
 ```
 
 ### Skill: `duo-plan-review.md`
 
-```markdown
-# Plan Review Instructions
+````markdown
+  # Plan Review Instructions
 
-You are reviewing your peer's implementation plan as a staff engineer. Be constructively critical.
+  You are reviewing your peer's implementation plan as a staff engineer. Be constructively critical.
 
-## Review Criteria
+  ## Review Criteria
 
-1. **Completeness**: Does the plan cover all requirements?
-2. **Simplicity**: Is there a simpler approach?
-3. **Edge Cases**: What scenarios might break?
-4. **Risks**: Are the identified risks complete?
-5. **Testability**: Is the test strategy adequate?
+  1. **Completeness**: Does the plan cover all requirements?
+  2. **Simplicity**: Is there a simpler approach?
+  3. **Edge Cases**: What scenarios might break?
+  4. **Risks**: Are the identified risks complete?
+  5. **Testability**: Is the test strategy adequate?
 
-## Review Format
+  ## Review Format
 
-Write your review to `.peer-sync/plan-review-{your-name}.md`:
+  Write your review to `.peer-sync/plan-review-{your-name}.md`:
 
-```markdown
-# Plan Review
+  ```markdown
+  # Plan Review
 
-## Verdict: APPROVE | REQUEST_CHANGES | NEEDS_DISCUSSION
+  ## Verdict: APPROVE | REQUEST_CHANGES | NEEDS_DISCUSSION
 
-## Strengths
-- ...
+  ## Strengths
+  - ...
 
-## Concerns
-- ...
+  ## Concerns
+  - ...
 
-## Suggestions
-- ...
+  ## Suggestions
+  - ...
 
-## Questions for the Author
-- ...
-```
+  ## Questions for the Author
+  - ...
+  ```
 
-When done, signal: `agent-duo signal $MY_NAME plan-review-done "review complete"`
-```
+  When done, signal: `agent-duo signal $MY_NAME plan-review-done "review complete"`
+````
 
 ### CLI Changes
 
@@ -201,57 +201,57 @@ The orchestrator tracks failure signals and triggers re-planning when:
 Add to existing work skill:
 
 ```markdown
-## When to Request Re-Planning
+  ## When to Request Re-Planning
 
-If you find yourself:
-- Repeatedly reverting changes
-- Hitting the same error multiple times
-- Realizing the approach is fundamentally wrong
+  If you find yourself:
+  - Repeatedly reverting changes
+  - Hitting the same error multiple times
+  - Realizing the approach is fundamentally wrong
 
-Signal for re-planning rather than pushing through:
-`agent-duo signal $MY_NAME needs-replan "reason: approach X doesn't work because Y"`
+  Signal for re-planning rather than pushing through:
+  `agent-duo signal $MY_NAME needs-replan "reason: approach X doesn't work because Y"`
 
-This is better than accumulating technical debt or wasting time on a dead end.
+  This is better than accumulating technical debt or wasting time on a dead end.
 ```
 
 ### Skill: `duo-replan.md`
 
-```markdown
-# Re-Plan Phase Instructions
+````markdown
+  # Re-Plan Phase Instructions
 
-Your previous approach hit significant obstacles. Step back and reconsider.
+  Your previous approach hit significant obstacles. Step back and reconsider.
 
-## Re-Plan Document Structure
+  ## Re-Plan Document Structure
 
-Write to `.peer-sync/replan-{your-name}.md`:
+  Write to `.peer-sync/replan-{your-name}.md`:
 
-```markdown
-# Re-Plan Analysis
+  ```markdown
+  # Re-Plan Analysis
 
-## What Was Attempted
-- Approach taken
-- Key implementation decisions
+  ## What Was Attempted
+  - Approach taken
+  - Key implementation decisions
 
-## Why It Failed
-- Specific obstacles encountered
-- Root cause analysis
+  ## Why It Failed
+  - Specific obstacles encountered
+  - Root cause analysis
 
-## Learnings
-- What we now know that we didn't before
-- Constraints discovered
+  ## Learnings
+  - What we now know that we didn't before
+  - Constraints discovered
 
-## Proposed New Approach
-- Different strategy
-- Why this should work
-- How it avoids previous pitfalls
+  ## Proposed New Approach
+  - Different strategy
+  - Why this should work
+  - How it avoids previous pitfalls
 
-## Salvageable Work
-- Code that can be reused
-- Tests that remain valid
-```
-
-When done, signal: `agent-duo signal $MY_NAME re-plan-done "re-plan complete"`
-```
+  ## Salvageable Work
+  - Code that can be reused
+  - Tests that remain valid
+  ```
+  
+  When done, signal: `agent-duo signal $MY_NAME re-plan-done "re-plan complete"`
+````
 
 ### Configuration
 
@@ -337,56 +337,56 @@ agent-duo signal $MY_NAME needs-elegant-retry "current implementation is overcom
 
 ### Skill: `duo-elegant-retry.md`
 
-```markdown
-# Elegant Retry Instructions
+````markdown
+  # Elegant Retry Instructions
 
-Your current implementation works but is overcomplicated. You're starting fresh with everything you've learned.
+  Your current implementation works but is overcomplicated. You're starting fresh with everything you've learned.
 
-## Before Resetting
+  ## Before Resetting
 
-Write your learnings to `.peer-sync/learnings-{your-name}.md`:
+  Write your learnings to `.peer-sync/learnings-{your-name}.md`:
 
-```markdown
-# Learnings from Attempt N
+  ```markdown
+  # Learnings from Attempt N
 
-## What Worked Well
-- Components that were clean and correct
+  ## What Worked Well
+  - Components that were clean and correct
 
-## What Was Overcomplicated
-- Unnecessary abstractions
-- Premature optimizations
-- Over-engineering
+  ## What Was Overcomplicated
+  - Unnecessary abstractions
+  - Premature optimizations
+  - Over-engineering
 
-## Key Insights
-- Things you understand now that you didn't before
-- Constraints that became clear during implementation
+  ## Key Insights
+  - Things you understand now that you didn't before
+  - Constraints that became clear during implementation
 
-## The Elegant Approach
-- How you would do it differently
-- Why this is simpler/cleaner
-```
+  ## The Elegant Approach
+  - How you would do it differently
+  - Why this is simpler/cleaner
+  ```
 
-## Archive and Reset
+  ## Archive and Reset
 
-```bash
-# Archive current work
-git branch {feature}-{your-name}-attempt-{n}
-git push origin {feature}-{your-name}-attempt-{n}
+  ```bash
+  # Archive current work
+  git branch {feature}-{your-name}-attempt-{n}
+  git push origin {feature}-{your-name}-attempt-{n}
 
-# Reset to clean state
-git reset --hard origin/main
-```
+  # Reset to clean state
+  git reset --hard origin/main
+  ```
 
-## Re-Implement
+  ## Re-Implement
 
-Now implement the elegant solution:
-- Read your learnings document
-- Read peer's review (if available)
-- Aim for simplicity over completeness
-- "Knowing everything you know now, implement it right"
+  Now implement the elegant solution:
+  - Read your learnings document
+  - Read peer's review (if available)
+  - Aim for simplicity over completeness
+  - "Knowing everything you know now, implement it right"
 
-Signal when starting fresh: `agent-duo signal $MY_NAME retrying "starting elegant implementation"`
-```
+  Signal when starting fresh: `agent-duo signal $MY_NAME retrying "starting elegant implementation"`
+````
 
 ### Guardrails
 
@@ -454,32 +454,32 @@ Review Phase
 ### Spec Format
 
 ````markdown
-# feature.md
+  # feature.md
 
-## Requirements
+  ## Requirements
 
-- [ ] User can login with email/password
-- [ ] Failed login shows error message after 3 attempts
-- [ ] Successful login redirects to dashboard
-- [ ] Session expires after 30 minutes of inactivity
+  - [ ] User can login with email/password
+  - [ ] Failed login shows error message after 3 attempts
+  - [ ] Successful login redirects to dashboard
+  - [ ] Session expires after 30 minutes of inactivity
 
-## Acceptance Tests
+  ## Acceptance Tests
 
-```gherkin
-Feature: User Authentication
+  ```gherkin
+  Feature: User Authentication
 
-Scenario: Successful login
-  Given a registered user with email "test@example.com"
-  When they enter valid credentials
-  Then they are redirected to /dashboard
-  And a session cookie is set
+  Scenario: Successful login
+    Given a registered user with email "test@example.com"
+    When they enter valid credentials
+    Then they are redirected to /dashboard
+    And a session cookie is set
 
-Scenario: Failed login lockout
-  Given a registered user
-  When they enter wrong password 3 times
-  Then login is blocked for 5 minutes
-  And an error message is displayed
-```
+  Scenario: Failed login lockout
+    Given a registered user
+    When they enter wrong password 3 times
+    Then login is blocked for 5 minutes
+    And an error message is displayed
+  ```
 ````
 
 ### Flow
@@ -534,15 +534,15 @@ agent-duo test --generate   # Generate test stubs from spec
 ### Skill Addition to `duo-work.md`
 
 ```markdown
-## Acceptance Tests
+  ## Acceptance Tests
 
-Your task file includes acceptance tests. Use them to validate your implementation:
+  Your task file includes acceptance tests. Use them to validate your implementation:
 
-1. Run tests periodically: `agent-duo test`
-2. Tests must pass before you can signal `done`
-3. If tests fail, fix the implementation before proceeding
+  1. Run tests periodically: `agent-duo test`
+  2. Tests must pass before you can signal `done`
+  3. If tests fail, fix the implementation before proceeding
 
-The orchestrator will block review phase transition until tests pass.
+  The orchestrator will block review phase transition until tests pass.
 ```
 
 ### Test Framework Integration
@@ -608,49 +608,49 @@ The orchestrator detects the project's test framework and generates appropriate 
 
 ### Proposal Format
 
-```markdown
-# Documentation Update Proposal
+````markdown
+  # Documentation Update Proposal
 
-**Agent:** claude
-**Session:** auth-feature
-**Date:** 2026-02-01
+  **Agent:** claude
+  **Session:** auth-feature
+  **Date:** 2026-02-01
 
-## Proposed Updates
+  ## Proposed Updates
 
-### 1. Add to "Testing" section
+  ### 1. Add to "Testing" section
 
-**Rationale:** Discovered that integration tests require a running Redis instance, not documented.
+  **Rationale:** Discovered that integration tests require a running Redis instance, not documented.
+  
+  **Proposed text:**
+  ```
+  ## Testing
 
-**Proposed text:**
-```
-## Testing
+  Integration tests require Redis running on localhost:6379:
+  \`\`\`bash
+  docker run -d -p 6379:6379 redis:alpine
+  npm run test:integration
+  \`\`\`
+  ```
 
-Integration tests require Redis running on localhost:6379:
-\`\`\`bash
-docker run -d -p 6379:6379 redis:alpine
-npm run test:integration
-\`\`\`
-```
+  ### 2. Add to "Conventions" section
 
-### 2. Add to "Conventions" section
+  **Rationale:** The codebase uses a specific error handling pattern I had to discover.
 
-**Rationale:** The codebase uses a specific error handling pattern I had to discover.
+  **Proposed text:**
+  ```
+  ## Error Handling
 
-**Proposed text:**
-```
-## Error Handling
+  All API endpoints use the `ApiError` class from `src/errors.ts`:
+  - Throw `new ApiError(400, "message")` for client errors
+  - Throw `new ApiError(500, "message")` for server errors
+  - The global error handler formats these consistently
+  ```
 
-All API endpoints use the `ApiError` class from `src/errors.ts`:
-- Throw `new ApiError(400, "message")` for client errors
-- Throw `new ApiError(500, "message")` for server errors
-- The global error handler formats these consistently
-```
+  ### 3. No changes needed
 
-### 3. No changes needed
-
-**Section:** Build commands
-**Rationale:** Current documentation is accurate and complete.
-```
+  **Section:** Build commands
+  **Rationale:** Current documentation is accurate and complete.
+````
 
 ### New Status Values
 
@@ -662,31 +662,31 @@ All API endpoints use the `ApiError` class from `src/errors.ts`:
 ### Skill: `duo-update-docs.md`
 
 ```markdown
-# Update Documentation Phase
+  # Update Documentation Phase
 
-Your implementation work is complete. Before the session ends, review what you learned and propose updates to the project's documentation.
+  Your implementation work is complete. Before the session ends, review what you learned and propose updates to the project's documentation.
 
-## What to Look For
+  ## What to Look For
 
-1. **Undocumented patterns**: Conventions you discovered by reading code
-2. **Gotchas**: Things that tripped you up or took time to figure out
-3. **Missing setup steps**: Dependencies, environment variables, services
-4. **Outdated information**: Docs that contradict current code
-5. **Useful commands**: Build, test, or debug commands you found helpful
+  1. **Undocumented patterns**: Conventions you discovered by reading code
+  2. **Gotchas**: Things that tripped you up or took time to figure out
+  3. **Missing setup steps**: Dependencies, environment variables, services
+  4. **Outdated information**: Docs that contradict current code
+  5. **Useful commands**: Build, test, or debug commands you found helpful
 
-## What NOT to Include
+  ## What NOT to Include
 
-- Implementation details of your specific feature (that goes in the PR)
-- Opinions on how code "should" be written
-- Temporary workarounds or hacks
+  - Implementation details of your specific feature (that goes in the PR)
+  - Opinions on how code "should" be written
+  - Temporary workarounds or hacks
 
-## Output
+  ## Output
 
-Write your proposals to `.peer-sync/docs-update-{your-name}.md` using the format specified.
+  Write your proposals to `.peer-sync/docs-update-{your-name}.md` using the format specified.
 
-If you have no meaningful updates to propose, write "No changes needed" with a brief rationale.
+  If you have no meaningful updates to propose, write "No changes needed" with a brief rationale.
 
-Signal completion: `agent-duo signal $MY_NAME docs-update-done "proposal ready"`
+  Signal completion: `agent-duo signal $MY_NAME docs-update-done "proposal ready"`
 ```
 
 ### CLI Changes
