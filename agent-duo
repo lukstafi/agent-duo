@@ -702,7 +702,7 @@ cmd_config() {
 #------------------------------------------------------------------------------
 
 cmd_start() {
-    local feature=""
+    local features=()
     local ttyd_mode=true
     local auto_run=false
     local clarify_mode=false
@@ -734,7 +734,7 @@ cmd_start() {
             --claude-model) claude_model="$2"; shift 2 ;;
             --port) base_port="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
-            *) feature="$1"; shift ;;
+            *) features+=("$1"); shift ;;
         esac
     done
 
@@ -742,7 +742,7 @@ cmd_start() {
     [ -n "$codex_model" ] && export AGENT_DUO_CODEX_MODEL="$codex_model"
     [ -n "$claude_model" ] && export AGENT_DUO_CLAUDE_MODEL="$claude_model"
 
-    [ -z "$feature" ] && die "Usage: agent-duo start <feature> [--no-ttyd] [--auto-run] [--clarify]"
+    [ ${#features[@]} -eq 0 ] && die "Usage: agent-duo start <feature> [feature2 ...] [--no-ttyd] [--auto-run] [--clarify]"
 
     # Validate codex thinking effort
     case "$codex_thinking" in
@@ -756,21 +756,88 @@ cmd_start() {
     # Ensure repo has at least one commit
     git rev-parse HEAD >/dev/null 2>&1 || die "Repository has no commits. Create an initial commit first."
 
-    local project_root
-    project_root="$(git rev-parse --show-toplevel)"
+    local main_project_root
+    main_project_root="$(get_main_project_root)"
     local project_name
-    project_name="$(basename "$project_root")"
+    project_name="$(basename "$main_project_root")"
 
-    # Check for existing session
-    if [ -d "$project_root/.peer-sync" ]; then
-        die "Session already exists (.peer-sync found).
-To continue an existing session: agent-duo run
-To start fresh: agent-duo cleanup && agent-duo start $feature"
+    # Multiple features: start each one
+    if [ ${#features[@]} -gt 1 ]; then
+        info "Starting ${#features[@]} parallel sessions..."
+        local started=0 failed=0
+        for feature in "${features[@]}"; do
+            echo ""
+            info "=== Starting session: $feature ==="
+            if start_single_session "$feature" "$main_project_root" "$project_name" \
+                "$ttyd_mode" "$auto_run" "$clarify_mode" "$pushback_mode" \
+                "$work_timeout" "$review_timeout" "$clarify_timeout" "$pushback_timeout" \
+                "$max_rounds" "$codex_thinking" "$base_port"; then
+                started=$((started + 1))
+            else
+                failed=$((failed + 1))
+            fi
+        done
+        echo ""
+        echo "=== Summary ==="
+        success "Started: $started"
+        [ $failed -gt 0 ] && warn "Failed: $failed"
+        if [ $started -gt 0 ]; then
+            echo ""
+            echo "View all sessions: agent-duo status"
+        fi
+        return 0
     fi
 
-    # Check for task file
+    # Single feature
+    local feature="${features[0]}"
+    start_single_session "$feature" "$main_project_root" "$project_name" \
+        "$ttyd_mode" "$auto_run" "$clarify_mode" "$pushback_mode" \
+        "$work_timeout" "$review_timeout" "$clarify_timeout" "$pushback_timeout" \
+        "$max_rounds" "$codex_thinking" "$base_port"
+}
+
+# Start a single session for one feature
+# Called by cmd_start for each feature
+start_single_session() {
+    local feature="$1"
+    local main_project_root="$2"
+    local project_name="$3"
+    local ttyd_mode="$4"
+    local auto_run="$5"
+    local clarify_mode="$6"
+    local pushback_mode="$7"
+    local work_timeout="$8"
+    local review_timeout="$9"
+    local clarify_timeout="${10}"
+    local pushback_timeout="${11}"
+    local max_rounds="${12}"
+    local codex_thinking="${13}"
+    local base_port="${14}"
+
+    # Check for existing session for THIS feature
+    local sessions_dir="$main_project_root/.agent-sessions"
+    if [ -L "$sessions_dir/${feature}.session" ]; then
+        warn "Session already exists for feature '$feature'."
+        warn "To continue: agent-duo run --feature $feature"
+        warn "To start fresh: agent-duo cleanup --feature $feature && agent-duo start $feature"
+        return 1
+    fi
+
+    # Also check for legacy single-session mode (backward compatibility)
+    if [ -d "$main_project_root/.peer-sync" ] && [ ${#features[@]} -eq 1 ]; then
+        local existing_feature
+        existing_feature="$(cat "$main_project_root/.peer-sync/feature" 2>/dev/null)"
+        if [ "$existing_feature" = "$feature" ]; then
+            warn "Legacy session exists for feature '$feature'."
+            warn "To continue: agent-duo run"
+            warn "To start fresh: agent-duo cleanup && agent-duo start $feature"
+            return 1
+        fi
+    fi
+
+    # Check for task file in main project
     local task_file
-    if task_file="$(find_task_file "$project_root" "$feature")"; then
+    if task_file="$(find_task_file "$main_project_root" "$feature")"; then
         info "Found task file: $task_file"
     else
         warn "Task file not found: $feature.md"
@@ -781,20 +848,14 @@ To start fresh: agent-duo cleanup && agent-duo start $feature"
     info "Starting Agent Duo session: $feature"
     info "Project: $project_name"
 
-    # Set up worktree paths (siblings of project root)
     local parent_dir
-    parent_dir="$(dirname "$project_root")"
-    local worktree_claude="$parent_dir/${project_name}-${feature}-claude"
-    local worktree_codex="$parent_dir/${project_name}-${feature}-codex"
+    parent_dir="$(dirname "$main_project_root")"
 
-    # Create branches and worktrees
-    cd "$project_root"
-
-    # Detect main branch: try origin/HEAD, then common names, then current branch
+    # Detect main branch
+    cd "$main_project_root"
     local main_branch
     main_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')" || true
     if [ -z "$main_branch" ]; then
-        # Try common branch names
         for candidate in main master; do
             if git rev-parse --verify "$candidate" >/dev/null 2>&1; then
                 main_branch="$candidate"
@@ -803,13 +864,26 @@ To start fresh: agent-duo cleanup && agent-duo start $feature"
         done
     fi
     if [ -z "$main_branch" ]; then
-        # Fall back to current branch
         main_branch="$(git rev-parse --abbrev-ref HEAD)"
     fi
 
+    # Create root worktree for this feature (orchestrator runs here)
+    local root_worktree="$parent_dir/${project_name}-${feature}"
+    if [ ! -d "$root_worktree" ]; then
+        info "Creating root worktree for feature..."
+        git worktree add -b "${feature}" "$root_worktree" "$main_branch" 2>/dev/null || \
+            git worktree add "$root_worktree" "${feature}"
+    else
+        warn "Root worktree already exists: $root_worktree"
+    fi
+
+    # Create agent worktrees branching from root worktree's branch
+    local worktree_claude="$parent_dir/${project_name}-${feature}-claude"
+    local worktree_codex="$parent_dir/${project_name}-${feature}-codex"
+
     if [ ! -d "$worktree_claude" ]; then
         info "Creating worktree for claude..."
-        git worktree add -b "${feature}-claude" "$worktree_claude" "$main_branch" 2>/dev/null || \
+        git worktree add -b "${feature}-claude" "$worktree_claude" "${feature}" 2>/dev/null || \
             git worktree add "$worktree_claude" "${feature}-claude"
     else
         warn "Worktree already exists: $worktree_claude"
@@ -817,25 +891,25 @@ To start fresh: agent-duo cleanup && agent-duo start $feature"
 
     if [ ! -d "$worktree_codex" ]; then
         info "Creating worktree for codex..."
-        git worktree add -b "${feature}-codex" "$worktree_codex" "$main_branch" 2>/dev/null || \
+        git worktree add -b "${feature}-codex" "$worktree_codex" "${feature}" 2>/dev/null || \
             git worktree add "$worktree_codex" "${feature}-codex"
     else
         warn "Worktree already exists: $worktree_codex"
     fi
 
-    # Initialize .peer-sync
-    local peer_sync="$project_root/.peer-sync"
+    # Initialize .peer-sync in ROOT WORKTREE (not main project)
+    local peer_sync="$root_worktree/.peer-sync"
     mkdir -p "$peer_sync/reviews"
     mkdir -p "$peer_sync/pids"
 
     echo "active" > "$peer_sync/session"
     # Determine initial phase: clarify -> pushback -> work
-    if $clarify_mode; then
+    if [ "$clarify_mode" = "true" ]; then
         echo "clarify" > "$peer_sync/phase"
         echo "true" > "$peer_sync/clarify-mode"
         echo "clarifying|$(date +%s)|starting" > "$peer_sync/claude.status"
         echo "clarifying|$(date +%s)|starting" > "$peer_sync/codex.status"
-    elif $pushback_mode; then
+    elif [ "$pushback_mode" = "true" ]; then
         echo "pushback" > "$peer_sync/phase"
         echo "pushing-back|$(date +%s)|starting" > "$peer_sync/claude.status"
         echo "pushing-back|$(date +%s)|starting" > "$peer_sync/codex.status"
@@ -851,32 +925,37 @@ To start fresh: agent-duo cleanup && agent-duo start $feature"
     echo "$codex_thinking" > "$peer_sync/codex-thinking"
     echo "duo" > "$peer_sync/mode"
 
-    # Create symlinks in worktrees
+    # Create symlinks in agent worktrees pointing to root worktree's .peer-sync
     ln -sfn "$peer_sync" "$worktree_claude/.peer-sync"
     ln -sfn "$peer_sync" "$worktree_codex/.peer-sync"
 
-    # Ensure .peer-sync is excluded from git (using .git/info/exclude to avoid modifying tracked files)
-    local git_exclude="$project_root/.git/info/exclude"
+    # Register session in main project's .agent-sessions directory
+    mkdir -p "$sessions_dir"
+    ln -sfn "$peer_sync" "$sessions_dir/${feature}.session"
+
+    # Ensure .peer-sync and .agent-sessions are excluded from git
+    local git_exclude="$main_project_root/.git/info/exclude"
     if [ -f "$git_exclude" ]; then
-        if ! grep -qxF ".peer-sync" "$git_exclude"; then
-            echo ".peer-sync" >> "$git_exclude"
-        fi
+        grep -qxF ".peer-sync" "$git_exclude" || echo ".peer-sync" >> "$git_exclude"
+        grep -qxF ".agent-sessions" "$git_exclude" || echo ".agent-sessions" >> "$git_exclude"
     else
         mkdir -p "$(dirname "$git_exclude")"
         echo ".peer-sync" > "$git_exclude"
+        echo ".agent-sessions" >> "$git_exclude"
     fi
 
-    # Copy task file to worktrees if it exists
-    if [ -f "$task_file" ]; then
+    # Copy task file to all worktrees if it exists
+    if [ -n "$task_file" ] && [ -f "$task_file" ]; then
+        cp "$task_file" "$root_worktree/"
         cp "$task_file" "$worktree_claude/"
         cp "$task_file" "$worktree_codex/"
     fi
 
-    if $ttyd_mode; then
-        start_ttyd_mode "$feature" "$project_root" "$worktree_claude" "$worktree_codex" "$peer_sync" \
+    if [ "$ttyd_mode" = "true" ]; then
+        start_ttyd_mode "$feature" "$root_worktree" "$worktree_claude" "$worktree_codex" "$peer_sync" \
             "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" "$clarify_mode" "$clarify_timeout" "$pushback_mode" "$pushback_timeout"
     else
-        start_tmux_mode "$feature" "$project_root" "$worktree_claude" "$worktree_codex" "$peer_sync" "$codex_thinking" "$clarify_mode" "$pushback_mode"
+        start_tmux_mode "$feature" "$root_worktree" "$worktree_claude" "$worktree_codex" "$peer_sync" "$codex_thinking" "$clarify_mode" "$pushback_mode"
     fi
 }
 
@@ -1059,11 +1138,69 @@ start_ttyd_mode() {
 #------------------------------------------------------------------------------
 
 cmd_stop() {
-    local root
-    root="$(get_project_root)"
-    local peer_sync="$root/.peer-sync"
+    local feature_arg=""
 
-    info "Stopping Agent Duo..."
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --feature) feature_arg="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local main_root
+    main_root="$(get_main_project_root 2>/dev/null)" || die "Not in a git repository"
+
+    # If feature specified, stop just that one
+    if [ -n "$feature_arg" ]; then
+        local root_worktree
+        root_worktree="$(get_session_root "$feature_arg" "$main_root")" || die "No session found for feature: $feature_arg"
+        stop_single_session "$feature_arg" "$root_worktree" "$root_worktree/.peer-sync"
+        return
+    fi
+
+    # Try to resolve session from current directory
+    if resolve_session 2>/dev/null; then
+        stop_single_session "$RESOLVED_FEATURE" "$RESOLVED_ROOT" "$RESOLVED_PEER_SYNC"
+        return
+    fi
+
+    # In main project - stop all sessions
+    # First check for legacy single-session
+    if [ -d "$main_root/.peer-sync" ]; then
+        local legacy_feature
+        legacy_feature="$(cat "$main_root/.peer-sync/feature" 2>/dev/null)"
+        stop_single_session "$legacy_feature" "$main_root" "$main_root/.peer-sync"
+        return
+    fi
+
+    # Stop all sessions from registry
+    local sessions
+    sessions="$(list_active_sessions "$main_root")"
+
+    if [ -z "$sessions" ]; then
+        die "No active sessions found."
+    fi
+
+    info "Stopping all sessions..."
+
+    while IFS=: read -r feat root state; do
+        [ -z "$feat" ] && continue
+        echo ""
+        info "=== Stopping: $feat ==="
+        stop_single_session "$feat" "$root" "$root/.peer-sync"
+    done <<< "$sessions"
+
+    success "All sessions stopped"
+}
+
+# Stop a single session
+stop_single_session() {
+    local feature="$1"
+    local root="$2"
+    local peer_sync="$3"
+
+    info "Stopping Agent Duo session: $feature"
 
     # Kill ttyd processes from PID files
     if [ -d "$peer_sync/pids" ]; then
@@ -1079,24 +1216,16 @@ cmd_stop() {
         done
     fi
 
-    # Get feature name for session-specific cleanup
-    local feature
-    feature="$(get_feature 2>/dev/null)" || true
-
-    # Fallback: kill ttyd processes for THIS session only (in case PID files are missing)
-    if [ -n "$feature" ]; then
-        pkill -f "ttyd.*duo-${feature}-" 2>/dev/null && info "Killed remaining ttyd processes for duo-${feature}" || true
-    fi
+    # Fallback: kill ttyd processes for THIS session only
+    pkill -f "ttyd.*duo-${feature}-" 2>/dev/null && info "Killed remaining ttyd processes for duo-${feature}" || true
 
     # Kill tmux sessions for this feature
-    if [ -n "$feature" ]; then
-        tmux kill-session -t "duo-${feature}" 2>/dev/null && info "Killed tmux session: duo-${feature}" || true
-        tmux kill-session -t "duo-${feature}-orchestrator" 2>/dev/null && info "Killed tmux session: duo-${feature}-orchestrator" || true
-        tmux kill-session -t "duo-${feature}-claude" 2>/dev/null && info "Killed tmux session: duo-${feature}-claude" || true
-        tmux kill-session -t "duo-${feature}-codex" 2>/dev/null && info "Killed tmux session: duo-${feature}-codex" || true
-    fi
+    tmux kill-session -t "duo-${feature}" 2>/dev/null && info "Killed tmux session: duo-${feature}" || true
+    tmux kill-session -t "duo-${feature}-orchestrator" 2>/dev/null && info "Killed tmux session: duo-${feature}-orchestrator" || true
+    tmux kill-session -t "duo-${feature}-claude" 2>/dev/null && info "Killed tmux session: duo-${feature}-claude" || true
+    tmux kill-session -t "duo-${feature}-codex" 2>/dev/null && info "Killed tmux session: duo-${feature}-codex" || true
 
-    success "Stopped"
+    success "Stopped: $feature"
 }
 
 #------------------------------------------------------------------------------
@@ -1108,6 +1237,7 @@ cmd_restart() {
     local work_timeout=$DEFAULT_WORK_TIMEOUT
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
     local max_rounds=10
+    local feature_arg=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -1116,27 +1246,37 @@ cmd_restart() {
             --work-timeout) work_timeout="$2"; shift 2 ;;
             --review-timeout) review_timeout="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
+            --feature) feature_arg="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
             *) die "Unknown argument: $1" ;;
         esac
     done
 
-    local root
-    root="$(get_project_root 2>/dev/null)" || die "Not in an agent-duo session (no .peer-sync found)"
-    local peer_sync="$root/.peer-sync"
+    # Resolve session
+    if [ -n "$feature_arg" ]; then
+        resolve_session --feature "$feature_arg"
+    else
+        if ! resolve_session 2>/dev/null; then
+            die "No active session found. Use --feature <name> or cd to a session worktree."
+        fi
+    fi
+
+    local root="$RESOLVED_ROOT"
+    local peer_sync="$RESOLVED_PEER_SYNC"
 
     # Check we have an active session
     [ -f "$peer_sync/feature" ] || die "No active session (missing .peer-sync/feature)"
     [ -f "$peer_sync/ports" ] || die "No port allocations found. Was this a ttyd session?"
 
-    local feature
-    feature="$(get_feature)"
+    local feature="$RESOLVED_FEATURE"
+    local main_root
+    main_root="$(get_main_project_root)"
     local project_name
-    project_name="$(basename "$root")"
+    project_name="$(basename "$main_root")"
     local parent_dir
-    parent_dir="$(dirname "$root")"
+    parent_dir="$(dirname "$main_root")"
 
-    # Calculate paths
+    # Calculate paths - root worktree is the orchestrator location
     local worktree_claude="$parent_dir/${project_name}-${feature}-claude"
     local worktree_codex="$parent_dir/${project_name}-${feature}-codex"
     local session_name="duo-${feature}"
@@ -1356,9 +1496,58 @@ cmd_restart() {
 #------------------------------------------------------------------------------
 
 cmd_status() {
-    local root
-    root="$(get_project_root 2>/dev/null)" || die "Not in an agent-duo session"
-    local peer_sync="$root/.peer-sync"
+    local feature_arg=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --feature) feature_arg="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    # Try to resolve session
+    if [ -n "$feature_arg" ]; then
+        # Specific feature requested
+        resolve_session --feature "$feature_arg"
+        show_single_status "$RESOLVED_PEER_SYNC"
+    elif resolve_session 2>/dev/null; then
+        # Single session or in a worktree - show it
+        show_single_status "$RESOLVED_PEER_SYNC"
+    else
+        # In main project with multiple sessions or no session
+        local main_root
+        main_root="$(get_main_project_root 2>/dev/null)" || die "Not in a git repository"
+
+        # Check for legacy single-session first
+        if [ -d "$main_root/.peer-sync" ]; then
+            show_single_status "$main_root/.peer-sync"
+            return
+        fi
+
+        # Show all sessions from registry
+        local sessions
+        sessions="$(list_active_sessions "$main_root")"
+
+        if [ -z "$sessions" ]; then
+            die "No active sessions found. Start one with: agent-duo start <feature>"
+        fi
+
+        echo ""
+        echo "=== All Agent Duo Sessions ==="
+
+        while IFS=: read -r feat root state; do
+            [ -z "$feat" ] && continue
+            echo ""
+            echo "━━━ Feature: $feat ($state) ━━━"
+            show_single_status "$root/.peer-sync"
+        done <<< "$sessions"
+    fi
+}
+
+# Show status for a single session
+show_single_status() {
+    local peer_sync="$1"
 
     echo ""
     echo "=== Agent Duo Status ==="
@@ -1444,20 +1633,40 @@ cmd_status() {
 #------------------------------------------------------------------------------
 
 cmd_pr() {
-    local agent="$1"
-    [ -z "$agent" ] && die "Usage: agent-duo pr <agent>"
+    local agent=""
+    local feature_arg=""
 
-    local root
-    root="$(get_project_root)"
-    local peer_sync="$root/.peer-sync"
-    local feature
-    feature="$(get_feature)"
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --feature) feature_arg="$2"; shift 2 ;;
+            -*) die "Unknown option: $1" ;;
+            *) agent="$1"; shift ;;
+        esac
+    done
 
-    # Determine worktree
+    [ -z "$agent" ] && die "Usage: agent-duo pr <agent> [--feature <name>]"
+
+    # Resolve session
+    if [ -n "$feature_arg" ]; then
+        resolve_session --feature "$feature_arg"
+    else
+        if ! resolve_session 2>/dev/null; then
+            die "No active session found. Use --feature <name> or cd to a session worktree."
+        fi
+    fi
+
+    local root="$RESOLVED_ROOT"
+    local peer_sync="$RESOLVED_PEER_SYNC"
+    local feature="$RESOLVED_FEATURE"
+
+    # Determine worktree - get main project root for path calculation
+    local main_root
+    main_root="$(get_main_project_root)"
     local project_name
-    project_name="$(basename "$root")"
+    project_name="$(basename "$main_root")"
     local parent_dir
-    parent_dir="$(dirname "$root")"
+    parent_dir="$(dirname "$main_root")"
     local worktree="$parent_dir/${project_name}-${feature}-${agent}"
 
     [ -d "$worktree" ] || die "Worktree not found: $worktree"
@@ -1561,33 +1770,170 @@ cmd_pr() {
 
 cmd_cleanup() {
     local full=false
-    [ "$1" = "--full" ] && full=true
+    local feature_arg=""
 
-    local root
-    root="$(get_project_root)"
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --full) full=true; shift ;;
+            --feature) feature_arg="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local main_root
+    main_root="$(get_main_project_root 2>/dev/null)" || die "Not in a git repository"
+
+    # If feature specified, clean just that one
+    if [ -n "$feature_arg" ]; then
+        cleanup_single_session "$feature_arg" "$main_root" "$full"
+        return
+    fi
+
+    # Try to resolve session from current directory
+    if resolve_session 2>/dev/null; then
+        cleanup_single_session "$RESOLVED_FEATURE" "$main_root" "$full"
+        return
+    fi
+
+    # In main project - clean all sessions
+    # First check for legacy single-session
+    if [ -d "$main_root/.peer-sync" ]; then
+        local legacy_feature
+        legacy_feature="$(cat "$main_root/.peer-sync/feature" 2>/dev/null)"
+        cleanup_legacy_session "$legacy_feature" "$main_root" "$full"
+        return
+    fi
+
+    # Clean all sessions from registry
+    local sessions
+    sessions="$(list_active_sessions "$main_root")"
+
+    if [ -z "$sessions" ]; then
+        die "No active sessions found."
+    fi
+
+    local count=0
+    while IFS=: read -r feat root state; do
+        [ -z "$feat" ] && continue
+        count=$((count + 1))
+    done <<< "$sessions"
+
+    info "Cleaning up $count session(s)..."
+
+    while IFS=: read -r feat root state; do
+        [ -z "$feat" ] && continue
+        echo ""
+        info "=== Cleaning up: $feat ==="
+        cleanup_single_session "$feat" "$main_root" "$full"
+    done <<< "$sessions"
+
+    success "All sessions cleaned up"
+}
+
+# Cleanup a single session (multi-session mode)
+cleanup_single_session() {
+    local feature="$1"
+    local main_root="$2"
+    local full="$3"
+
+    local project_name
+    project_name="$(basename "$main_root")"
+    local parent_dir
+    parent_dir="$(dirname "$main_root")"
+    local sessions_dir="$main_root/.agent-sessions"
+
+    # Get root worktree path
+    local root_worktree="$parent_dir/${project_name}-${feature}"
+    local peer_sync="$root_worktree/.peer-sync"
+
+    info "Cleaning up session: $feature"
+
+    # Stop any running processes first
+    if [ -d "$peer_sync" ]; then
+        # Temporarily set variables for cmd_stop
+        RESOLVED_FEATURE="$feature"
+        RESOLVED_ROOT="$root_worktree"
+        RESOLVED_PEER_SYNC="$peer_sync"
+        stop_single_session "$feature" "$root_worktree" "$peer_sync"
+    fi
+
+    # Remove session from registry
+    if [ -L "$sessions_dir/${feature}.session" ]; then
+        rm -f "$sessions_dir/${feature}.session"
+        info "Removed from registry"
+    fi
+
+    # Remove .peer-sync from root worktree
+    if [ -d "$peer_sync" ]; then
+        rm -rf "$peer_sync"
+        info "Removed .peer-sync"
+    fi
+
+    if [ "$full" = "true" ]; then
+        local worktree_claude="$parent_dir/${project_name}-${feature}-claude"
+        local worktree_codex="$parent_dir/${project_name}-${feature}-codex"
+
+        cd "$main_root"  # Make sure we're in main repo for git operations
+
+        # Remove agent worktrees
+        if [ -d "$worktree_claude" ]; then
+            git worktree remove --force "$worktree_claude" 2>/dev/null || rm -rf "$worktree_claude"
+            info "Removed worktree: $worktree_claude"
+        fi
+
+        if [ -d "$worktree_codex" ]; then
+            git worktree remove --force "$worktree_codex" 2>/dev/null || rm -rf "$worktree_codex"
+            info "Removed worktree: $worktree_codex"
+        fi
+
+        # Remove root worktree
+        if [ -d "$root_worktree" ]; then
+            git worktree remove --force "$root_worktree" 2>/dev/null || rm -rf "$root_worktree"
+            info "Removed root worktree: $root_worktree"
+        fi
+
+        # Prune worktree references
+        git worktree prune
+
+        # Delete branches
+        git branch -D "${feature}" 2>/dev/null && info "Deleted branch: ${feature}" || true
+        git branch -D "${feature}-claude" 2>/dev/null && info "Deleted branch: ${feature}-claude" || true
+        git branch -D "${feature}-codex" 2>/dev/null && info "Deleted branch: ${feature}-codex" || true
+    fi
+
+    success "Cleanup complete for $feature"
+}
+
+# Cleanup legacy single-session (backward compatibility)
+cleanup_legacy_session() {
+    local feature="$1"
+    local root="$2"
+    local full="$3"
+
     local peer_sync="$root/.peer-sync"
-    local feature
-    feature="$(get_feature)"
     local project_name
     project_name="$(basename "$root")"
     local parent_dir
     parent_dir="$(dirname "$root")"
 
-    info "Cleaning up session: $feature"
+    info "Cleaning up legacy session: $feature"
 
     # Stop any running processes first
-    cmd_stop
+    RESOLVED_ROOT="$root"
+    RESOLVED_PEER_SYNC="$peer_sync"
+    RESOLVED_FEATURE="$feature"
+    cmd_stop --feature "$feature" 2>/dev/null || true
 
-    # Always remove session state (.peer-sync)
+    # Remove session state
     rm -rf "$peer_sync"
     info "Removed .peer-sync"
 
-    if $full; then
-        # Remove worktrees
+    if [ "$full" = "true" ]; then
         local worktree_claude="$parent_dir/${project_name}-${feature}-claude"
         local worktree_codex="$parent_dir/${project_name}-${feature}-codex"
 
-        cd "$root"  # Make sure we're not in a worktree
+        cd "$root"
 
         if [ -d "$worktree_claude" ]; then
             git worktree remove --force "$worktree_claude" 2>/dev/null || rm -rf "$worktree_claude"
@@ -1599,10 +1945,7 @@ cmd_cleanup() {
             info "Removed worktree: $worktree_codex"
         fi
 
-        # Prune worktree references
         git worktree prune
-
-        # Delete branches
         git branch -D "${feature}-claude" 2>/dev/null && info "Deleted branch: ${feature}-claude" || true
         git branch -D "${feature}-codex" 2>/dev/null && info "Deleted branch: ${feature}-codex" || true
     fi
@@ -2808,6 +3151,7 @@ cmd_run() {
     local enable_clarify=""  # empty means use session default
     local enable_pushback="" # empty means use session default
     local tui_exit_behavior=$DEFAULT_TUI_EXIT_BEHAVIOR
+    local feature_arg=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -2822,16 +3166,36 @@ cmd_run() {
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --auto-start) auto_start=true; shift ;;
             --on-tui-exit) tui_exit_behavior="$2"; shift 2 ;;
+            --feature) feature_arg="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
             *) die "Unknown argument: $1" ;;
         esac
     done
 
-    local root
-    root="$(get_project_root)"
-    local peer_sync="$root/.peer-sync"
-    local feature
-    feature="$(get_feature)"
+    # Resolve session
+    if [ -n "$feature_arg" ]; then
+        resolve_session --feature "$feature_arg"
+    else
+        # Check if multiple sessions and we're in main project
+        if ! resolve_session 2>/dev/null; then
+            local main_root
+            main_root="$(get_main_project_root)"
+            local sessions
+            sessions="$(list_active_sessions "$main_root")"
+            if [ -n "$sessions" ]; then
+                echo "Multiple sessions found. Please specify which one:"
+                echo "$sessions" | while IFS=: read -r feat root state; do
+                    echo "  --feature $feat"
+                done
+                die "Use --feature <name> to specify which session to run"
+            fi
+            die "No active session found. Start one with: agent-duo start <feature>"
+        fi
+    fi
+
+    local root="$RESOLVED_ROOT"
+    local peer_sync="$RESOLVED_PEER_SYNC"
+    local feature="$RESOLVED_FEATURE"
 
     # Determine tmux session name
     local session_name="duo-${feature}"

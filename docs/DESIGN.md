@@ -2,23 +2,25 @@
 
 ## Overview
 
-Agent Duo coordinates two AI coding agents working in parallel on the same task, each in their own git worktree, producing two alternative solutions as separate PRs.
+Agent Duo coordinates two AI coding agents working in parallel on the same task, each in their own git worktree, producing two alternative solutions as separate PRs. Multiple features can run in parallel, each with isolated session state.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      Agent Duo Session                          │
+│                      Agent Duo Session (Multi-Feature)          │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  ~/myapp/                    (main branch, orchestrator runs)   │
-│      │                                                          │
-│      ├── myfeature.md        (task description)                 │
-│      └── .peer-sync/         (coordination state)               │
+│  ~/myapp/                    (main branch, task specs here)     │
+│      ├── auth.md, payments.md (task descriptions)               │
+│      └── .agent-sessions/    (registry of active sessions)      │
 │                                                                 │
-│  ~/myapp-myfeature-claude/   (branch: myfeature-claude)         │
-│      └── .peer-sync -> ~/myapp/.peer-sync                       │
+│  ~/myapp-auth/               (root worktree, orchestrator here) │
+│      └── .peer-sync/         (session state for "auth")         │
 │                                                                 │
-│  ~/myapp-myfeature-codex/    (branch: myfeature-codex)          │
-│      └── .peer-sync -> ~/myapp/.peer-sync                       │
+│  ~/myapp-auth-claude/        (branch: auth-claude)              │
+│      └── .peer-sync -> ../myapp-auth/.peer-sync                 │
+│                                                                 │
+│  ~/myapp-auth-codex/         (branch: auth-codex)               │
+│      └── .peer-sync -> ../myapp-auth/.peer-sync                 │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -575,6 +577,70 @@ Agent-solo is an alternative mode where one agent codes and another reviews in a
 - Gather phase available (reviewer collects context for coder)
 - Skills: `solo-coder-{work,clarify}.md`, `solo-reviewer-{work,clarify,gather,pushback}.md`, `solo-pr-comment.md`
 
+## Multi-Session Support (Parallel Task Execution)
+
+Both agent-duo and agent-solo support running multiple features in parallel. Each feature gets its own isolated session with a root worktree.
+
+### Directory Structure (Multi-Session)
+
+```
+~/myapp/                          # Main project (no .peer-sync here)
+├── .agent-sessions/              # Registry tracking all active sessions
+│   ├── auth.session              # Symlink → ../myapp-auth/.peer-sync
+│   └── payments.session          # Symlink → ../myapp-payments/.peer-sync
+├── auth.md, payments.md          # Task specs in main branch
+
+~/myapp-auth/                     # Root worktree for "auth" feature
+├── .peer-sync/                   # Session state (singleton per feature)
+├── auth.md                       # Task file copied here
+└── (code)
+
+~/myapp-auth-claude/              # Agent worktree (duo mode)
+├── .peer-sync -> ../myapp-auth/.peer-sync
+~/myapp-auth-codex/               # Agent worktree (duo mode)
+├── .peer-sync -> ../myapp-auth/.peer-sync
+
+~/myapp-payments/                 # Root worktree for "payments" feature
+├── .peer-sync/                   # Separate session state
+└── ...
+```
+
+### CLI for Multi-Session
+
+```bash
+# Start multiple features at once
+agent-duo start auth payments billing --auto-run
+
+# Status shows all sessions from main project
+agent-duo status                  # Shows all sessions
+agent-duo status --feature auth   # Shows specific session
+
+# From a worktree, commands auto-detect the session
+cd ../myapp-auth-claude
+agent-duo status                  # Shows auth session
+
+# Stop/cleanup all or specific
+agent-duo stop                    # Stops all (from main project)
+agent-duo stop --feature auth     # Stops specific session
+agent-duo cleanup --full          # Cleans all with worktrees
+agent-duo cleanup --feature auth --full
+```
+
+### Session Discovery
+
+Commands resolve which session to operate on:
+
+1. **From agent/root worktree**: Auto-detect via `.peer-sync` symlink
+2. **From main project with single session**: Auto-detect
+3. **From main project with multiple sessions**: Operate on ALL sessions (default)
+4. **`--feature` flag**: Override to target specific session
+
+### Backward Compatibility
+
+- Legacy sessions (`.peer-sync` in main project) still work
+- Single-session workflow unchanged (no `--feature` needed)
+- Commands auto-detect the appropriate mode
+
 ## Design Principles
 
 1. **Simple file-based protocol** - No daemons, just files and git
@@ -584,6 +650,7 @@ Agent-solo is an alternative mode where one agent codes and another reviews in a
 5. **Unified CLI** - Single `agent-duo` command for all operations
 6. **Graceful degradation** - Works without ttyd, gh, etc.
 7. **Session recovery** - `restart` command handles crashes gracefully
+8. **Parallel sessions** - Multiple features can run simultaneously with isolated state
 
 ---
 

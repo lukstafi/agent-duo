@@ -73,6 +73,8 @@ get_project_root() {
 }
 
 # Get feature name from session
+# For multi-session: if root is a root worktree (has .peer-sync), read from there
+# For single-session (legacy): read from project root's .peer-sync
 get_feature() {
     local root
     root="$(get_project_root)"
@@ -81,6 +83,203 @@ get_feature() {
     else
         die "No active session (missing .peer-sync/feature)"
     fi
+}
+
+#------------------------------------------------------------------------------
+# Multi-session discovery (for parallel task execution)
+#------------------------------------------------------------------------------
+
+# Get the main project root (where .agent-sessions registry lives)
+# This walks up to find the actual git root (not a worktree)
+# Returns: path to main project root
+get_main_project_root() {
+    local dir="${1:-$PWD}"
+
+    # Walk up to find .git directory (not .git file, which indicates worktree)
+    while [ "$dir" != "/" ]; do
+        if [ -d "$dir/.git" ] && [ ! -f "$dir/.git" ]; then
+            # Found actual git repo (not worktree)
+            echo "$dir"
+            return 0
+        elif [ -f "$dir/.git" ]; then
+            # This is a worktree - read the gitdir to find main repo
+            local gitdir
+            gitdir="$(grep '^gitdir:' "$dir/.git" | cut -d' ' -f2-)"
+            # gitdir points to .git/worktrees/<name>, go up to find main .git
+            local main_git
+            main_git="$(cd "$dir" && cd "$gitdir/../.." && pwd)"
+            echo "$(dirname "$main_git")"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+
+    die "Not in a git repository"
+}
+
+# List all active sessions from .agent-sessions registry
+# Usage: list_active_sessions [main_project_root]
+# Output: feature_name:root_worktree_path (one per line)
+list_active_sessions() {
+    local main_root="${1:-$(get_main_project_root)}"
+    local sessions_dir="$main_root/.agent-sessions"
+
+    [ -d "$sessions_dir" ] || return 0
+
+    for session_link in "$sessions_dir"/*.session; do
+        [ -L "$session_link" ] || continue
+
+        # Extract feature name from filename (feat1.session -> feat1)
+        local filename
+        filename="$(basename "$session_link")"
+        local feature="${filename%.session}"
+
+        # Resolve symlink to get root worktree path
+        local peer_sync_path
+        peer_sync_path="$(readlink "$session_link" 2>/dev/null)" || continue
+
+        # peer_sync_path is absolute path to .peer-sync in root worktree
+        local root_worktree
+        root_worktree="$(dirname "$peer_sync_path")"
+
+        # Verify session is still active
+        if [ -d "$peer_sync_path" ] && [ -f "$peer_sync_path/session" ]; then
+            local state
+            state="$(cat "$peer_sync_path/session" 2>/dev/null)"
+            echo "$feature:$root_worktree:$state"
+        fi
+    done
+}
+
+# Get session root worktree path for a specific feature
+# Usage: get_session_root <feature> [main_project_root]
+# Returns: path to root worktree for this feature
+get_session_root() {
+    local feature="$1"
+    local main_root="${2:-$(get_main_project_root)}"
+    local session_link="$main_root/.agent-sessions/${feature}.session"
+
+    if [ -L "$session_link" ]; then
+        local peer_sync_path
+        peer_sync_path="$(readlink "$session_link")"
+        if [ -d "$peer_sync_path" ]; then
+            dirname "$peer_sync_path"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Discover feature name from current working directory
+# Works when in an agent worktree or root worktree (uses .peer-sync)
+# Returns: feature name
+discover_feature_from_cwd() {
+    # First check PEER_SYNC environment variable
+    if [ -n "$PEER_SYNC" ] && [ -f "$PEER_SYNC/feature" ]; then
+        cat "$PEER_SYNC/feature"
+        return 0
+    fi
+
+    # Check for .peer-sync in current or parent directories
+    local dir="$PWD"
+    while [ "$dir" != "/" ]; do
+        if [ -d "$dir/.peer-sync" ] && [ -f "$dir/.peer-sync/feature" ]; then
+            cat "$dir/.peer-sync/feature"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+
+    return 1
+}
+
+# Check if we're in the main project root (vs a worktree)
+# Returns: 0 if in main project, 1 if in worktree
+is_main_project() {
+    local dir="${1:-$PWD}"
+
+    # If .git is a directory (not file), we're in main project
+    if [ -d "$dir/.git" ] && [ ! -f "$dir/.git" ]; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Resolve session for commands that need it
+# Usage: resolve_session [--feature <name>]
+# Sets global variables: RESOLVED_FEATURE, RESOLVED_PEER_SYNC, RESOLVED_ROOT
+# Returns: 0 on success, dies on error
+resolve_session() {
+    local feature_arg=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --feature) feature_arg="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    # If feature explicitly specified, use it
+    if [ -n "$feature_arg" ]; then
+        local main_root
+        main_root="$(get_main_project_root)"
+        RESOLVED_ROOT="$(get_session_root "$feature_arg" "$main_root")" || \
+            die "No session found for feature: $feature_arg"
+        RESOLVED_FEATURE="$feature_arg"
+        RESOLVED_PEER_SYNC="$RESOLVED_ROOT/.peer-sync"
+        return 0
+    fi
+
+    # Try to discover from current directory
+    if RESOLVED_FEATURE="$(discover_feature_from_cwd 2>/dev/null)"; then
+        RESOLVED_ROOT="$(get_project_root)"
+        RESOLVED_PEER_SYNC="$RESOLVED_ROOT/.peer-sync"
+        return 0
+    fi
+
+    # Check if we're in main project with sessions
+    if is_main_project; then
+        local main_root="$PWD"
+        local sessions
+        sessions="$(list_active_sessions "$main_root")"
+
+        if [ -z "$sessions" ]; then
+            # No multi-session setup, check for legacy single session
+            if [ -d "$main_root/.peer-sync" ]; then
+                RESOLVED_ROOT="$main_root"
+                RESOLVED_PEER_SYNC="$main_root/.peer-sync"
+                RESOLVED_FEATURE="$(cat "$RESOLVED_PEER_SYNC/feature" 2>/dev/null)"
+                return 0
+            fi
+            die "No active sessions found. Start one with: agent-duo start <feature>"
+        fi
+
+        # Count sessions
+        local count=0
+        local single_feature="" single_root=""
+        while IFS=: read -r feat root state; do
+            [ -z "$feat" ] && continue
+            count=$((count + 1))
+            single_feature="$feat"
+            single_root="$root"
+        done <<< "$sessions"
+
+        if [ "$count" -eq 1 ]; then
+            # Only one session - use it
+            RESOLVED_FEATURE="$single_feature"
+            RESOLVED_ROOT="$single_root"
+            RESOLVED_PEER_SYNC="$RESOLVED_ROOT/.peer-sync"
+            return 0
+        fi
+
+        # Multiple sessions - caller needs to handle this
+        # Return special code to indicate multiple sessions
+        return 2
+    fi
+
+    die "Not in an agent session. Use --feature <name> or cd to a session worktree."
 }
 
 # Get session mode (duo or solo)
