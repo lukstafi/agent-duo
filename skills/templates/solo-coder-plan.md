@@ -28,7 +28,17 @@ Write a detailed implementation plan before starting to code. The reviewer will 
 cat "$FEATURE.md"
 ```
 
-### 2. Explore the Codebase
+### 2. Check for Previous Feedback (if this is a plan revision)
+
+```bash
+PLAN_ROUND=$(cat "$PEER_SYNC/plan-round" 2>/dev/null || echo "1")
+if [ "$PLAN_ROUND" -gt 1 ]; then
+    echo "=== Previous Plan Review Feedback ==="
+    cat "$PEER_SYNC/plan-review.md"
+fi
+```
+
+### 3. Explore the Codebase
 
 Understand the existing code structure relevant to your task:
 
@@ -37,7 +47,7 @@ rg -n "pattern|keyword|module"
 cat path/to/relevant-file
 ```
 
-### 3. Write Your Implementation Plan
+### 4. Write Your Implementation Plan
 
 ```bash
 cat > "$PEER_SYNC/plan-coder.md" << 'PLAN_EOF'
@@ -80,7 +90,9 @@ PLAN_EOF
 
 Edit the file to fill in actual content (don't leave placeholders).
 
-### 4. Signal Completion
+If you're revising based on feedback, address each point raised in the previous review.
+
+### 5. Signal Completion
 
 ```bash
 agent-solo signal coder plan-done "implementation plan submitted"
@@ -104,3 +116,4 @@ The orchestrator will pause and notify the user. After they respond, continue pl
 - **Be realistic**: Don't promise what you can't deliver
 - **Consider the existing code**: Your plan should integrate cleanly
 - **Think about testing**: Every feature needs verification
+- **Address feedback**: If revising, explicitly address each prior concern
