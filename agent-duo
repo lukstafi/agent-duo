@@ -1816,6 +1816,10 @@ ensure_docs_update() {
     local peer_sync="$2"
     local feature="$3"
 
+    if [ ! -f "$peer_sync/docs-update-mode" ]; then
+        return 0
+    fi
+
     local docs_update_mode
     docs_update_mode="$(cat "$peer_sync/docs-update-mode" 2>/dev/null)" || docs_update_mode="true"
     if [ "$docs_update_mode" != "true" ]; then
