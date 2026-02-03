@@ -4760,14 +4760,20 @@ SESSION COMMANDS
         Auto-commits uncommitted changes and pushes.
         Runs update-docs phase before PR creation (unless skipped).
 
-    feedback [options]
-        View/manage accumulated workflow feedback files.
-        Options:
-          --list                  List feedback files (default)
-          --view <n|file>         Show a feedback file by index or name
-          --delete <n|file>       Delete a feedback file by index or name
-          --submit <n|file>       Create a GitHub issue from a feedback file
-          --repo <owner/repo>     Target repo for --submit (default: lukstafi/agent-duo)
+    feedback [list|view|delete|submit]
+        Manage accumulated workflow feedback from agent sessions.
+
+        Subcommands:
+          list               List accumulated feedback files (default)
+          view <file>        View contents of a feedback file
+          delete <file>      Delete a feedback file (or --all for all)
+          submit             Interactively submit feedback as GitHub issue
+                             (uses feedback_repo config, or prompts for repo)
+
+        Workflow feedback is automatically accumulated from .peer-sync/ to
+        ~/.agent-duo/workflow-feedback/ when both PRs are created or during cleanup.
+
+        Configure target repo: agent-duo config feedback_repo owner/repo
 
     merge [options]
         Start merge phase to consolidate both PRs into main.
