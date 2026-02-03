@@ -704,6 +704,7 @@ DEFAULT_REVIEW_TIMEOUT=600   # 10 minutes
 DEFAULT_GATHER_TIMEOUT=600   # 10 minutes
 DEFAULT_CLARIFY_TIMEOUT=600  # 10 minutes
 DEFAULT_PUSHBACK_TIMEOUT=600 # 10 minutes
+DEFAULT_PLAN_TIMEOUT=600     # 10 minutes
 DEFAULT_INTEGRATE_TIMEOUT=600 # 10 minutes
 DEFAULT_DOCS_UPDATE_TIMEOUT=600 # 10 minutes
 DEFAULT_POLL_INTERVAL=10     # Check every 10 seconds
@@ -917,8 +918,8 @@ lib_cmd_signal() {
 
     # Validate status
     case "$status" in
-        gathering|gather-done|clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|updating-docs|docs-update-done|integrating|integrate-done|interrupted|error|pr-created|escalated) ;;
-        *) die "Invalid status: $status (valid: gathering, gather-done, clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, updating-docs, docs-update-done, integrating, integrate-done, interrupted, error, pr-created, escalated)" ;;
+        gathering|gather-done|clarifying|clarify-done|pushing-back|pushback-done|planning|plan-done|plan-reviewing|plan-review-done|needs-clarify|working|done|reviewing|review-done|updating-docs|docs-update-done|integrating|integrate-done|interrupted|error|pr-created|escalated) ;;
+        *) die "Invalid status: $status (valid: gathering, gather-done, clarifying, clarify-done, pushing-back, pushback-done, planning, plan-done, plan-reviewing, plan-review-done, needs-clarify, working, done, reviewing, review-done, updating-docs, docs-update-done, integrating, integrate-done, interrupted, error, pr-created, escalated)" ;;
     esac
 
     local content="${status}|$(date +%s)|${message}"
@@ -1774,6 +1775,32 @@ case "$phase" in
         fi
         log_debug "signaling review-done"
         $signal_cmd signal "$agent" review-done "completed via hook"
+        ;;
+    plan)
+        # Don't override if already plan-done or beyond
+        case "$current_status" in
+            plan-done|plan-reviewing|plan-review-done|done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
+        esac
+        # In solo mode, only coder plans
+        if [ "$mode" = "solo" ] && [ "$agent" != "coder" ]; then
+            log_debug "skipping (not coder in plan phase)"
+            exit 0
+        fi
+        log_debug "signaling plan-done"
+        $signal_cmd signal "$agent" plan-done "completed via hook"
+        ;;
+    plan-review)
+        # Don't override if already plan-review-done or beyond
+        case "$current_status" in
+            plan-review-done|done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
+        esac
+        # In solo mode, only reviewer reviews plans
+        if [ "$mode" = "solo" ] && [ "$agent" != "reviewer" ]; then
+            log_debug "skipping (not reviewer in plan-review phase)"
+            exit 0
+        fi
+        log_debug "signaling plan-review-done"
+        $signal_cmd signal "$agent" plan-review-done "completed via hook"
         ;;
     update-docs)
         # Don't override if already docs-update-done or beyond

@@ -7,7 +7,7 @@
 # Usage: agent-duo <command> [options]
 #
 # Session Commands:
-#   start <feature> [--auto-run] [--no-ttyd] [--clarify] [--skip-docs-update]  Start session
+#   start <feature> [--auto-run] [--no-ttyd] [--clarify] [--pushback] [--plan] [--skip-docs-update]  Start session
 #   run [options]        Run orchestrator loop with timeouts
 #                        --on-tui-exit=pause|quit|ignore  TUI exit behavior
 #   stop                 Stop ttyd servers, keep worktrees
@@ -190,6 +190,8 @@ cmd_setup() {
     install_skill "$templates_dir/duo-review.md" "$claude_skills/duo-review.md" "/duo-review"
     install_skill "$templates_dir/duo-clarify.md" "$claude_skills/duo-clarify.md" "/duo-clarify"
     install_skill "$templates_dir/duo-pushback.md" "$claude_skills/duo-pushback.md" "/duo-pushback"
+    install_skill "$templates_dir/duo-plan.md" "$claude_skills/duo-plan.md" "/duo-plan"
+    install_skill "$templates_dir/duo-plan-review.md" "$claude_skills/duo-plan-review.md" "/duo-plan-review"
     install_skill "$templates_dir/duo-amend.md" "$claude_skills/duo-amend.md" "/duo-amend"
     install_skill "$templates_dir/duo-update-docs.md" "$claude_skills/duo-update-docs.md" "/duo-update-docs"
     install_skill "$templates_dir/duo-pr-comment.md" "$claude_skills/duo-pr-comment.md" "/duo-pr-comment"
@@ -204,6 +206,7 @@ cmd_setup() {
     # Install Codex skills (uses $command syntax)
     # Codex expects skills as directories with SKILL.md inside
     local codex_skills="$HOME/.codex/skills"
+    mkdir -p "$codex_skills/duo-work" "$codex_skills/duo-review" "$codex_skills/duo-clarify" "$codex_skills/duo-pushback" "$codex_skills/duo-plan" "$codex_skills/duo-plan-review" "$codex_skills/duo-amend" "$codex_skills/duo-pr-comment"
     mkdir -p "$codex_skills/duo-work" "$codex_skills/duo-review" "$codex_skills/duo-clarify" "$codex_skills/duo-pushback" "$codex_skills/duo-amend" "$codex_skills/duo-update-docs" "$codex_skills/duo-pr-comment"
     mkdir -p "$codex_skills/duo-merge-vote" "$codex_skills/duo-merge-debate" "$codex_skills/duo-merge-execute" "$codex_skills/duo-merge-review" "$codex_skills/duo-merge-amend"
     mkdir -p "$codex_skills/duo-integrate"
@@ -212,6 +215,8 @@ cmd_setup() {
     install_skill "$templates_dir/duo-review.md" "$codex_skills/duo-review/SKILL.md" "\$duo-review"
     install_skill "$templates_dir/duo-clarify.md" "$codex_skills/duo-clarify/SKILL.md" "\$duo-clarify"
     install_skill "$templates_dir/duo-pushback.md" "$codex_skills/duo-pushback/SKILL.md" "\$duo-pushback"
+    install_skill "$templates_dir/duo-plan.md" "$codex_skills/duo-plan/SKILL.md" "\$duo-plan"
+    install_skill "$templates_dir/duo-plan-review.md" "$codex_skills/duo-plan-review/SKILL.md" "\$duo-plan-review"
     install_skill "$templates_dir/duo-amend.md" "$codex_skills/duo-amend/SKILL.md" "\$duo-amend"
     install_skill "$templates_dir/duo-update-docs.md" "$codex_skills/duo-update-docs/SKILL.md" "\$duo-update-docs"
     install_skill "$templates_dir/duo-pr-comment.md" "$codex_skills/duo-pr-comment/SKILL.md" "\$duo-pr-comment"
@@ -476,6 +481,7 @@ Sent: $(date)"
     # Claude skills
     local claude_skills="$HOME/.claude/commands"
     local claude_skills_ok=true
+    for skill in duo-work duo-review duo-clarify duo-pushback duo-plan duo-plan-review duo-amend; do
     for skill in duo-work duo-review duo-clarify duo-pushback duo-amend duo-update-docs; do
         if [ -f "$claude_skills/$skill.md" ]; then
             success "Claude skill: $skill"
@@ -492,6 +498,7 @@ Sent: $(date)"
     # Codex skills
     local codex_skills="$HOME/.codex/skills"
     local codex_skills_ok=true
+    for skill in duo-work duo-review duo-clarify duo-pushback duo-plan duo-plan-review duo-amend; do
     for skill in duo-work duo-review duo-clarify duo-pushback duo-amend duo-update-docs; do
         if [ -f "$codex_skills/$skill/SKILL.md" ]; then
             success "Codex skill: $skill"
@@ -713,11 +720,13 @@ cmd_start() {
     local auto_run=false
     local clarify_mode=false
     local pushback_mode=false
+    local plan_mode=false
     local docs_update_mode=true
     local work_timeout=$DEFAULT_WORK_TIMEOUT
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
     local pushback_timeout=$DEFAULT_PUSHBACK_TIMEOUT
+    local plan_timeout=$DEFAULT_PLAN_TIMEOUT
     local max_rounds=10
     local codex_thinking=$DEFAULT_CODEX_THINKING
     local codex_model=""
@@ -731,11 +740,13 @@ cmd_start() {
             --auto-run) auto_run=true; shift ;;
             --clarify) clarify_mode=true; shift ;;
             --pushback) pushback_mode=true; shift ;;
+            --plan) plan_mode=true; shift ;;
             --skip-docs-update) docs_update_mode=false; shift ;;
             --work-timeout) work_timeout="$2"; shift 2 ;;
             --review-timeout) review_timeout="$2"; shift 2 ;;
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
             --pushback-timeout) pushback_timeout="$2"; shift 2 ;;
+            --plan-timeout) plan_timeout="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --codex-thinking) codex_thinking="$2"; shift 2 ;;
             --codex-model) codex_model="$2"; shift 2 ;;
@@ -750,6 +761,7 @@ cmd_start() {
     [ -n "$codex_model" ] && export AGENT_DUO_CODEX_MODEL="$codex_model"
     [ -n "$claude_model" ] && export AGENT_DUO_CLAUDE_MODEL="$claude_model"
 
+    [ ${#features[@]} -eq 0 ] && die "Usage: agent-duo start <feature> [feature2 ...] [--no-ttyd] [--auto-run] [--clarify] [--pushback] [--plan]"
     [ ${#features[@]} -eq 0 ] && die "Usage: agent-duo start <feature> [feature2 ...] [--no-ttyd] [--auto-run] [--clarify] [--skip-docs-update]"
 
     # Validate codex thinking effort
@@ -777,6 +789,8 @@ cmd_start() {
             echo ""
             info "=== Starting session: $feature ==="
             if start_single_session "$feature" "$main_project_root" "$project_name" \
+                "$ttyd_mode" "$auto_run" "$clarify_mode" "$pushback_mode" "$plan_mode" \
+                "$work_timeout" "$review_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
                 "$ttyd_mode" "$auto_run" "$clarify_mode" "$pushback_mode" "$docs_update_mode" \
                 "$work_timeout" "$review_timeout" "$clarify_timeout" "$pushback_timeout" \
                 "$max_rounds" "$codex_thinking" "$base_port"; then
@@ -799,6 +813,8 @@ cmd_start() {
     # Single feature
     local feature="${features[0]}"
     start_single_session "$feature" "$main_project_root" "$project_name" \
+        "$ttyd_mode" "$auto_run" "$clarify_mode" "$pushback_mode" "$plan_mode" \
+        "$work_timeout" "$review_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
         "$ttyd_mode" "$auto_run" "$clarify_mode" "$pushback_mode" "$docs_update_mode" \
         "$work_timeout" "$review_timeout" "$clarify_timeout" "$pushback_timeout" \
         "$max_rounds" "$codex_thinking" "$base_port"
@@ -814,11 +830,16 @@ start_single_session() {
     local auto_run="$5"
     local clarify_mode="$6"
     local pushback_mode="$7"
+    local plan_mode="$8"
     local docs_update_mode="$8"
     local work_timeout="$9"
     local review_timeout="${10}"
     local clarify_timeout="${11}"
     local pushback_timeout="${12}"
+    local plan_timeout="${13}"
+    local max_rounds="${14}"
+    local codex_thinking="${15}"
+    local base_port="${16}"
     local max_rounds="${13}"
     local codex_thinking="${14}"
     local base_port="${15}"
@@ -912,7 +933,7 @@ start_single_session() {
     mkdir -p "$peer_sync/pids"
 
     echo "active" > "$peer_sync/session"
-    # Determine initial phase: clarify -> pushback -> work
+    # Determine initial phase: clarify -> pushback -> plan -> work
     if [ "$clarify_mode" = "true" ]; then
         echo "clarify" > "$peer_sync/phase"
         echo "true" > "$peer_sync/clarify-mode"
@@ -922,6 +943,10 @@ start_single_session() {
         echo "pushback" > "$peer_sync/phase"
         echo "pushing-back|$(date +%s)|starting" > "$peer_sync/claude.status"
         echo "pushing-back|$(date +%s)|starting" > "$peer_sync/codex.status"
+    elif [ "$plan_mode" = "true" ]; then
+        echo "plan" > "$peer_sync/phase"
+        echo "planning|$(date +%s)|starting" > "$peer_sync/claude.status"
+        echo "planning|$(date +%s)|starting" > "$peer_sync/codex.status"
     else
         echo "work" > "$peer_sync/phase"
         echo "working|$(date +%s)|starting" > "$peer_sync/claude.status"
@@ -929,6 +954,7 @@ start_single_session() {
     fi
     echo "$clarify_mode" > "$peer_sync/clarify-mode"
     echo "$pushback_mode" > "$peer_sync/pushback-mode"
+    echo "$plan_mode" > "$peer_sync/plan-mode"
     echo "$docs_update_mode" > "$peer_sync/docs-update-mode"
     echo "1" > "$peer_sync/round"
     echo "$feature" > "$peer_sync/feature"
@@ -966,9 +992,11 @@ start_single_session() {
 
     if [ "$ttyd_mode" = "true" ]; then
         start_ttyd_mode "$feature" "$root_worktree" "$worktree_claude" "$worktree_codex" "$peer_sync" \
-            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" "$clarify_mode" "$clarify_timeout" "$pushback_mode" "$pushback_timeout"
+            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" \
+            "$clarify_mode" "$clarify_timeout" "$pushback_mode" "$pushback_timeout" \
+            "$plan_mode" "$plan_timeout"
     else
-        start_tmux_mode "$feature" "$root_worktree" "$worktree_claude" "$worktree_codex" "$peer_sync" "$codex_thinking" "$clarify_mode" "$pushback_mode"
+        start_tmux_mode "$feature" "$root_worktree" "$worktree_claude" "$worktree_codex" "$peer_sync" "$codex_thinking" "$clarify_mode" "$pushback_mode" "$plan_mode"
     fi
 }
 
@@ -981,6 +1009,7 @@ start_tmux_mode() {
     local codex_thinking="${6:-$DEFAULT_CODEX_THINKING}"
     local clarify_mode="${7:-false}"
     local pushback_mode="${8:-false}"
+    local plan_mode="${9:-false}"
 
     local session_name="duo-${feature}"
 
@@ -1045,6 +1074,12 @@ start_tmux_mode() {
         echo "  1. Propose improvements to the task file"
         echo "  2. You can accept, reject, or modify the pushbacks"
     fi
+    if [ "$plan_mode" = "true" ]; then
+        echo ""
+        echo "Plan stage enabled. After pushback (if enabled), agents will:"
+        echo "  1. Write implementation plans"
+        echo "  2. Review each other's plans before work begins"
+    fi
 }
 
 start_ttyd_mode() {
@@ -1062,6 +1097,8 @@ start_ttyd_mode() {
     local clarify_timeout="${12:-$DEFAULT_CLARIFY_TIMEOUT}"
     local pushback_mode="${13:-false}"
     local pushback_timeout="${14:-$DEFAULT_PUSHBACK_TIMEOUT}"
+    local plan_mode="${15:-false}"
+    local plan_timeout="${16:-$DEFAULT_PLAN_TIMEOUT}"
 
     local session_name="duo-${feature}"
 
@@ -1129,6 +1166,9 @@ start_ttyd_mode() {
         if [ "$pushback_mode" = "true" ]; then
             run_cmd="$run_cmd --pushback-timeout $pushback_timeout"
         fi
+        if [ "$plan_mode" = "true" ]; then
+            run_cmd="$run_cmd --plan-timeout $plan_timeout"
+        fi
         tmux send-keys -t "${session_name}-orchestrator" "$run_cmd"
         tmux send-keys -t "${session_name}-orchestrator" C-m
     else
@@ -1147,6 +1187,12 @@ start_ttyd_mode() {
         echo "Pushback stage enabled. After clarify (if enabled), agents will:"
         echo "  1. Propose improvements to the task file"
         echo "  2. You can accept, reject, or modify the pushbacks"
+    fi
+    if [ "$plan_mode" = "true" ]; then
+        echo ""
+        echo "Plan stage enabled. After pushback (if enabled), agents will:"
+        echo "  1. Write implementation plans"
+        echo "  2. Review each other's plans before work begins"
     fi
 }
 
@@ -3158,6 +3204,8 @@ cmd_signal() {
 
     # Validate status
     case "$status" in
+        clarifying|clarify-done|pushing-back|pushback-done|planning|plan-done|plan-reviewing|plan-review-done|needs-clarify|working|done|reviewing|review-done|integrating|integrate-done|interrupted|error|pr-created|escalated|voting|vote-done|debating|debate-done|merging|merge-done|merge-reviewing|merge-review-done) ;;
+        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, planning, plan-done, plan-reviewing, plan-review-done, needs-clarify, working, done, reviewing, review-done, integrating, integrate-done, interrupted, error, pr-created, escalated, voting, vote-done, debating, debate-done, merging, merge-done, merge-reviewing, merge-review-done)" ;;
         clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|updating-docs|docs-update-done|integrating|integrate-done|interrupted|error|pr-created|escalated|voting|vote-done|debating|debate-done|merging|merge-done|merge-reviewing|merge-review-done) ;;
         *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, updating-docs, docs-update-done, integrating, integrate-done, interrupted, error, pr-created, escalated, voting, vote-done, debating, debate-done, merging, merge-done, merge-reviewing, merge-review-done)" ;;
     esac
@@ -3708,11 +3756,13 @@ cmd_run() {
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
     local pushback_timeout=$DEFAULT_PUSHBACK_TIMEOUT
+    local plan_timeout=$DEFAULT_PLAN_TIMEOUT
     local poll_interval=$DEFAULT_POLL_INTERVAL
     local max_rounds=10
     local auto_start=false
     local enable_clarify=""  # empty means use session default
     local enable_pushback="" # empty means use session default
+    local enable_plan=""     # empty means use session default
     local tui_exit_behavior=$DEFAULT_TUI_EXIT_BEHAVIOR
 
     # Parse arguments
@@ -3722,8 +3772,10 @@ cmd_run() {
             --review-timeout) review_timeout="$2"; shift 2 ;;
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
             --pushback-timeout) pushback_timeout="$2"; shift 2 ;;
+            --plan-timeout) plan_timeout="$2"; shift 2 ;;
             --clarify) enable_clarify="true"; shift ;;
             --pushback) enable_pushback="true"; shift ;;
+            --plan) enable_plan="true"; shift ;;
             --poll) poll_interval="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --auto-start) auto_start=true; shift ;;
@@ -4061,7 +4113,196 @@ cmd_run() {
         echo "confirmed" > "$peer_sync/pushback-confirmed"
         echo "work" > "$peer_sync/phase"
 
-        success "Pushback stage complete! Proceeding to work phase..."
+        success "Pushback stage complete!"
+        echo ""
+    fi
+
+    # Check if plan mode is enabled (command line overrides session setting)
+    local plan_mode
+    if [ -n "$enable_plan" ]; then
+        plan_mode="$enable_plan"
+        echo "$enable_plan" > "$peer_sync/plan-mode"
+    else
+        plan_mode="$(cat "$peer_sync/plan-mode" 2>/dev/null)" || plan_mode="false"
+    fi
+
+    # Handle plan phase if enabled and not already confirmed
+    if [ "$plan_mode" = "true" ] && [ ! -f "$peer_sync/plan-confirmed" ]; then
+        info "=== Plan Phase ==="
+        echo "plan" > "$peer_sync/phase"
+
+        check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+        atomic_write "$peer_sync/claude.status" "planning|$(date +%s)|plan phase"
+        info "Triggering duo-plan for claude..."
+        trigger_skill "claude" "$claude_session" "duo-plan"
+
+        check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+        atomic_write "$peer_sync/codex.status" "planning|$(date +%s)|plan phase"
+        info "Triggering duo-plan for codex..."
+        trigger_skill "codex" "$codex_session" "duo-plan"
+
+        # Wait for both agents to complete plan phase
+        local plan_start=$SECONDS
+        local claude_plan_done=false
+        local codex_plan_done=false
+        local claude_needs_notice=false
+        local codex_needs_notice=false
+
+        while ! ($claude_plan_done && $codex_plan_done); do
+            local elapsed=$((SECONDS - plan_start))
+
+            local claude_status
+            claude_status="$(get_agent_status "claude" "$peer_sync")"
+            local codex_status
+            codex_status="$(get_agent_status "codex" "$peer_sync")"
+
+            [ "$claude_status" = "plan-done" ] && claude_plan_done=true
+            [ "$codex_status" = "plan-done" ] && codex_plan_done=true
+
+            if [ "$claude_status" = "needs-clarify" ] && [ "$claude_needs_notice" = "false" ]; then
+                claude_needs_notice=true
+                echo ""
+                warn "Claude needs clarification during planning"
+                echo "Respond in Claude's terminal, then they will signal plan-done."
+                echo ""
+            fi
+            if [ "$codex_status" = "needs-clarify" ] && [ "$codex_needs_notice" = "false" ]; then
+                codex_needs_notice=true
+                echo ""
+                warn "Codex needs clarification during planning"
+                echo "Respond in Codex's terminal, then they will signal plan-done."
+                echo ""
+            fi
+
+            if $claude_plan_done && $codex_plan_done; then
+                break
+            fi
+
+            if ! $claude_plan_done; then
+                check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+            fi
+            if ! $codex_plan_done; then
+                check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+            fi
+
+            if [ "$elapsed" -ge "$plan_timeout" ]; then
+                warn "Plan phase timeout (${plan_timeout}s)"
+                break
+            fi
+
+            printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$plan_timeout"
+            sleep "$poll_interval"
+        done
+        echo ""
+
+        # Display plan results
+        echo ""
+        info "=== Plan Phase Results ==="
+        echo ""
+
+        if [ -f "$peer_sync/plan-claude.md" ]; then
+            echo "--- Claude's Plan ---"
+            cat "$peer_sync/plan-claude.md"
+            echo ""
+        else
+            warn "Claude did not submit a plan"
+        fi
+
+        if [ -f "$peer_sync/plan-codex.md" ]; then
+            echo "--- Codex's Plan ---"
+            cat "$peer_sync/plan-codex.md"
+            echo ""
+        else
+            warn "Codex did not submit a plan"
+        fi
+
+        # Plan-review phase
+        info "=== Plan-Review Phase ==="
+        echo "plan-review" > "$peer_sync/phase"
+
+        check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+        atomic_write "$peer_sync/claude.status" "plan-reviewing|$(date +%s)|plan-review phase"
+        info "Triggering duo-plan-review for claude..."
+        trigger_skill "claude" "$claude_session" "duo-plan-review"
+
+        check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+        atomic_write "$peer_sync/codex.status" "plan-reviewing|$(date +%s)|plan-review phase"
+        info "Triggering duo-plan-review for codex..."
+        trigger_skill "codex" "$codex_session" "duo-plan-review"
+
+        local review_start=$SECONDS
+        local claude_review_done=false
+        local codex_review_done=false
+        local claude_review_notice=false
+        local codex_review_notice=false
+
+        while ! ($claude_review_done && $codex_review_done); do
+            local elapsed=$((SECONDS - review_start))
+
+            local claude_status
+            claude_status="$(get_agent_status "claude" "$peer_sync")"
+            local codex_status
+            codex_status="$(get_agent_status "codex" "$peer_sync")"
+
+            [ "$claude_status" = "plan-review-done" ] && claude_review_done=true
+            [ "$codex_status" = "plan-review-done" ] && codex_review_done=true
+
+            if [ "$claude_status" = "needs-clarify" ] && [ "$claude_review_notice" = "false" ]; then
+                claude_review_notice=true
+                echo ""
+                warn "Claude needs clarification during plan review"
+                echo "Respond in Claude's terminal, then they will signal plan-review-done."
+                echo ""
+            fi
+            if [ "$codex_status" = "needs-clarify" ] && [ "$codex_review_notice" = "false" ]; then
+                codex_review_notice=true
+                echo ""
+                warn "Codex needs clarification during plan review"
+                echo "Respond in Codex's terminal, then they will signal plan-review-done."
+                echo ""
+            fi
+
+            if $claude_review_done && $codex_review_done; then
+                break
+            fi
+
+            if ! $claude_review_done; then
+                check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+            fi
+            if ! $codex_review_done; then
+                check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+            fi
+
+            if [ "$elapsed" -ge "$plan_timeout" ]; then
+                warn "Plan-review phase timeout (${plan_timeout}s)"
+                break
+            fi
+
+            printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$plan_timeout"
+            sleep "$poll_interval"
+        done
+        echo ""
+
+        echo ""
+        info "=== Plan-Review Results ==="
+        echo ""
+
+        if [ -f "$peer_sync/plan-review-claude.md" ]; then
+            echo "--- Claude's Review of Codex's Plan ---"
+            cat "$peer_sync/plan-review-claude.md"
+            echo ""
+        fi
+
+        if [ -f "$peer_sync/plan-review-codex.md" ]; then
+            echo "--- Codex's Review of Claude's Plan ---"
+            cat "$peer_sync/plan-review-codex.md"
+            echo ""
+        fi
+
+        echo "confirmed" > "$peer_sync/plan-confirmed"
+        echo "work" > "$peer_sync/phase"
+
+        success "Plan phase complete! Proceeding to work phase..."
         echo ""
     fi
 
@@ -4682,11 +4923,13 @@ SESSION COMMANDS
           --no-ttyd                Use single tmux session instead of web terminals
           --clarify                Enable clarify stage before work starts
           --pushback               Enable pushback stage (after clarify if both enabled)
+          --plan                   Enable plan stage (after pushback if both enabled)
           --skip-docs-update       Skip update-docs phase before PR creation
           --work-timeout <secs>    Work phase timeout (default: 1200, with --auto-run)
           --review-timeout <secs>  Review phase timeout (default: 600, with --auto-run)
           --clarify-timeout <secs> Clarify stage timeout (default: 600, with --clarify)
           --pushback-timeout <secs> Pushback stage timeout (default: 600, with --pushback)
+          --plan-timeout <secs>    Plan phase timeout (default: 600, with --plan)
           --max-rounds <n>         Maximum rounds (default: 10, with --auto-run)
           --codex-thinking <level> Codex reasoning effort: low, medium, high (default: high)
           --codex-model <model>    GPT model for Codex (e.g., o3, gpt-4.1)
@@ -4718,10 +4961,12 @@ SESSION COMMANDS
         Options:
           --clarify                Enable clarify stage before work starts
           --pushback               Enable pushback stage (after clarify if both enabled)
+          --plan                   Enable plan stage (after pushback if both enabled)
           --work-timeout <secs>    Work phase timeout (default: 1200)
           --review-timeout <secs>  Review phase timeout (default: 600)
           --clarify-timeout <secs> Clarify stage timeout (default: 600)
           --pushback-timeout <secs> Pushback stage timeout (default: 600)
+          --plan-timeout <secs>    Plan phase timeout (default: 600)
           --poll <secs>            Status poll interval (default: 10)
           --max-rounds <n>         Maximum rounds (default: 10)
           --auto-start             Auto-launch agent CLIs and send task
@@ -4838,6 +5083,9 @@ CONTROL COMMANDS
 AGENT COMMANDS (used by AI agents)
     signal <agent> <status> [message]
         Signal a status change. Status values:
+        clarifying, clarify-done, pushing-back, pushback-done, planning,
+        plan-done, plan-reviewing, plan-review-done, needs-clarify, working,
+        done, reviewing, review-done, integrating, integrate-done, interrupted,
         clarifying, clarify-done, pushing-back, pushback-done, working, done,
         reviewing, review-done, updating-docs, docs-update-done, integrating, integrate-done, interrupted,
         error, pr-created, escalated, voting, vote-done, debating, debate-done,
@@ -4847,6 +5095,7 @@ AGENT COMMANDS (used by AI agents)
         Read peer's current status (requires PEER_NAME env var).
 
     phase
+        Read current phase (clarify, pushback, plan, plan-review, work, review, or merge).
         Read current phase (clarify, pushback, work, review, update-docs, or merge).
 
     escalate <reason> [message]

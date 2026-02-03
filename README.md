@@ -157,6 +157,7 @@ agent-duo start <feature> --port 8000  # Use fixed ports 8000, 8001, 8002 (fails
 agent-duo start <feature> --auto-run   # Start and run orchestrator immediately
 agent-duo start <feature> --clarify    # Enable clarify stage (agents propose approaches)
 agent-duo start <feature> --pushback   # Enable pushback stage (agents improve task)
+agent-duo start <feature> --plan       # Enable plan/review stage (agents write plans)
 agent-duo start <feature> --skip-docs-update  # Skip update-docs phase before PR creation
 agent-duo start <feature> --no-ttyd    # Start with single tmux session (no web terminals)
 agent-duo run [options]                # Run orchestrator loop (if not using --auto-run)
@@ -176,6 +177,7 @@ agent-duo run \
   --review-timeout 600 \    # Seconds before interrupting review phase
   --clarify-timeout 600 \   # Seconds for clarify stage
   --pushback-timeout 600 \  # Seconds for pushback stage
+  --plan-timeout 600 \      # Seconds for plan + plan-review stages
   --max-rounds 10 \         # Maximum work/review cycles
   --auto-start              # Auto-launch agent CLIs
 ```
@@ -219,21 +221,29 @@ Each round consists of:
    - User can accept, reject, or modify suggestions
    - Run `agent-duo confirm` to proceed
 
-3. **Work Phase**: Agents implement their solution independently
+3. **Plan Phase** (optional, `--plan`): Agents write implementation plans
+   - Write to `.peer-sync/plan-<agent>.md`
+   - Signal `plan-done` when finished
+
+4. **Plan-Review Phase** (optional, `--plan`): Agents review peer plans
+   - Write reviews to `.peer-sync/plan-review-<agent>.md`
+   - Signal `plan-review-done` when finished
+
+5. **Work Phase**: Agents implement their solution independently
    - They can peek at peer's worktree for insight (not imitation)
    - Signal `done` when ready for review
    - Orchestrator interrupts if timeout reached
 
-4. **Review Phase**: Agents review each other's code
+6. **Review Phase**: Agents review each other's code
    - Write structured review to `.peer-sync/reviews/`
    - Note different tradeoffs, not defects
    - Signal `review-done` when finished
 
-5. **Update-Docs Phase** (before PR creation)
+7. **Update-Docs Phase** (before PR creation)
    - Append project learnings to `AGENTS_STAGING.md`
    - Write workflow feedback to `.peer-sync/workflow-feedback-<agent>.md`
 
-6. **Repeat** until both agents create PRs
+8. **Repeat** until both agents create PRs
 
 ## Task Learning (Update-Docs)
 
