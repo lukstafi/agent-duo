@@ -1886,6 +1886,54 @@ cmd_pr() {
     if [ -f "$peer_sync/claude.pr" ] && [ -f "$peer_sync/codex.pr" ]; then
         echo "complete" > "$peer_sync/session"
         success "Both PRs created - session complete!"
+
+        # Accumulate workflow feedback now that session is complete
+        if [ ! -f "$peer_sync/workflow-feedback-copied" ]; then
+            accumulate_workflow_feedback "$peer_sync" "$feature"
+            touch "$peer_sync/workflow-feedback-copied"
+        fi
+    fi
+}
+
+#------------------------------------------------------------------------------
+# Helper: accumulate workflow feedback before cleanup
+#------------------------------------------------------------------------------
+
+accumulate_workflow_feedback() {
+    local peer_sync="$1"
+    local feature="$2"
+
+    [ ! -d "$peer_sync" ] && return 0
+
+    local feedback_dir="$HOME/.agent-duo/workflow-feedback"
+    local date_str
+    date_str="$(date +%Y-%m-%d)"
+    local found_feedback=false
+
+    # Look for workflow feedback files
+    for agent in claude codex; do
+        local feedback_file="$peer_sync/workflow-feedback-${agent}.md"
+        if [ -f "$feedback_file" ]; then
+            mkdir -p "$feedback_dir"
+            local dest_file="$feedback_dir/${date_str}-${feature}-${agent}.md"
+
+            # If destination exists, append with separator
+            if [ -f "$dest_file" ]; then
+                echo "" >> "$dest_file"
+                echo "---" >> "$dest_file"
+                echo "# Additional feedback from same session" >> "$dest_file"
+                echo "" >> "$dest_file"
+                cat "$feedback_file" >> "$dest_file"
+            else
+                cp "$feedback_file" "$dest_file"
+            fi
+
+            found_feedback=true
+        fi
+    done
+
+    if [ "$found_feedback" = "true" ]; then
+        info "Workflow feedback accumulated to ~/.agent-duo/workflow-feedback/"
     fi
 }
 
@@ -1988,6 +2036,9 @@ cleanup_single_session() {
         stop_single_session "$feature" "$root_worktree" "$peer_sync"
     fi
 
+    # Accumulate workflow feedback before cleanup
+    accumulate_workflow_feedback "$peer_sync" "$feature"
+
     # Remove session from registry
     if [ -L "$sessions_dir/${feature}.session" ]; then
         rm -f "$sessions_dir/${feature}.session"
@@ -2051,6 +2102,9 @@ cleanup_legacy_session() {
 
     # Stop any running processes first
     stop_single_session "$feature" "$root" "$peer_sync" 2>/dev/null || true
+
+    # Accumulate workflow feedback before cleanup
+    accumulate_workflow_feedback "$peer_sync" "$feature"
 
     # Remove session state
     rm -rf "$peer_sync"
@@ -2919,6 +2973,262 @@ cmd_phase() {
     else
         echo "unknown"
     fi
+}
+
+#------------------------------------------------------------------------------
+# Command: learn (for agents - record project learnings)
+#------------------------------------------------------------------------------
+
+cmd_learn() {
+    local title="$1"
+    shift
+    local content="$*"
+
+    [ -z "$title" ] && die "Usage: agent-duo learn \"<title>\" [content]
+       Or pipe content: echo 'details' | agent-duo learn \"<title>\""
+
+    # Get agent name
+    local agent="${MY_NAME:-unknown}"
+    local feature="${FEATURE:-unknown}"
+
+    # Determine worktree root (where AGENTS_STAGING.md should live)
+    local worktree_root="${MY_WORKTREE:-$(pwd)}"
+
+    # If content not provided as argument, read from stdin
+    if [ -z "$content" ]; then
+        if [ -t 0 ]; then
+            # No stdin, no content - just create a placeholder
+            content=""
+        else
+            content="$(cat)"
+        fi
+    fi
+
+    local staging_file="$worktree_root/AGENTS_STAGING.md"
+    local date_str
+    date_str="$(date +%Y-%m-%d)"
+
+    # Create file with header if it doesn't exist
+    if [ ! -f "$staging_file" ]; then
+        cat > "$staging_file" << 'EOF'
+# Agent Learnings (Staging)
+
+This file contains learnings discovered by AI agents during development sessions.
+Periodically review and consolidate valuable entries into `CLAUDE.md` or `AGENTS.md`.
+
+---
+
+EOF
+    fi
+
+    # Append the learning entry
+    cat >> "$staging_file" << EOF
+
+<!-- Entry: ${feature}-${agent} | ${date_str} -->
+### ${title}
+
+${content}
+<!-- End entry -->
+EOF
+
+    success "Learning recorded to AGENTS_STAGING.md"
+}
+
+#------------------------------------------------------------------------------
+# Command: workflow-feedback (for agents - record feedback about agent-duo)
+#------------------------------------------------------------------------------
+
+cmd_workflow_feedback() {
+    local category="$1"
+    shift
+    local content="$*"
+
+    [ -z "$category" ] && die "Usage: agent-duo workflow-feedback <category> [content]
+       Categories: skill-unclear, coordination, tooling, friction, other
+       Or pipe content: echo 'details' | agent-duo workflow-feedback <category>"
+
+    # Validate category
+    case "$category" in
+        skill-unclear|coordination|tooling|friction|other) ;;
+        *) die "Invalid category: $category (valid: skill-unclear, coordination, tooling, friction, other)" ;;
+    esac
+
+    # Get agent name and session info
+    local agent="${MY_NAME:-unknown}"
+    local feature="${FEATURE:-unknown}"
+
+    # Get project root with .peer-sync
+    local root
+    root="$(get_project_root)"
+    local peer_sync="$root/.peer-sync"
+
+    # If content not provided as argument, read from stdin
+    if [ -z "$content" ]; then
+        if [ -t 0 ]; then
+            die "No feedback content provided. Provide as argument or pipe to stdin."
+        else
+            content="$(cat)"
+        fi
+    fi
+
+    local feedback_file="$peer_sync/workflow-feedback-${agent}.md"
+    local date_str
+    date_str="$(date +%Y-%m-%d)"
+    local timestamp
+    timestamp="$(date +%H:%M:%S)"
+
+    # Create file with header if it doesn't exist
+    if [ ! -f "$feedback_file" ]; then
+        cat > "$feedback_file" << EOF
+# Workflow Feedback - ${agent}
+
+Session: ${feature}
+Agent: ${agent}
+
+---
+
+EOF
+    fi
+
+    # Append the feedback entry
+    cat >> "$feedback_file" << EOF
+
+## [${category}] ${date_str} ${timestamp}
+
+${content}
+
+---
+EOF
+
+    success "Workflow feedback recorded"
+}
+
+#------------------------------------------------------------------------------
+# Command: feedback (manage accumulated workflow feedback)
+#------------------------------------------------------------------------------
+
+cmd_feedback() {
+    local action="${1:-list}"
+    shift || true
+
+    local feedback_dir="$HOME/.agent-duo/workflow-feedback"
+
+    case "$action" in
+        list)
+            if [ ! -d "$feedback_dir" ] || [ -z "$(ls -A "$feedback_dir" 2>/dev/null)" ]; then
+                info "No accumulated workflow feedback."
+                return 0
+            fi
+            info "Accumulated workflow feedback:"
+            echo ""
+            ls -1 "$feedback_dir" | while read -r file; do
+                local filepath="$feedback_dir/$file"
+                local lines
+                lines="$(wc -l < "$filepath" | tr -d ' ')"
+                echo "  $file ($lines lines)"
+            done
+            ;;
+        view)
+            local file="$1"
+            [ -z "$file" ] && die "Usage: agent-duo feedback view <filename>"
+            local filepath="$feedback_dir/$file"
+            [ ! -f "$filepath" ] && die "Feedback file not found: $file"
+            cat "$filepath"
+            ;;
+        delete)
+            local file="$1"
+            [ -z "$file" ] && die "Usage: agent-duo feedback delete <filename|--all>"
+            if [ "$file" = "--all" ]; then
+                rm -rf "$feedback_dir"
+                success "All feedback deleted"
+            else
+                local filepath="$feedback_dir/$file"
+                [ ! -f "$filepath" ] && die "Feedback file not found: $file"
+                rm "$filepath"
+                success "Deleted: $file"
+            fi
+            ;;
+        submit)
+            if [ ! -d "$feedback_dir" ] || [ -z "$(ls -A "$feedback_dir" 2>/dev/null)" ]; then
+                die "No feedback to submit"
+            fi
+
+            # Check for gh CLI
+            if ! command -v gh >/dev/null 2>&1; then
+                die "GitHub CLI (gh) not found. Install it or submit feedback manually."
+            fi
+
+            # List files for selection
+            info "Available feedback files:"
+            local files=()
+            local i=1
+            while IFS= read -r file; do
+                files+=("$file")
+                echo "  $i) $file"
+                i=$((i + 1))
+            done < <(ls -1 "$feedback_dir")
+
+            echo ""
+            echo "Enter file number to submit (or 'all' to combine all): "
+            read -r selection
+
+            local body=""
+            local title=""
+
+            if [ "$selection" = "all" ]; then
+                title="Workflow feedback from agent sessions"
+                for file in "${files[@]}"; do
+                    body+="# From: $file"$'\n\n'
+                    body+="$(cat "$feedback_dir/$file")"$'\n\n'
+                    body+="---"$'\n\n'
+                done
+            else
+                local idx=$((selection - 1))
+                if [ "$idx" -lt 0 ] || [ "$idx" -ge "${#files[@]}" ]; then
+                    die "Invalid selection"
+                fi
+                local selected="${files[$idx]}"
+                title="Workflow feedback: $selected"
+                body="$(cat "$feedback_dir/$selected")"
+            fi
+
+            echo ""
+            echo "Title: $title"
+            echo ""
+            echo "Body preview (first 500 chars):"
+            echo "${body:0:500}..."
+            echo ""
+            echo "Submit this feedback to agent-duo GitHub issues? [y/N] "
+            read -r confirm
+
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                # Get configured repo or prompt
+                local repo
+                repo="$(get_config_value "feedback_repo" 2>/dev/null)" || repo=""
+                if [ -z "$repo" ]; then
+                    echo "Enter GitHub repo (e.g., owner/repo): "
+                    read -r repo
+                    if [ -z "$repo" ]; then
+                        die "No repo specified"
+                    fi
+                    echo "Save this repo for future submissions? [y/N] "
+                    read -r save_repo
+                    if [ "$save_repo" = "y" ] || [ "$save_repo" = "Y" ]; then
+                        set_config_value "feedback_repo" "$repo"
+                        success "Saved feedback_repo=$repo"
+                    fi
+                fi
+                info "Creating issue in $repo..."
+                echo "$body" | gh issue create --title "$title" --body-file - --repo "$repo" 2>/dev/null || \
+                    warn "Could not create issue. Check repo access or submit manually."
+            else
+                info "Submission cancelled. You can copy the feedback manually."
+            fi
+            ;;
+        *)
+            die "Unknown feedback action: $action (valid: list, view, delete, submit)"
+            ;;
+    esac
 }
 
 #------------------------------------------------------------------------------
@@ -4423,6 +4733,43 @@ AGENT COMMANDS (used by AI agents)
           inconsistency - Conflicting requirements or code/docs mismatch
           misguided     - Evidence the task approach is wrong
 
+    learn "<title>" [content]
+        Record a project learning to AGENTS_STAGING.md.
+        Append documentation about patterns, gotchas, or conventions discovered
+        during development. Content can be piped from stdin.
+
+        Example:
+          agent-duo learn "Redis required for tests" "Integration tests need Redis on localhost:6379"
+          echo "Use ApiError from src/errors.ts" | agent-duo learn "Error handling pattern"
+
+    workflow-feedback <category> [content]
+        Record feedback about the agent-duo workflow itself.
+        Helps improve skills and coordination for future sessions.
+        Content can be piped from stdin.
+
+        Categories:
+          skill-unclear  - Skill instructions were ambiguous or missing
+          coordination   - Timing or signaling issues
+          tooling        - Missing commands or features
+          friction       - General workflow friction points
+          other          - Other feedback
+
+FEEDBACK COMMANDS (for users)
+    feedback [list|view|delete|submit]
+        Manage accumulated workflow feedback from agent sessions.
+
+        Subcommands:
+          list               List accumulated feedback files
+          view <file>        View contents of a feedback file
+          delete <file>      Delete a feedback file (or --all for all)
+          submit             Interactively submit feedback as GitHub issue
+                             (uses feedback_repo config, or prompts for repo)
+
+        Workflow feedback is automatically accumulated from .peer-sync/ to
+        ~/.agent-duo/workflow-feedback/ when both PRs are created or during cleanup.
+
+        Configure target repo: agent-duo config feedback_repo owner/repo
+
 ENVIRONMENT VARIABLES (set in agent sessions)
     PEER_SYNC       Path to .peer-sync directory
     MY_NAME         This agent's name (claude or codex)
@@ -4472,6 +4819,10 @@ EXAMPLES
 
     # Clean up
     agent-duo cleanup --full
+
+    # View accumulated workflow feedback from past sessions
+    agent-duo feedback list
+    agent-duo feedback view 2026-02-03-auth-claude.md
 EOF
 }
 
@@ -4504,6 +4855,9 @@ main() {
         signal)      cmd_signal "$@" ;;
         peer-status) cmd_peer_status "$@" ;;
         phase)       cmd_phase "$@" ;;
+        learn)       cmd_learn "$@" ;;
+        workflow-feedback) cmd_workflow_feedback "$@" ;;
+        feedback)    cmd_feedback "$@" ;;
         help|--help|-h) cmd_help ;;
         *)           die "Unknown command: $cmd (try 'agent-duo help')" ;;
     esac
