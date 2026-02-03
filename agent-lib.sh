@@ -1901,8 +1901,15 @@ pr_has_new_comments() {
     if [ -f "$hash_file" ]; then
         local last_hash
         last_hash="$(cat "$hash_file")"
-        if [ "$current_hash" = "$last_hash" ]; then
-            return 1  # No changes
+        # Only compare comment_count|review_count, not updatedAt
+        # This avoids false positives from force pushes (rebase) which change updatedAt
+        # but don't add new comments/reviews
+        local current_counts="${current_hash%|*}"  # Remove updatedAt (after last |)
+        local last_counts="${last_hash%|*}"
+        if [ "$current_counts" = "$last_counts" ]; then
+            # Update hash file even if counts unchanged (to track updatedAt for debugging)
+            echo "$current_hash" > "$hash_file"
+            return 1  # No new comments/reviews
         fi
     fi
 
