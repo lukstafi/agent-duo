@@ -7,7 +7,7 @@
 # Usage: agent-solo <command> [options]
 #
 # Session Commands:
-#   start <feature> [--auto-run] [--no-ttyd] [--clarify]  Start session
+#   start <feature> [--auto-run] [--no-ttyd] [--clarify] [--pushback] [--plan]  Start session
 #   run [options]        Run orchestrator loop with timeouts
 #   stop                 Stop ttyd servers, keep worktree
 #   restart [--auto-run] [--no-ttyd]  Restart session after system restart/crash
@@ -161,27 +161,31 @@ cmd_setup() {
 
     install_skill "$templates_dir/solo-coder-work.md" "$claude_skills/solo-coder-work.md" "/solo-coder-work"
     install_skill "$templates_dir/solo-coder-clarify.md" "$claude_skills/solo-coder-clarify.md" "/solo-coder-clarify"
+    install_skill "$templates_dir/solo-coder-plan.md" "$claude_skills/solo-coder-plan.md" "/solo-coder-plan"
     install_skill "$templates_dir/solo-reviewer-work.md" "$claude_skills/solo-reviewer-work.md" "/solo-reviewer-work"
     install_skill "$templates_dir/solo-reviewer-clarify.md" "$claude_skills/solo-reviewer-clarify.md" "/solo-reviewer-clarify"
     install_skill "$templates_dir/solo-reviewer-gather.md" "$claude_skills/solo-reviewer-gather.md" "/solo-reviewer-gather"
     install_skill "$templates_dir/solo-reviewer-pushback.md" "$claude_skills/solo-reviewer-pushback.md" "/solo-reviewer-pushback"
+    install_skill "$templates_dir/solo-reviewer-plan.md" "$claude_skills/solo-reviewer-plan.md" "/solo-reviewer-plan"
     install_skill "$templates_dir/solo-pr-comment.md" "$claude_skills/solo-pr-comment.md" "/solo-pr-comment"
     install_skill "$templates_dir/solo-integrate.md" "$claude_skills/solo-integrate.md" "/solo-integrate"
     success "Installed Claude solo skills to $claude_skills"
 
     # Install Codex skills (uses $command syntax)
     local codex_skills="$HOME/.codex/skills"
-    mkdir -p "$codex_skills/solo-coder-work" "$codex_skills/solo-coder-clarify"
-    mkdir -p "$codex_skills/solo-reviewer-work" "$codex_skills/solo-reviewer-clarify" "$codex_skills/solo-reviewer-gather" "$codex_skills/solo-reviewer-pushback"
+    mkdir -p "$codex_skills/solo-coder-work" "$codex_skills/solo-coder-clarify" "$codex_skills/solo-coder-plan"
+    mkdir -p "$codex_skills/solo-reviewer-work" "$codex_skills/solo-reviewer-clarify" "$codex_skills/solo-reviewer-gather" "$codex_skills/solo-reviewer-pushback" "$codex_skills/solo-reviewer-plan"
     mkdir -p "$codex_skills/solo-pr-comment"
     mkdir -p "$codex_skills/solo-integrate"
 
     install_skill "$templates_dir/solo-coder-work.md" "$codex_skills/solo-coder-work/SKILL.md" "\$solo-coder-work"
     install_skill "$templates_dir/solo-coder-clarify.md" "$codex_skills/solo-coder-clarify/SKILL.md" "\$solo-coder-clarify"
+    install_skill "$templates_dir/solo-coder-plan.md" "$codex_skills/solo-coder-plan/SKILL.md" "\$solo-coder-plan"
     install_skill "$templates_dir/solo-reviewer-work.md" "$codex_skills/solo-reviewer-work/SKILL.md" "\$solo-reviewer-work"
     install_skill "$templates_dir/solo-reviewer-clarify.md" "$codex_skills/solo-reviewer-clarify/SKILL.md" "\$solo-reviewer-clarify"
     install_skill "$templates_dir/solo-reviewer-gather.md" "$codex_skills/solo-reviewer-gather/SKILL.md" "\$solo-reviewer-gather"
     install_skill "$templates_dir/solo-reviewer-pushback.md" "$codex_skills/solo-reviewer-pushback/SKILL.md" "\$solo-reviewer-pushback"
+    install_skill "$templates_dir/solo-reviewer-plan.md" "$codex_skills/solo-reviewer-plan/SKILL.md" "\$solo-reviewer-plan"
     install_skill "$templates_dir/solo-pr-comment.md" "$codex_skills/solo-pr-comment/SKILL.md" "\$solo-pr-comment"
     install_skill "$templates_dir/solo-integrate.md" "$codex_skills/solo-integrate/SKILL.md" "\$solo-integrate"
     success "Installed Codex solo skills to $codex_skills"
@@ -208,11 +212,13 @@ cmd_start() {
     local gather_mode=false
     local clarify_mode=false
     local pushback_mode=false
+    local plan_mode=false
     local work_timeout=$DEFAULT_WORK_TIMEOUT
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
     local gather_timeout=$DEFAULT_GATHER_TIMEOUT
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
     local pushback_timeout=$DEFAULT_PUSHBACK_TIMEOUT
+    local plan_timeout=$DEFAULT_PLAN_TIMEOUT
     local max_rounds=10
     local codex_thinking=$DEFAULT_CODEX_THINKING
     local coder=$DEFAULT_CODER
@@ -229,11 +235,13 @@ cmd_start() {
             --gather) gather_mode=true; shift ;;
             --clarify) clarify_mode=true; shift ;;
             --pushback) pushback_mode=true; shift ;;
+            --plan) plan_mode=true; shift ;;
             --work-timeout) work_timeout="$2"; shift 2 ;;
             --review-timeout) review_timeout="$2"; shift 2 ;;
             --gather-timeout) gather_timeout="$2"; shift 2 ;;
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
             --pushback-timeout) pushback_timeout="$2"; shift 2 ;;
+            --plan-timeout) plan_timeout="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --codex-thinking) codex_thinking="$2"; shift 2 ;;
             --codex-model) codex_model="$2"; shift 2 ;;
@@ -250,7 +258,7 @@ cmd_start() {
     [ -n "$codex_model" ] && export AGENT_DUO_CODEX_MODEL="$codex_model"
     [ -n "$claude_model" ] && export AGENT_DUO_CLAUDE_MODEL="$claude_model"
 
-    [ ${#features[@]} -eq 0 ] && die "Usage: agent-solo start <feature> [feature2 ...] [--no-ttyd] [--auto-run] [--clarify] [--coder <agent>] [--reviewer <agent>]"
+    [ ${#features[@]} -eq 0 ] && die "Usage: agent-solo start <feature> [feature2 ...] [--no-ttyd] [--auto-run] [--clarify] [--pushback] [--plan] [--coder <agent>] [--reviewer <agent>]"
 
     # Validate codex thinking effort
     case "$codex_thinking" in
@@ -277,8 +285,8 @@ cmd_start() {
             echo ""
             info "=== Starting session: $feature ==="
             if start_single_solo_session "$feature" "$main_project_root" "$project_name" \
-                "$ttyd_mode" "$auto_run" "$gather_mode" "$clarify_mode" "$pushback_mode" \
-                "$work_timeout" "$review_timeout" "$gather_timeout" "$clarify_timeout" "$pushback_timeout" \
+                "$ttyd_mode" "$auto_run" "$gather_mode" "$clarify_mode" "$pushback_mode" "$plan_mode" \
+                "$work_timeout" "$review_timeout" "$gather_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
                 "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port"; then
                 started=$((started + 1))
             else
@@ -299,8 +307,8 @@ cmd_start() {
     # Single feature
     local feature="${features[0]}"
     start_single_solo_session "$feature" "$main_project_root" "$project_name" \
-        "$ttyd_mode" "$auto_run" "$gather_mode" "$clarify_mode" "$pushback_mode" \
-        "$work_timeout" "$review_timeout" "$gather_timeout" "$clarify_timeout" "$pushback_timeout" \
+        "$ttyd_mode" "$auto_run" "$gather_mode" "$clarify_mode" "$pushback_mode" "$plan_mode" \
+        "$work_timeout" "$review_timeout" "$gather_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
         "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port"
 }
 
@@ -314,16 +322,18 @@ start_single_solo_session() {
     local gather_mode="$6"
     local clarify_mode="$7"
     local pushback_mode="$8"
-    local work_timeout="$9"
-    local review_timeout="${10}"
-    local gather_timeout="${11}"
-    local clarify_timeout="${12}"
-    local pushback_timeout="${13}"
-    local max_rounds="${14}"
-    local codex_thinking="${15}"
-    local coder="${16}"
-    local reviewer="${17}"
-    local base_port="${18}"
+    local plan_mode="$9"
+    local work_timeout="${10}"
+    local review_timeout="${11}"
+    local gather_timeout="${12}"
+    local clarify_timeout="${13}"
+    local pushback_timeout="${14}"
+    local plan_timeout="${15}"
+    local max_rounds="${16}"
+    local codex_thinking="${17}"
+    local coder="${18}"
+    local reviewer="${19}"
+    local base_port="${20}"
 
     # Check for existing session for THIS feature
     local sessions_dir="$main_project_root/.agent-sessions"
@@ -398,7 +408,7 @@ start_single_solo_session() {
     echo "solo" > "$peer_sync/mode"
     echo "$coder" > "$peer_sync/coder-agent"
     echo "$reviewer" > "$peer_sync/reviewer-agent"
-    # Determine initial phase: gather -> clarify -> pushback -> work
+    # Determine initial phase: gather -> clarify -> pushback -> plan -> work
     if [ "$gather_mode" = "true" ]; then
         echo "gather" > "$peer_sync/phase"
         echo "waiting|$(date +%s)|waiting for reviewer to gather context" > "$peer_sync/coder.status"
@@ -411,6 +421,11 @@ start_single_solo_session() {
         echo "pushback" > "$peer_sync/phase"
         echo "waiting|$(date +%s)|waiting for reviewer pushback" > "$peer_sync/coder.status"
         echo "pushing-back|$(date +%s)|starting" > "$peer_sync/reviewer.status"
+    elif [ "$plan_mode" = "true" ]; then
+        echo "plan" > "$peer_sync/phase"
+        echo "planning|$(date +%s)|starting" > "$peer_sync/coder.status"
+        echo "waiting|$(date +%s)|waiting for coder plan" > "$peer_sync/reviewer.status"
+        echo "1" > "$peer_sync/plan-round"
     else
         echo "work" > "$peer_sync/phase"
         echo "working|$(date +%s)|starting" > "$peer_sync/coder.status"
@@ -419,6 +434,7 @@ start_single_solo_session() {
     echo "$gather_mode" > "$peer_sync/gather-mode"
     echo "$clarify_mode" > "$peer_sync/clarify-mode"
     echo "$pushback_mode" > "$peer_sync/pushback-mode"
+    echo "$plan_mode" > "$peer_sync/plan-mode"
     echo "1" > "$peer_sync/round"
     echo "$feature" > "$peer_sync/feature"
     echo "$codex_thinking" > "$peer_sync/codex-thinking"
@@ -625,6 +641,9 @@ start_ttyd_mode_solo() {
         fi
         if [ "$pushback_mode" = "true" ]; then
             run_cmd="$run_cmd --pushback-timeout $pushback_timeout"
+        fi
+        if [ "$plan_mode" = "true" ]; then
+            run_cmd="$run_cmd --plan --plan-timeout $plan_timeout"
         fi
         tmux send-keys -t "${session_name}-orchestrator" "$run_cmd"
         tmux send-keys -t "${session_name}-orchestrator" C-m
@@ -1063,7 +1082,7 @@ cmd_restart() {
             echo "pr-comments" > "$peer_sync/phase"
             echo "active" > "$peer_sync/session"
             local run_cmd="agent-solo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
-            run_cmd="$run_cmd --clarify-timeout $clarify_timeout --pushback-timeout $pushback_timeout"
+            run_cmd="$run_cmd --clarify-timeout $clarify_timeout --pushback-timeout $pushback_timeout --plan-timeout $plan_timeout"
             tmux send-keys -t "$orchestrator_target" "$run_cmd"
             tmux send-keys -t "$orchestrator_target" C-m
             success "Started PR comment monitoring"
@@ -1083,7 +1102,7 @@ cmd_restart() {
 
         if ! $orchestrator_running; then
             local run_cmd="agent-solo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
-            run_cmd="$run_cmd --clarify-timeout $clarify_timeout --pushback-timeout $pushback_timeout"
+            run_cmd="$run_cmd --clarify-timeout $clarify_timeout --pushback-timeout $pushback_timeout --plan-timeout $plan_timeout"
             tmux send-keys -t "$orchestrator_target" "$run_cmd"
             tmux send-keys -t "$orchestrator_target" C-m
             success "Started orchestrator loop"
@@ -1573,18 +1592,205 @@ Do NOT start implementing - that's the coder's job in the work phase.
 EOF
 }
 
+#------------------------------------------------------------------------------
+# Generate plan message for coder (solo mode)
+#------------------------------------------------------------------------------
+
+generate_coder_plan_message() {
+    local feature="$1"
+    local task_content="$2"
+    local peer_sync="$3"
+    local plan_round="$4"
+
+    local revision_note=""
+    if [ "$plan_round" -gt 1 ]; then
+        revision_note="
+### Previous Review Feedback
+
+**This is plan revision round $plan_round.** Check the reviewer's feedback:
+
+\`\`\`bash
+cat \"$peer_sync/plan-review.md\"
+\`\`\`
+
+Address all feedback in your revised plan.
+"
+    fi
+
+    cat <<EOF
+# Task: $feature
+
+$task_content
+
+---
+## Agent-Solo Context - PLAN PHASE (Coder)
+
+You are the **CODER** in a solo workflow. A reviewer will examine your plan.
+
+- **Sync directory**: $peer_sync
+- **Plan round**: $plan_round
+$revision_note
+### Your Task
+
+Write a detailed implementation plan before starting to code. Your plan will be reviewed for approval.
+
+### Explore the Codebase First
+
+Understand the existing code structure relevant to your task before planning.
+
+### Write Your Implementation Plan
+
+\`\`\`bash
+cat > "$peer_sync/plan-coder.md" << 'PLAN_EOF'
+# Implementation Plan
+
+## Approach
+
+[Describe your high-level strategy in 3-5 sentences. What is the core idea?]
+
+## Key Decisions
+
+1. **Decision 1**: [What and why]
+2. **Decision 2**: [What and why]
+
+## File Changes
+
+| File | Action | Description |
+|------|--------|-------------|
+| \`path/to/file.ext\` | Create/Modify | Brief description |
+
+## Implementation Steps
+
+1. [ ] Step 1: Description
+2. [ ] Step 2: Description
+3. [ ] Step 3: Description
+
+## Risks and Edge Cases
+
+- **Risk 1**: [Description and mitigation]
+
+## Test Strategy
+
+- [ ] Unit tests for X
+- [ ] Manual verification of Y
+
+PLAN_EOF
+\`\`\`
+
+Edit the file with actual content, then signal completion:
+
+\`\`\`bash
+agent-solo signal coder plan-done "implementation plan submitted"
+\`\`\`
+
+If you need user clarification:
+\`\`\`bash
+agent-solo signal coder needs-clarify "question: what should happen when X?"
+\`\`\`
+
+Then **STOP and wait**. The reviewer will examine your plan.
+Do NOT start implementing until the work phase begins.
+EOF
+}
+
+#------------------------------------------------------------------------------
+# Generate plan-review message for reviewer (solo mode)
+#------------------------------------------------------------------------------
+
+generate_reviewer_plan_message() {
+    local feature="$1"
+    local peer_sync="$2"
+    local plan_round="$3"
+
+    cat <<EOF
+## Agent-Solo Context - PLAN-REVIEW PHASE (Reviewer)
+
+You are the **REVIEWER** in a solo workflow. Review the coder's plan before they start implementing.
+
+- **Sync directory**: $peer_sync
+- **Plan round**: $plan_round
+
+### Your Task
+
+Review the coder's implementation plan and provide a verdict.
+
+### Read the Coder's Plan
+
+\`\`\`bash
+cat "$peer_sync/plan-coder.md"
+\`\`\`
+
+### Write Your Review with Verdict
+
+\`\`\`bash
+cat > "$peer_sync/plan-review.md" << 'REVIEW_EOF'
+# Plan Review (Round $plan_round)
+
+## Completeness
+
+[Does the plan cover all requirements?]
+
+## Simplicity
+
+[Is there a simpler approach?]
+
+## Risks and Gaps
+
+[What edge cases or failure modes are missing?]
+
+## Feasibility
+
+[Will this approach work?]
+
+## Feedback
+
+1. [Feedback item 1]
+2. [Feedback item 2]
+
+---
+
+## Verdict
+
+**APPROVE** / **REQUEST_CHANGES**
+
+[If REQUEST_CHANGES: Explain what must be addressed before approval]
+
+REVIEW_EOF
+\`\`\`
+
+Edit the file with actual observations. **Include a clear verdict: APPROVE or REQUEST_CHANGES**
+
+### Signal Completion
+
+Include the verdict in your signal:
+
+\`\`\`bash
+agent-solo signal reviewer plan-review-done "verdict: APPROVE"
+# or
+agent-solo signal reviewer plan-review-done "verdict: REQUEST_CHANGES"
+\`\`\`
+
+Then **STOP and wait**.
+
+- If **APPROVE**: The coder will proceed to implementation
+- If **REQUEST_CHANGES**: The coder will revise their plan (max 3 total attempts)
+EOF
+}
+
 cmd_run() {
     local work_timeout=$DEFAULT_WORK_TIMEOUT
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
     local gather_timeout=$DEFAULT_GATHER_TIMEOUT
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
     local pushback_timeout=$DEFAULT_PUSHBACK_TIMEOUT
+    local plan_timeout=$DEFAULT_PLAN_TIMEOUT
     local poll_interval=$DEFAULT_POLL_INTERVAL
     local max_rounds=10
     local auto_start=false
     local enable_gather=""
     local enable_clarify=""
     local enable_pushback=""
+    local enable_plan=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -1594,9 +1800,11 @@ cmd_run() {
             --gather-timeout) gather_timeout="$2"; shift 2 ;;
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
             --pushback-timeout) pushback_timeout="$2"; shift 2 ;;
+            --plan-timeout) plan_timeout="$2"; shift 2 ;;
             --gather) enable_gather="true"; shift ;;
             --clarify) enable_clarify="true"; shift ;;
             --pushback) enable_pushback="true"; shift ;;
+            --plan) enable_plan="true"; shift ;;
             --poll) poll_interval="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --auto-start) auto_start=true; shift ;;
@@ -1976,9 +2184,195 @@ cmd_run() {
 
         # Mark pushback as confirmed
         echo "confirmed" > "$peer_sync/pushback-confirmed"
-        echo "work" > "$peer_sync/phase"
 
-        success "Pushback stage complete! Proceeding to work phase..."
+        success "Pushback stage complete!"
+        echo ""
+    fi
+
+    # Check if plan mode is enabled (command line overrides session setting)
+    local plan_mode
+    if [ -n "$enable_plan" ]; then
+        plan_mode="$enable_plan"
+        echo "$enable_plan" > "$peer_sync/plan-mode"
+    else
+        plan_mode="$(cat "$peer_sync/plan-mode" 2>/dev/null)" || plan_mode="false"
+    fi
+
+    # Handle plan phase if enabled and not already confirmed
+    if [ "$plan_mode" = "true" ] && [ ! -f "$peer_sync/plan-confirmed" ]; then
+        local plan_round
+        plan_round="$(cat "$peer_sync/plan-round" 2>/dev/null)" || plan_round=1
+        local max_plan_rounds=3
+
+        while [ "$plan_round" -le "$max_plan_rounds" ]; do
+            info "=== Plan Phase (Round $plan_round/$max_plan_rounds) ==="
+            echo "plan" > "$peer_sync/phase"
+            echo "$plan_round" > "$peer_sync/plan-round"
+
+            # Read task content
+            local task_file
+            local task_content=""
+            if task_file="$(find_task_file "$root" "$feature")"; then
+                task_content="$(cat "$task_file" | head -c 4000)"
+            fi
+
+            # Send plan message to coder
+            atomic_write "$peer_sync/coder.status" "planning|$(date +%s)|plan phase round $plan_round"
+            atomic_write "$peer_sync/reviewer.status" "waiting|$(date +%s)|waiting for coder plan"
+            info "Sending plan task to coder..."
+            local coder_plan_msg
+            coder_plan_msg="$(generate_coder_plan_message "$feature" "$task_content" "$peer_sync" "$plan_round")"
+            tmux send-keys -t "$coder_session" "$coder_plan_msg"
+            sleep 0.5
+            tmux send-keys -t "$coder_session" C-m
+
+            # Wait for coder to complete plan
+            local plan_start=$SECONDS
+            local coder_plan_done=false
+
+            while ! $coder_plan_done; do
+                local elapsed=$((SECONDS - plan_start))
+
+                local coder_status
+                coder_status="$(get_agent_status "coder" "$peer_sync")"
+
+                [ "$coder_status" = "plan-done" ] && coder_plan_done=true
+
+                # Handle needs-clarify status
+                if [ "$coder_status" = "needs-clarify" ]; then
+                    echo ""
+                    warn "Coder needs clarification during planning"
+                    local coder_msg
+                    coder_msg="$(cut -d'|' -f3- < "$peer_sync/coder.status")"
+                    echo "  Coder: $coder_msg"
+                    echo ""
+                    echo "Respond to the coder in their terminal, then they will signal plan-done."
+                    echo ""
+                fi
+
+                if $coder_plan_done; then
+                    break
+                fi
+
+                # Check timeout
+                if [ "$elapsed" -ge "$plan_timeout" ]; then
+                    warn "Plan phase timeout (${plan_timeout}s)"
+                    break
+                fi
+
+                printf "\r  Waiting... coder=%s (%ds/%ds)  " "$coder_status" "$elapsed" "$plan_timeout"
+                sleep "$poll_interval"
+            done
+            echo ""
+
+            # Display coder's plan
+            if [ -f "$peer_sync/plan-coder.md" ]; then
+                echo ""
+                info "--- Coder's Plan ---"
+                cat "$peer_sync/plan-coder.md"
+                echo ""
+            else
+                warn "Coder did not submit a plan"
+            fi
+
+            # Now enter plan-review phase
+            info "=== Plan-Review Phase (Round $plan_round/$max_plan_rounds) ==="
+            echo "plan-review" > "$peer_sync/phase"
+
+            # Send plan-review message to reviewer
+            atomic_write "$peer_sync/reviewer.status" "plan-reviewing|$(date +%s)|plan-review phase round $plan_round"
+            atomic_write "$peer_sync/coder.status" "waiting|$(date +%s)|waiting for reviewer verdict"
+            info "Sending plan-review task to reviewer..."
+            local reviewer_plan_msg
+            reviewer_plan_msg="$(generate_reviewer_plan_message "$feature" "$peer_sync" "$plan_round")"
+            tmux send-keys -t "$reviewer_session" "$reviewer_plan_msg"
+            sleep 0.5
+            tmux send-keys -t "$reviewer_session" C-m
+
+            # Wait for reviewer to complete plan review
+            local review_start=$SECONDS
+            local reviewer_review_done=false
+
+            while ! $reviewer_review_done; do
+                local elapsed=$((SECONDS - review_start))
+
+                local reviewer_status
+                reviewer_status="$(get_agent_status "reviewer" "$peer_sync")"
+
+                [ "$reviewer_status" = "plan-review-done" ] && reviewer_review_done=true
+
+                # Handle needs-clarify status
+                if [ "$reviewer_status" = "needs-clarify" ]; then
+                    echo ""
+                    warn "Reviewer needs clarification during plan review"
+                    echo "Respond to the reviewer in their terminal, then they will signal plan-review-done."
+                    echo ""
+                fi
+
+                if $reviewer_review_done; then
+                    break
+                fi
+
+                # Check timeout
+                if [ "$elapsed" -ge "$plan_timeout" ]; then
+                    warn "Plan-review phase timeout (${plan_timeout}s)"
+                    break
+                fi
+
+                printf "\r  Waiting... reviewer=%s (%ds/%ds)  " "$reviewer_status" "$elapsed" "$plan_timeout"
+                sleep "$poll_interval"
+            done
+            echo ""
+
+            # Display reviewer's verdict
+            if [ -f "$peer_sync/plan-review.md" ]; then
+                echo ""
+                info "--- Reviewer's Plan Review ---"
+                cat "$peer_sync/plan-review.md"
+                echo ""
+            fi
+
+            # Check verdict
+            local verdict=""
+            if [ -f "$peer_sync/plan-review.md" ]; then
+                # Extract verdict from the file (look for APPROVE or REQUEST_CHANGES)
+                if grep -q "^\*\*APPROVE\*\*" "$peer_sync/plan-review.md" || grep -q "^APPROVE$" "$peer_sync/plan-review.md"; then
+                    verdict="APPROVE"
+                elif grep -q "^\*\*REQUEST_CHANGES\*\*" "$peer_sync/plan-review.md" || grep -q "^REQUEST_CHANGES$" "$peer_sync/plan-review.md"; then
+                    verdict="REQUEST_CHANGES"
+                fi
+            fi
+
+            # Also check status message for verdict
+            local reviewer_msg
+            reviewer_msg="$(cut -d'|' -f3- < "$peer_sync/reviewer.status" 2>/dev/null)" || reviewer_msg=""
+            if echo "$reviewer_msg" | grep -iq "approve"; then
+                verdict="APPROVE"
+            elif echo "$reviewer_msg" | grep -iq "request.changes"; then
+                verdict="REQUEST_CHANGES"
+            fi
+
+            if [ "$verdict" = "APPROVE" ]; then
+                success "Plan approved! Proceeding to work phase..."
+                echo "confirmed" > "$peer_sync/plan-confirmed"
+                break
+            elif [ "$verdict" = "REQUEST_CHANGES" ] && [ "$plan_round" -lt "$max_plan_rounds" ]; then
+                warn "Reviewer requested changes. Coder will revise plan..."
+                plan_round=$((plan_round + 1))
+                # Loop continues
+            else
+                # No clear verdict or max rounds reached
+                if [ "$plan_round" -ge "$max_plan_rounds" ]; then
+                    warn "Max plan rounds ($max_plan_rounds) reached. Proceeding to work phase..."
+                else
+                    info "Proceeding to work phase..."
+                fi
+                echo "confirmed" > "$peer_sync/plan-confirmed"
+                break
+            fi
+        done
+
+        echo "work" > "$peer_sync/phase"
         echo ""
     fi
 
