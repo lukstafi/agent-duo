@@ -57,9 +57,9 @@ Do one of the following:
 agent-duo signal "$MY_NAME" done "brief summary"
 ```
 
-**If your solution is complete** — create the PR now:
+**If your solution is complete** — capture learnings and create the PR now:
 ```bash
-agent-duo pr "$MY_NAME"
+agent-duo pr "$MY_NAME"   # will prompt for update-docs if needed
 ```
 
 The orchestrator waits for your signal or PR before proceeding.
