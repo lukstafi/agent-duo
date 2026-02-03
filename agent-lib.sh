@@ -900,6 +900,286 @@ trigger_skill() {
 }
 
 #------------------------------------------------------------------------------
+# Unified Agent Communication
+#------------------------------------------------------------------------------
+
+# Send content to an agent TUI and track for potential retry
+# This is the primary function for sending messages/skills to agents
+#
+# Usage: send_to_agent <agent> <session> <peer_sync> <send_type> <content> [skill_name]
+#   agent: "claude", "codex", "coder", or "reviewer"
+#   session: tmux session target
+#   peer_sync: path to .peer-sync directory
+#   send_type: "message" for multi-line content, "skill" for skill invocation
+#   content: the message text or skill name (without / or $ prefix)
+#   skill_name: (optional) logical name for retry tracking (defaults to content for skills)
+#
+# For skills: content is the skill name (e.g., "duo-work")
+# For messages: content is the full message text
+#
+# This function:
+# 1. Sends the content appropriately based on agent type
+# 2. Stores what was sent in .peer-sync for retry purposes
+# 3. Clears any previous retry state (fresh send = fresh retry counter)
+send_to_agent() {
+    local agent="$1"
+    local session="$2"
+    local peer_sync="$3"
+    local send_type="$4"
+    local content="$5"
+    local skill_name="${6:-$content}"
+
+    # Determine the underlying agent type (claude or codex) for send mechanics
+    local agent_type="$agent"
+    case "$agent" in
+        coder|reviewer)
+            # Solo mode - look up which CLI this role uses
+            local coder_agent reviewer_agent
+            coder_agent="$(cat "$peer_sync/coder-agent" 2>/dev/null)" || coder_agent="claude"
+            reviewer_agent="$(cat "$peer_sync/reviewer-agent" 2>/dev/null)" || reviewer_agent="codex"
+            [ "$agent" = "coder" ] && agent_type="$coder_agent" || agent_type="$reviewer_agent"
+            ;;
+    esac
+
+    # Clear any previous retry state for this agent (fresh send)
+    rm -f "$peer_sync/${agent}.retry-state"
+
+    # Store what we're sending for retry purposes
+    # Format: send_type|skill_name|timestamp
+    echo "${send_type}|${skill_name}|$(date +%s)" > "$peer_sync/${agent}.last-send"
+
+    # For message sends, also store the full content (for retry)
+    if [ "$send_type" = "message" ]; then
+        echo "$content" > "$peer_sync/${agent}.last-message"
+    fi
+
+    # Send based on type
+    case "$send_type" in
+        skill)
+            trigger_skill "$agent_type" "$session" "$content"
+            ;;
+        message)
+            # Send message content
+            tmux send-keys -t "$session" "$content"
+            sleep 0.5
+            tmux send-keys -t "$session" C-m
+            ;;
+        *)
+            warn "Unknown send_type: $send_type"
+            return 1
+            ;;
+    esac
+}
+
+# Retry the last send to an agent (used by check_and_retry_on_error)
+# Usage: retry_last_send <agent> <session> <peer_sync>
+# Returns: 0 if retried, 1 if nothing to retry
+retry_last_send() {
+    local agent="$1"
+    local session="$2"
+    local peer_sync="$3"
+
+    local last_send_file="$peer_sync/${agent}.last-send"
+    [ -f "$last_send_file" ] || return 1
+
+    local send_type skill_name timestamp
+    IFS='|' read -r send_type skill_name timestamp < "$last_send_file"
+
+    # Determine agent type for send mechanics
+    local agent_type="$agent"
+    case "$agent" in
+        coder|reviewer)
+            local coder_agent reviewer_agent
+            coder_agent="$(cat "$peer_sync/coder-agent" 2>/dev/null)" || coder_agent="claude"
+            reviewer_agent="$(cat "$peer_sync/reviewer-agent" 2>/dev/null)" || reviewer_agent="codex"
+            [ "$agent" = "coder" ] && agent_type="$coder_agent" || agent_type="$reviewer_agent"
+            ;;
+    esac
+
+    case "$send_type" in
+        skill)
+            info "Retrying skill $skill_name for $agent..."
+            trigger_skill "$agent_type" "$session" "$skill_name"
+            ;;
+        message)
+            local last_msg_file="$peer_sync/${agent}.last-message"
+            if [ -f "$last_msg_file" ]; then
+                info "Retrying message for $agent..."
+                local content
+                content="$(cat "$last_msg_file")"
+                tmux send-keys -t "$session" "$content"
+                sleep 0.5
+                tmux send-keys -t "$session" C-m
+            else
+                warn "No saved message to retry for $agent"
+                return 1
+            fi
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
+#------------------------------------------------------------------------------
+# API Error Detection and Retry
+#------------------------------------------------------------------------------
+
+# Default retry settings
+DEFAULT_API_RETRY_BACKOFF=30      # Initial backoff in seconds
+DEFAULT_API_MAX_RETRIES=3         # Maximum retry attempts
+DEFAULT_API_BACKOFF_MULTIPLIER=2  # Exponential backoff multiplier
+
+# Check if an agent's tmux pane shows API errors
+# Usage: agent_has_api_error <session>
+# Returns: 0 if API error detected, 1 otherwise
+agent_has_api_error() {
+    local session="$1"
+
+    # Capture recent lines from the tmux pane (last 30 lines should catch recent errors)
+    local buffer
+    buffer="$(tmux capture-pane -t "$session" -p -S -30 2>/dev/null)" || return 1
+
+    # Look for common API error patterns
+    # Claude Code shows: "API Error: 500 {...}"
+    # Also check for rate limit errors, timeouts, etc.
+    if echo "$buffer" | grep -qE 'API Error: (5[0-9]{2}|429)|Internal server error|rate.?limit|timeout.*error'; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Get the timestamp of the last API error from pane (for deduplication)
+# Usage: get_api_error_signature <session>
+# Returns: A signature string based on error content, or empty if no error
+get_api_error_signature() {
+    local session="$1"
+
+    local buffer
+    buffer="$(tmux capture-pane -t "$session" -p -S -30 2>/dev/null)" || return 1
+
+    # Extract the error line and request_id if present (for deduplication)
+    local error_line
+    error_line="$(echo "$buffer" | grep -oE 'API Error: [0-9]+.*request_id[^}]+' | tail -1)"
+
+    if [ -n "$error_line" ]; then
+        echo "$error_line"
+    fi
+}
+
+# Check if agent is stuck at prompt after API error (ready for retry)
+# Usage: agent_ready_for_retry <session>
+# Returns: 0 if at prompt and ready, 1 otherwise
+agent_ready_for_retry() {
+    local session="$1"
+
+    # Capture last few lines to see if we're at a prompt
+    local buffer
+    buffer="$(tmux capture-pane -t "$session" -p -S -5 2>/dev/null)" || return 1
+
+    # Look for prompt indicators (❯ for Claude, $ or > for Codex)
+    # The prompt should be at the end of the buffer (last non-empty line)
+    local last_line
+    last_line="$(echo "$buffer" | grep -v '^$' | tail -1)"
+
+    # Check for various prompt patterns
+    if echo "$last_line" | grep -qE '^[❯$>]|^[[:space:]]*[❯$>]'; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Check and handle API errors for an agent during wait loop
+# Uses the last-send tracking from send_to_agent to know what to retry
+# Usage: check_and_retry_on_error <agent> <session> <peer_sync>
+# Returns: 0 if no action needed or retry triggered, 1 if max retries exceeded
+check_and_retry_on_error() {
+    local agent="$1"
+    local session="$2"
+    local peer_sync="$3"
+
+    # Only check if agent appears stuck (not progressing)
+    local status
+    status="$(get_agent_status "$agent" "$peer_sync")"
+
+    # If agent is in a terminal state, no need to check for errors
+    case "$status" in
+        done|review-done|pr-created|clarify-done|gather-done|pushback-done|plan-done|plan-review-done|docs-update-done)
+            # Clear any retry state
+            rm -f "$peer_sync/${agent}.retry-state"
+            rm -f "$peer_sync/${agent}.last-send"
+            rm -f "$peer_sync/${agent}.last-message"
+            return 0
+            ;;
+    esac
+
+    # Check for API error and agent ready for retry
+    if ! agent_has_api_error "$session" || ! agent_ready_for_retry "$session"; then
+        return 0
+    fi
+
+    # We have an error and agent is at prompt - check retry state
+    local retry_file="$peer_sync/${agent}.retry-state"
+    local last_send_file="$peer_sync/${agent}.last-send"
+
+    # Need last-send info to know what to retry
+    [ -f "$last_send_file" ] || return 0
+
+    local send_type skill_name send_timestamp
+    IFS='|' read -r send_type skill_name send_timestamp < "$last_send_file"
+
+    # Read retry state
+    local attempt=1
+    local backoff="$DEFAULT_API_RETRY_BACKOFF"
+    local last_error_sig=""
+
+    if [ -f "$retry_file" ]; then
+        IFS='|' read -r attempt backoff last_error_sig < "$retry_file"
+    fi
+
+    # Check if we've exceeded max retries
+    if [ "$attempt" -gt "$DEFAULT_API_MAX_RETRIES" ]; then
+        warn "Agent $agent: max retries ($DEFAULT_API_MAX_RETRIES) exceeded for $skill_name"
+        rm -f "$retry_file"
+        return 1
+    fi
+
+    # Get current error signature
+    local current_error_sig
+    current_error_sig="$(get_api_error_signature "$session")"
+
+    # Only retry if this is a different error or we haven't retried this error yet
+    if [ "$current_error_sig" = "$last_error_sig" ]; then
+        return 0  # Same error, already retried
+    fi
+
+    warn "Agent $agent: API error detected, attempt $attempt/$DEFAULT_API_MAX_RETRIES"
+    warn "Waiting ${backoff}s before retry..."
+
+    # Send notification about retry
+    send_ntfy \
+        "[agent-duo] API error - retrying" \
+        "Agent $agent hit API error during $skill_name. Retry $attempt/$DEFAULT_API_MAX_RETRIES in ${backoff}s." \
+        "default" \
+        "warning,repeat" 2>/dev/null || true
+
+    sleep "$backoff"
+
+    # Retry the last send
+    retry_last_send "$agent" "$session" "$peer_sync"
+
+    # Update retry state with exponential backoff
+    local new_backoff=$((backoff * DEFAULT_API_BACKOFF_MULTIPLIER))
+    echo "$((attempt + 1))|$new_backoff|$current_error_sig" > "$retry_file"
+
+    return 0
+}
+
+#------------------------------------------------------------------------------
 # Shared commands (signal, peer-status, phase)
 #------------------------------------------------------------------------------
 

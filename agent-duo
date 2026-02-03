@@ -481,7 +481,6 @@ Sent: $(date)"
     # Claude skills
     local claude_skills="$HOME/.claude/commands"
     local claude_skills_ok=true
-    for skill in duo-work duo-review duo-clarify duo-pushback duo-plan duo-plan-review duo-amend; do
     for skill in duo-work duo-review duo-clarify duo-pushback duo-amend duo-update-docs; do
         if [ -f "$claude_skills/$skill.md" ]; then
             success "Claude skill: $skill"
@@ -498,7 +497,6 @@ Sent: $(date)"
     # Codex skills
     local codex_skills="$HOME/.codex/skills"
     local codex_skills_ok=true
-    for skill in duo-work duo-review duo-clarify duo-pushback duo-plan duo-plan-review duo-amend; do
     for skill in duo-work duo-review duo-clarify duo-pushback duo-amend duo-update-docs; do
         if [ -f "$codex_skills/$skill/SKILL.md" ]; then
             success "Codex skill: $skill"
@@ -1911,7 +1909,7 @@ ensure_docs_update() {
     fi
 
     info "Triggering duo-update-docs for $agent..."
-    trigger_skill "$agent" "$target" "duo-update-docs"
+    send_to_agent "$agent" "$target" "$peer_sync" skill "duo-update-docs"
 
     local timeout="${DEFAULT_DOCS_UPDATE_TIMEOUT:-600}"
     local start=$SECONDS
@@ -1922,6 +1920,9 @@ ensure_docs_update() {
         local status
         status="$(get_agent_status "$agent" "$peer_sync")"
         [ "$status" = "docs-update-done" ] && break
+
+        # Check for API errors and retry if needed
+        check_and_retry_on_error "$agent" "$target" "$peer_sync"
 
         local elapsed=$((SECONDS - start))
         if [ "$elapsed" -ge "$timeout" ]; then
@@ -2749,17 +2750,13 @@ cmd_run_merge() {
     info "Sending vote request to claude..."
     local claude_vote_msg
     claude_vote_msg="$(generate_merge_vote_message "claude" "codex" "$feature" "$peer_sync" "$claude_pr" "$codex_pr" "$round")"
-    tmux send-keys -t "$claude_session" "$claude_vote_msg"
-    sleep 0.5
-    tmux send-keys -t "$claude_session" C-m
+    send_to_agent "claude" "$claude_session" "$peer_sync" message "$claude_vote_msg" "merge-vote"
 
     atomic_write "$peer_sync/codex.status" "voting|$(date +%s)|merge vote phase"
     info "Sending vote request to codex..."
     local codex_vote_msg
     codex_vote_msg="$(generate_merge_vote_message "codex" "claude" "$feature" "$peer_sync" "$claude_pr" "$codex_pr" "$round")"
-    tmux send-keys -t "$codex_session" "$codex_vote_msg"
-    sleep 0.5
-    tmux send-keys -t "$codex_session" C-m
+    send_to_agent "codex" "$codex_session" "$peer_sync" message "$codex_vote_msg" "merge-vote"
 
     # Wait for both votes
     local vote_start=$SECONDS
@@ -2777,6 +2774,14 @@ cmd_run_merge() {
 
         if $claude_voted && $codex_voted; then
             break
+        fi
+
+        # Check for API errors and retry if needed
+        if ! $claude_voted; then
+            check_and_retry_on_error "claude" "$claude_session" "$peer_sync"
+        fi
+        if ! $codex_voted; then
+            check_and_retry_on_error "codex" "$codex_session" "$peer_sync"
         fi
 
         if [ "$elapsed" -ge "$vote_timeout" ]; then
@@ -2826,16 +2831,12 @@ cmd_run_merge() {
         atomic_write "$peer_sync/claude.status" "debating|$(date +%s)|debate round $current_round"
         local claude_debate_msg
         claude_debate_msg="$(generate_merge_debate_message "claude" "codex" "$feature" "$peer_sync" "$current_round")"
-        tmux send-keys -t "$claude_session" "$claude_debate_msg"
-        sleep 0.5
-        tmux send-keys -t "$claude_session" C-m
+        send_to_agent "claude" "$claude_session" "$peer_sync" message "$claude_debate_msg" "merge-debate"
 
         atomic_write "$peer_sync/codex.status" "debating|$(date +%s)|debate round $current_round"
         local codex_debate_msg
         codex_debate_msg="$(generate_merge_debate_message "codex" "claude" "$feature" "$peer_sync" "$current_round")"
-        tmux send-keys -t "$codex_session" "$codex_debate_msg"
-        sleep 0.5
-        tmux send-keys -t "$codex_session" C-m
+        send_to_agent "codex" "$codex_session" "$peer_sync" message "$codex_debate_msg" "merge-debate"
 
         # Wait for debate responses
         local debate_start=$SECONDS
@@ -2853,6 +2854,14 @@ cmd_run_merge() {
 
             if $claude_debated && $codex_debated; then
                 break
+            fi
+
+            # Check for API errors and retry if needed
+            if ! $claude_debated; then
+                check_and_retry_on_error "claude" "$claude_session" "$peer_sync"
+            fi
+            if ! $codex_debated; then
+                check_and_retry_on_error "codex" "$codex_session" "$peer_sync"
             fi
 
             if [ "$elapsed" -ge "$debate_timeout" ]; then
@@ -2925,7 +2934,7 @@ cmd_run_merge() {
 
     atomic_write "$peer_sync/${executor}.status" "merging|$(date +%s)|executing merge"
     info "Triggering duo-merge-execute for $executor..."
-    trigger_skill "$executor" "$executor_session" "duo-merge-execute"
+    send_to_agent "$executor" "$executor_session" "$peer_sync" skill "duo-merge-execute"
 
     # Wait for merge execution
     local merge_timeout="${MERGE_TIMEOUT:-900}"
@@ -2942,6 +2951,9 @@ cmd_run_merge() {
         if $merge_done; then
             break
         fi
+
+        # Check for API errors and retry if needed
+        check_and_retry_on_error "$executor" "$executor_session" "$peer_sync"
 
         if [ "$elapsed" -ge "$merge_timeout" ]; then
             warn "Merge execution timeout (${merge_timeout}s)"
@@ -2970,7 +2982,7 @@ cmd_run_merge() {
 
         atomic_write "$peer_sync/${reviewer}.status" "merge-reviewing|$(date +%s)|reviewing merge"
         info "Triggering duo-merge-review for $reviewer..."
-        trigger_skill "$reviewer" "$reviewer_session" "duo-merge-review"
+        send_to_agent "$reviewer" "$reviewer_session" "$peer_sync" skill "duo-merge-review"
 
         # Wait for review
         local review_start=$SECONDS
@@ -2986,6 +2998,9 @@ cmd_run_merge() {
             if $review_done; then
                 break
             fi
+
+            # Check for API errors and retry if needed
+            check_and_retry_on_error "$reviewer" "$reviewer_session" "$peer_sync"
 
             if [ "$elapsed" -ge "$review_timeout" ]; then
                 warn "Merge review timeout (${review_timeout}s)"
@@ -3032,7 +3047,7 @@ cmd_run_merge() {
 
             atomic_write "$peer_sync/${executor}.status" "merging|$(date +%s)|addressing review feedback"
             info "Triggering duo-merge-amend for $executor..."
-            trigger_skill "$executor" "$executor_session" "duo-merge-amend"
+            send_to_agent "$executor" "$executor_session" "$peer_sync" skill "duo-merge-amend"
 
             # Wait for amend
             local amend_start=$SECONDS
@@ -3048,6 +3063,9 @@ cmd_run_merge() {
                 if $amend_done; then
                     break
                 fi
+
+                # Check for API errors and retry if needed
+                check_and_retry_on_error "$executor" "$executor_session" "$peer_sync"
 
                 if [ "$elapsed" -ge "$amend_timeout" ]; then
                     warn "Merge amend timeout (${amend_timeout}s)"
@@ -3872,17 +3890,13 @@ cmd_run() {
         info "Sending clarify task to claude..."
         local claude_clarify_msg
         claude_clarify_msg="$(generate_clarify_message "claude" "codex" "$feature" "$task_content" "$worktree_codex" "$peer_sync")"
-        tmux send-keys -t "$claude_session" "$claude_clarify_msg"
-        sleep 0.5
-        tmux send-keys -t "$claude_session" C-m
+        send_to_agent "claude" "$claude_session" "$peer_sync" message "$claude_clarify_msg" "clarify"
 
         atomic_write "$peer_sync/codex.status" "clarifying|$(date +%s)|clarify phase"
         info "Sending clarify task to codex..."
         local codex_clarify_msg
         codex_clarify_msg="$(generate_clarify_message "codex" "claude" "$feature" "$task_content" "$worktree_claude" "$peer_sync")"
-        tmux send-keys -t "$codex_session" "$codex_clarify_msg"
-        sleep 0.5
-        tmux send-keys -t "$codex_session" C-m
+        send_to_agent "codex" "$codex_session" "$peer_sync" message "$codex_clarify_msg" "clarify"
 
         # Wait for both agents to complete clarify phase
         local clarify_start=$SECONDS
@@ -3908,9 +3922,11 @@ cmd_run() {
             # Check if agent TUIs have exited unexpectedly
             if ! $claude_clarify_done; then
                 check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+                check_and_retry_on_error "claude" "$claude_session" "$peer_sync"
             fi
             if ! $codex_clarify_done; then
                 check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+                check_and_retry_on_error "codex" "$codex_session" "$peer_sync"
             fi
 
             # Check timeout
@@ -3990,17 +4006,13 @@ cmd_run() {
         info "Sending pushback task to claude..."
         local claude_pushback_msg
         claude_pushback_msg="$(generate_pushback_message "claude" "codex" "$feature" "$task_content" "$worktree_codex" "$peer_sync")"
-        tmux send-keys -t "$claude_session" "$claude_pushback_msg"
-        sleep 0.5
-        tmux send-keys -t "$claude_session" C-m
+        send_to_agent "claude" "$claude_session" "$peer_sync" message "$claude_pushback_msg" "pushback"
 
         atomic_write "$peer_sync/codex.status" "pushing-back|$(date +%s)|pushback stage"
         info "Sending pushback task to codex..."
         local codex_pushback_msg
         codex_pushback_msg="$(generate_pushback_message "codex" "claude" "$feature" "$task_content" "$worktree_claude" "$peer_sync")"
-        tmux send-keys -t "$codex_session" "$codex_pushback_msg"
-        sleep 0.5
-        tmux send-keys -t "$codex_session" C-m
+        send_to_agent "codex" "$codex_session" "$peer_sync" message "$codex_pushback_msg" "pushback"
 
         # Wait for both agents to complete pushback stage
         local pushback_start=$SECONDS
@@ -4026,9 +4038,11 @@ cmd_run() {
             # Check if agent TUIs have exited unexpectedly
             if ! $claude_pushback_done; then
                 check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+                check_and_retry_on_error "claude" "$claude_session" "$peer_sync"
             fi
             if ! $codex_pushback_done; then
                 check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+                check_and_retry_on_error "codex" "$codex_session" "$peer_sync"
             fi
 
             # Check timeout
@@ -4134,12 +4148,12 @@ cmd_run() {
         check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
         atomic_write "$peer_sync/claude.status" "planning|$(date +%s)|plan phase"
         info "Triggering duo-plan for claude..."
-        trigger_skill "claude" "$claude_session" "duo-plan"
+        send_to_agent "claude" "$claude_session" "$peer_sync" skill "duo-plan"
 
         check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
         atomic_write "$peer_sync/codex.status" "planning|$(date +%s)|plan phase"
         info "Triggering duo-plan for codex..."
-        trigger_skill "codex" "$codex_session" "duo-plan"
+        send_to_agent "codex" "$codex_session" "$peer_sync" skill "duo-plan"
 
         # Wait for both agents to complete plan phase
         local plan_start=$SECONDS
@@ -4180,9 +4194,11 @@ cmd_run() {
 
             if ! $claude_plan_done; then
                 check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+                check_and_retry_on_error "claude" "$claude_session" "$peer_sync"
             fi
             if ! $codex_plan_done; then
                 check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+                check_and_retry_on_error "codex" "$codex_session" "$peer_sync"
             fi
 
             if [ "$elapsed" -ge "$plan_timeout" ]; then
@@ -4223,12 +4239,12 @@ cmd_run() {
         check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
         atomic_write "$peer_sync/claude.status" "plan-reviewing|$(date +%s)|plan-review phase"
         info "Triggering duo-plan-review for claude..."
-        trigger_skill "claude" "$claude_session" "duo-plan-review"
+        send_to_agent "claude" "$claude_session" "$peer_sync" skill "duo-plan-review"
 
         check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
         atomic_write "$peer_sync/codex.status" "plan-reviewing|$(date +%s)|plan-review phase"
         info "Triggering duo-plan-review for codex..."
-        trigger_skill "codex" "$codex_session" "duo-plan-review"
+        send_to_agent "codex" "$codex_session" "$peer_sync" skill "duo-plan-review"
 
         local review_start=$SECONDS
         local claude_review_done=false
@@ -4268,9 +4284,11 @@ cmd_run() {
 
             if ! $claude_review_done; then
                 check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+                check_and_retry_on_error "claude" "$claude_session" "$peer_sync"
             fi
             if ! $codex_review_done; then
                 check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+                check_and_retry_on_error "codex" "$codex_session" "$peer_sync"
             fi
 
             if [ "$elapsed" -ge "$plan_timeout" ]; then
@@ -4362,18 +4380,14 @@ cmd_run() {
                     info "Sending augmented task to claude..."
                     local claude_msg
                     claude_msg="$(generate_round1_message "claude" "codex" "$feature" "$task_content" "$worktree_codex" "$peer_sync")"
-                    tmux send-keys -t "$claude_session" "$claude_msg"
-                    sleep 0.5
-                    tmux send-keys -t "$claude_session" C-m
+                    send_to_agent "claude" "$claude_session" "$peer_sync" message "$claude_msg" "round1-work"
                 fi
                 if ! has_pr "codex" "$peer_sync"; then
                     atomic_write "$peer_sync/codex.status" "working|$(date +%s)|round $round work phase"
                     info "Sending augmented task to codex..."
                     local codex_msg
                     codex_msg="$(generate_round1_message "codex" "claude" "$feature" "$task_content" "$worktree_claude" "$peer_sync")"
-                    tmux send-keys -t "$codex_session" "$codex_msg"
-                    sleep 0.5
-                    tmux send-keys -t "$codex_session" C-m
+                    send_to_agent "codex" "$codex_session" "$peer_sync" message "$codex_msg" "round1-work"
                 fi
             else
                 # Round 2+: Trigger skill (agent already knows the context)
@@ -4384,20 +4398,20 @@ cmd_run() {
                 atomic_write "$peer_sync/claude.status" "working|$(date +%s)|round $round work phase"
                 if has_pr "claude" "$peer_sync"; then
                     info "Triggering duo-amend for claude (has PR)..."
-                    trigger_skill "claude" "$claude_session" "duo-amend"
+                    send_to_agent "claude" "$claude_session" "$peer_sync" skill "duo-amend"
                 else
                     info "Triggering duo-work for claude..."
-                    trigger_skill "claude" "$claude_session" "duo-work"
+                    send_to_agent "claude" "$claude_session" "$peer_sync" skill "duo-work"
                 fi
 
                 check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
                 atomic_write "$peer_sync/codex.status" "working|$(date +%s)|round $round work phase"
                 if has_pr "codex" "$peer_sync"; then
                     info "Triggering duo-amend for codex (has PR)..."
-                    trigger_skill "codex" "$codex_session" "duo-amend"
+                    send_to_agent "codex" "$codex_session" "$peer_sync" skill "duo-amend"
                 else
                     info "Triggering duo-work for codex..."
-                    trigger_skill "codex" "$codex_session" "duo-work"
+                    send_to_agent "codex" "$codex_session" "$peer_sync" skill "duo-work"
                 fi
             fi
 
@@ -4434,6 +4448,14 @@ cmd_run() {
                 fi
                 if ! $codex_done; then
                     check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+                fi
+
+                # Check for API errors and retry if needed
+                if ! $claude_done; then
+                    check_and_retry_on_error "claude" "$claude_session" "$peer_sync"
+                fi
+                if ! $codex_done; then
+                    check_and_retry_on_error "codex" "$codex_session" "$peer_sync"
                 fi
 
                 # Check timeout
@@ -4483,12 +4505,12 @@ cmd_run() {
             check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
             atomic_write "$peer_sync/claude.status" "reviewing|$(date +%s)|round $round review phase"
             info "Triggering duo-review for claude..."
-            trigger_skill "claude" "$claude_session" "duo-review"
+            send_to_agent "claude" "$claude_session" "$peer_sync" skill "duo-review"
 
             check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
             atomic_write "$peer_sync/codex.status" "reviewing|$(date +%s)|round $round review phase"
             info "Triggering duo-review for codex..."
-            trigger_skill "codex" "$codex_session" "duo-review"
+            send_to_agent "codex" "$codex_session" "$peer_sync" skill "duo-review"
 
             # Wait for review phase completion with timeout
             # Note: Agents with PRs still participate in reviews
@@ -4518,9 +4540,11 @@ cmd_run() {
                 # Check if agent TUIs have exited unexpectedly
                 if ! $claude_done; then
                     check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
+                    check_and_retry_on_error "claude" "$claude_session" "$peer_sync"
                 fi
                 if ! $codex_done; then
                     check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
+                    check_and_retry_on_error "codex" "$codex_session" "$peer_sync"
                 fi
 
                 # Check timeout
@@ -4651,13 +4675,13 @@ cmd_run() {
                             check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
                             atomic_write "$peer_sync/claude.status" "working|$(date +%s)|integrating (rebasing onto main)"
                             info "Triggering duo-integrate for claude..."
-                            trigger_skill "claude" "$claude_session" "duo-integrate"
+                            send_to_agent "claude" "$claude_session" "$peer_sync" skill "duo-integrate"
                         fi
                         if $codex_open; then
                             check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
                             atomic_write "$peer_sync/codex.status" "working|$(date +%s)|integrating (rebasing onto main)"
                             info "Triggering duo-integrate for codex..."
-                            trigger_skill "codex" "$codex_session" "duo-integrate"
+                            send_to_agent "codex" "$codex_session" "$peer_sync" skill "duo-integrate"
                         fi
 
                         # Wait for integration to complete
@@ -4685,6 +4709,14 @@ cmd_run() {
 
                             if $claude_integrated && $codex_integrated; then
                                 break
+                            fi
+
+                            # Check for API errors and retry if needed
+                            if ! $claude_integrated && $claude_open; then
+                                check_and_retry_on_error "claude" "$claude_session" "$peer_sync"
+                            fi
+                            if ! $codex_integrated && $codex_open; then
+                                check_and_retry_on_error "codex" "$codex_session" "$peer_sync"
                             fi
 
                             # Check timeout
@@ -4780,14 +4812,14 @@ cmd_run() {
                     check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
                     atomic_write "$peer_sync/claude.status" "working|$(date +%s)|addressing PR comments"
                     info "Triggering duo-pr-comment for claude..."
-                    trigger_skill "claude" "$claude_session" "duo-pr-comment"
+                    send_to_agent "claude" "$claude_session" "$peer_sync" skill "duo-pr-comment"
                 fi
 
                 if $codex_needs_attention; then
                     check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
                     atomic_write "$peer_sync/codex.status" "working|$(date +%s)|addressing PR comments"
                     info "Triggering duo-pr-comment for codex..."
-                    trigger_skill "codex" "$codex_session" "duo-pr-comment"
+                    send_to_agent "codex" "$codex_session" "$peer_sync" skill "duo-pr-comment"
                 fi
 
                 # Wait for agents to finish if they were triggered
@@ -4814,6 +4846,14 @@ cmd_run() {
 
                         if $claude_done && $codex_done; then
                             break
+                        fi
+
+                        # Check for API errors and retry if needed
+                        if ! $claude_done; then
+                            check_and_retry_on_error "claude" "$claude_session" "$peer_sync"
+                        fi
+                        if ! $codex_done; then
+                            check_and_retry_on_error "codex" "$codex_session" "$peer_sync"
                         fi
 
                         # Check timeout

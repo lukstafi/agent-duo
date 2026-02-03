@@ -1735,9 +1735,7 @@ cmd_run() {
         info "Reviewer: gather relevant context for the coder..."
         local reviewer_gather_msg
         reviewer_gather_msg="$(generate_reviewer_gather_message "$feature" "$task_content" "$peer_sync")"
-        tmux send-keys -t "$reviewer_session" "$reviewer_gather_msg"
-        sleep 0.5
-        tmux send-keys -t "$reviewer_session" C-m
+        send_to_agent "reviewer" "$reviewer_session" "$peer_sync" message "$reviewer_gather_msg" "gather"
 
         # Wait for reviewer to complete gather
         local gather_start=$SECONDS
@@ -1749,6 +1747,9 @@ cmd_run() {
             if [ "$reviewer_status" = "gather-done" ]; then
                 break
             fi
+
+            # Check for API errors and retry if needed
+            check_and_retry_on_error "reviewer" "$reviewer_session" "$peer_sync"
 
             if [ "$elapsed" -ge "$gather_timeout" ]; then
                 warn "Reviewer gather timeout (${gather_timeout}s)"
@@ -1814,9 +1815,7 @@ cmd_run() {
         info "Coder: propose your approach..."
         local coder_clarify_msg
         coder_clarify_msg="$(generate_coder_clarify_message "$feature" "$task_content" "$peer_sync")"
-        tmux send-keys -t "$coder_session" "$coder_clarify_msg"
-        sleep 0.5
-        tmux send-keys -t "$coder_session" C-m
+        send_to_agent "coder" "$coder_session" "$peer_sync" message "$coder_clarify_msg" "clarify"
 
         # Wait for coder to complete clarify
         local clarify_start=$SECONDS
@@ -1828,6 +1827,9 @@ cmd_run() {
             if [ "$coder_status" = "clarify-done" ]; then
                 break
             fi
+
+            # Check for API errors and retry if needed
+            check_and_retry_on_error "coder" "$coder_session" "$peer_sync"
 
             if [ "$elapsed" -ge "$clarify_timeout" ]; then
                 warn "Coder clarify timeout (${clarify_timeout}s)"
@@ -1844,9 +1846,7 @@ cmd_run() {
         info "Reviewer: review approach and add comments..."
         local reviewer_clarify_msg
         reviewer_clarify_msg="$(generate_reviewer_clarify_message "$feature" "$task_content" "$peer_sync")"
-        tmux send-keys -t "$reviewer_session" "$reviewer_clarify_msg"
-        sleep 0.5
-        tmux send-keys -t "$reviewer_session" C-m
+        send_to_agent "reviewer" "$reviewer_session" "$peer_sync" message "$reviewer_clarify_msg" "clarify"
 
         # Wait for reviewer to complete clarify
         clarify_start=$SECONDS
@@ -1858,6 +1858,9 @@ cmd_run() {
             if [ "$reviewer_status" = "clarify-done" ]; then
                 break
             fi
+
+            # Check for API errors and retry if needed
+            check_and_retry_on_error "reviewer" "$reviewer_session" "$peer_sync"
 
             if [ "$elapsed" -ge "$clarify_timeout" ]; then
                 warn "Reviewer clarify timeout (${clarify_timeout}s)"
@@ -1936,9 +1939,7 @@ cmd_run() {
         info "Sending pushback task to reviewer..."
         local reviewer_pushback_msg
         reviewer_pushback_msg="$(generate_solo_pushback_message "$feature" "$task_content" "$peer_sync")"
-        tmux send-keys -t "$reviewer_session" "$reviewer_pushback_msg"
-        sleep 0.5
-        tmux send-keys -t "$reviewer_session" C-m
+        send_to_agent "reviewer" "$reviewer_session" "$peer_sync" message "$reviewer_pushback_msg" "pushback"
 
         # Wait for reviewer to complete pushback stage
         local pushback_start=$SECONDS
@@ -1956,6 +1957,9 @@ cmd_run() {
             if $reviewer_pushback_done; then
                 break
             fi
+
+            # Check for API errors and retry if needed
+            check_and_retry_on_error "reviewer" "$reviewer_session" "$peer_sync"
 
             # Check timeout
             if [ "$elapsed" -ge "$pushback_timeout" ]; then
@@ -2044,7 +2048,7 @@ cmd_run() {
             atomic_write "$peer_sync/coder.status" "planning|$(date +%s)|plan phase round $plan_round"
             atomic_write "$peer_sync/reviewer.status" "waiting|$(date +%s)|waiting for coder plan"
             info "Triggering solo-coder-plan for coder..."
-            trigger_skill "$coder" "$coder_session" "solo-coder-plan"
+            send_to_agent "coder" "$coder_session" "$peer_sync" skill "solo-coder-plan"
 
             local plan_start=$SECONDS
             local coder_plan_done=false
@@ -2072,6 +2076,7 @@ cmd_run() {
 
                 if ! $coder_plan_done; then
                     check_tui_health "coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
+                    check_and_retry_on_error "coder" "$coder_session" "$peer_sync"
                 fi
 
                 if [ "$elapsed" -ge "$plan_timeout" ]; then
@@ -2100,7 +2105,7 @@ cmd_run() {
             atomic_write "$peer_sync/reviewer.status" "plan-reviewing|$(date +%s)|plan-review phase round $plan_round"
             atomic_write "$peer_sync/coder.status" "waiting|$(date +%s)|waiting for reviewer verdict"
             info "Triggering solo-reviewer-plan for reviewer..."
-            trigger_skill "$reviewer" "$reviewer_session" "solo-reviewer-plan"
+            send_to_agent "reviewer" "$reviewer_session" "$peer_sync" skill "solo-reviewer-plan"
 
             local review_start=$SECONDS
             local reviewer_review_done=false
@@ -2128,6 +2133,7 @@ cmd_run() {
 
                 if ! $reviewer_review_done; then
                     check_tui_health "reviewer" "$reviewer_session" "$peer_sync" "$tui_exit_behavior"
+                    check_and_retry_on_error "reviewer" "$reviewer_session" "$peer_sync"
                 fi
 
                 if [ "$elapsed" -ge "$plan_timeout" ]; then
@@ -2233,13 +2239,11 @@ cmd_run() {
             info "Sending task to coder..."
             local coder_msg
             coder_msg="$(generate_coder_work_message "$feature" "$task_content" "$peer_sync" "$round")"
-            tmux send-keys -t "$coder_session" "$coder_msg"
-            sleep 0.5
-            tmux send-keys -t "$coder_session" C-m
+            send_to_agent "coder" "$coder_session" "$peer_sync" message "$coder_msg" "round1-work"
         else
             # Round 2+: Trigger skill
             info "Triggering solo-coder-work for coder..."
-            trigger_skill "$coder" "$coder_session" "solo-coder-work"
+            send_to_agent "coder" "$coder_session" "$peer_sync" skill "solo-coder-work"
         fi
 
         # Wait for coder to complete work
@@ -2258,6 +2262,9 @@ cmd_run() {
             if has_pr "coder" "$peer_sync"; then
                 break
             fi
+
+            # Check for API errors and retry if needed
+            check_and_retry_on_error "coder" "$coder_session" "$peer_sync"
 
             # Check timeout
             if [ "$elapsed" -ge "$work_timeout" ]; then
@@ -2295,7 +2302,7 @@ cmd_run() {
         atomic_write "$peer_sync/coder.status" "waiting|$(date +%s)|waiting for review"
 
         info "Triggering solo-reviewer-work for reviewer..."
-        trigger_skill "$reviewer" "$reviewer_session" "solo-reviewer-work"
+        send_to_agent "reviewer" "$reviewer_session" "$peer_sync" "skill" "solo-reviewer-work"
 
         # Wait for reviewer to complete review
         local review_start=$SECONDS
@@ -2315,6 +2322,9 @@ cmd_run() {
                 interrupt_agent "reviewer" "$reviewer_session" "$peer_sync"
                 break
             fi
+
+            # Check for API errors and retry if needed
+            check_and_retry_on_error "reviewer" "$reviewer_session" "$peer_sync"
 
             printf "\r  Waiting for reviewer... status=%s (%ds/%ds)  " "$reviewer_status" "$elapsed" "$review_timeout"
             sleep "$poll_interval"
@@ -2405,7 +2415,7 @@ cmd_run() {
                         check_tui_health "$coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
                         atomic_write "$peer_sync/coder.status" "working|$(date +%s)|integrating (rebasing onto main)"
                         info "Triggering solo-integrate for coder..."
-                        trigger_skill "$coder" "$coder_session" "solo-integrate"
+                        send_to_agent "coder" "$coder_session" "$peer_sync" "skill" "solo-integrate"
 
                         # Wait for integration to complete
                         local integrate_start=$SECONDS
@@ -2425,6 +2435,9 @@ cmd_run() {
                                 warn "Integration timeout (${DEFAULT_INTEGRATE_TIMEOUT}s)"
                                 break
                             fi
+
+                            # Check for API errors and retry if needed
+                            check_and_retry_on_error "coder" "$coder_session" "$peer_sync"
 
                             printf "\r  Integrating... coder=%s (%ds)  " "$coder_status" "$elapsed"
                             sleep "$poll_interval"
@@ -2463,7 +2476,7 @@ cmd_run() {
                     check_tui_health "$coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
                     atomic_write "$peer_sync/coder.status" "working|$(date +%s)|addressing PR comments"
                     info "Triggering solo-pr-comment for coder..."
-                    trigger_skill "$coder" "$coder_session" "solo-pr-comment"
+                    send_to_agent "coder" "$coder_session" "$peer_sync" "skill" "solo-pr-comment"
 
                     # Wait for coder to finish
                     local pr_watch_start=$SECONDS
@@ -2482,6 +2495,9 @@ cmd_run() {
                             warn "PR comment response timeout (${DEFAULT_PR_WATCH_TIMEOUT}s)"
                             break
                         fi
+
+                        # Check for API errors and retry if needed
+                        check_and_retry_on_error "coder" "$coder_session" "$peer_sync"
 
                         printf "\r  Waiting for coder... status=%s (%ds)  " "$coder_status" "$elapsed"
                         sleep "$poll_interval"
