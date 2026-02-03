@@ -277,6 +277,75 @@ agent-duo config ntfy_topic my-agent-duo-topic
 # Requires working mail setup (see: agent-duo doctor)
 ```
 
+## Multiple Tasks (Parallel Sessions)
+
+You can run multiple features in parallel, each with its own isolated session. Each task needs its own `.md` file in the project root:
+
+```bash
+# Create separate task files for each feature
+cat > auth.md << 'EOF'
+# Add User Authentication
+Implement login/logout with session management.
+EOF
+
+cat > payments.md << 'EOF'
+# Add Payment Processing
+Integrate Stripe for payment handling.
+EOF
+
+# Start multiple features at once
+agent-duo start auth payments --auto-run
+# Creates separate worktrees and sessions for each feature:
+#   ~/myproject-auth-claude/    ~/myproject-auth-codex/
+#   ~/myproject-payments-claude/ ~/myproject-payments-codex/
+
+# Or start them individually
+agent-duo start auth --auto-run
+agent-duo start payments --auto-run
+```
+
+### Managing Multiple Sessions
+
+```bash
+# View all active sessions
+agent-duo status
+
+# View specific session
+agent-duo status --feature auth
+
+# Stop all sessions
+agent-duo stop
+
+# Stop specific session
+agent-duo stop --feature payments
+
+# Cleanup all sessions
+agent-duo cleanup --full
+
+# Cleanup specific session
+agent-duo cleanup --feature auth --full
+```
+
+### Session Directory Structure
+
+```
+~/myproject/                      # Main project (task specs here)
+├── .agent-sessions/              # Registry of active sessions
+│   ├── auth.session              # Symlink → ../myproject-auth/.peer-sync
+│   └── payments.session          # Symlink → ../myproject-payments/.peer-sync
+├── auth.md                       # Task spec for auth feature
+├── payments.md                   # Task spec for payments feature
+
+~/myproject-auth/                 # Root worktree for "auth"
+├── .peer-sync/                   # Session state
+├── auth.md                       # Task file (copied here)
+
+~/myproject-auth-claude/          # Claude's worktree
+~/myproject-auth-codex/           # Codex's worktree
+```
+
+Commands auto-detect which session to operate on based on your current directory. Use `--feature <name>` to explicitly target a specific session.
+
 ## Agent Solo Mode
 
 Agent-solo is a simpler alternative where one agent codes and another reviews:

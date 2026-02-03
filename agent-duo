@@ -7,7 +7,7 @@
 # Usage: agent-duo <command> [options]
 #
 # Session Commands:
-#   start <feature> [--auto-run] [--no-ttyd] [--clarify] [--pushback] [--plan] [--skip-docs-update]  Start session
+#   start <feature> [<feature2> ...] [options]  Start session(s)
 #   run [options]        Run orchestrator loop with timeouts
 #                        --on-tui-exit=pause|quit|ignore  TUI exit behavior
 #   stop                 Stop ttyd servers, keep worktrees
@@ -4912,8 +4912,8 @@ USAGE
     agent-duo <command> [options]
 
 SESSION COMMANDS
-    start <feature> [options]
-        Start a new session for the given feature.
+    start <feature> [<feature2> ...] [options]
+        Start a new session for the given feature(s).
         Creates worktrees, tmux sessions, and ttyd web terminals.
         Looks for task description in: <feature>.md, doc/<feature>.md,
         docs/<feature>.md, or **/<feature>.md (anywhere in project).

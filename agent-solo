@@ -7,7 +7,7 @@
 # Usage: agent-solo <command> [options]
 #
 # Session Commands:
-#   start <feature> [--auto-run] [--no-ttyd] [--clarify] [--pushback] [--plan]  Start session
+#   start <feature> [<feature2> ...] [options]  Start session(s)
 #   run [options]        Run orchestrator loop with timeouts
 #   stop                 Stop ttyd servers, keep worktree
 #   restart [--auto-run] [--no-ttyd]  Restart session after system restart/crash
@@ -2948,8 +2948,8 @@ USAGE
     agent-solo <command> [options]
 
 SESSION COMMANDS
-    start <feature> [options]
-        Start a new session for the given feature.
+    start <feature> [<feature2> ...] [options]
+        Start a new session for the given feature(s).
         Creates one shared worktree, two tmux sessions (coder + reviewer), and ttyd web terminals.
 
         Options:

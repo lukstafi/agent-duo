@@ -46,18 +46,22 @@ agent-duo doctor
 
 ```bash
 agent-duo start <feature>       # Start session, creates worktrees
+agent-duo start <f1> <f2> ...   # Start multiple features in parallel (each needs its own .md file)
 agent-duo start <f> --clarify   # Start with clarify phase before work
 agent-duo start <f> --pushback  # Start with pushback phase (task improvement)
 agent-duo start <f> --auto-run  # Start and run orchestrator immediately
 agent-duo run [options]         # Run orchestrator loop (from orchestrator worktree)
 agent-duo stop                  # Stop ttyd servers, keep worktrees
+agent-duo stop --feature <f>    # Stop specific session only
 agent-duo restart [--auto-run] [--no-ttyd] [--feature <name>]  # Recover session(s)
-agent-duo status                # Show session state
+agent-duo status                # Show all active sessions
+agent-duo status --feature <f>  # Show specific session
 agent-duo confirm               # Confirm clarify/pushback phase, proceed
 agent-duo pr <agent>            # Create PR for agent's solution
 agent-duo merge [--auto-restart]# Start merge phase (fresh sessions)
 agent-duo run-merge             # Run merge with existing sessions
 agent-duo cleanup [--full]      # Remove worktrees (--full: also state)
+agent-duo cleanup --feature <f> # Cleanup specific session only
 agent-duo setup                 # Install agent-duo to PATH and skills
 agent-duo doctor                # Check system configuration
 agent-duo config [key] [value]  # Get/set configuration (ntfy_topic, etc.)
