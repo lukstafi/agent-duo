@@ -974,9 +974,11 @@ start_single_session() {
 
     if [ "$ttyd_mode" = "true" ]; then
         start_ttyd_mode "$feature" "$root_worktree" "$worktree_claude" "$worktree_codex" "$peer_sync" \
-            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" "$clarify_mode" "$clarify_timeout" "$pushback_mode" "$pushback_timeout"
+            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" \
+            "$clarify_mode" "$clarify_timeout" "$pushback_mode" "$pushback_timeout" \
+            "$plan_mode" "$plan_timeout"
     else
-        start_tmux_mode "$feature" "$root_worktree" "$worktree_claude" "$worktree_codex" "$peer_sync" "$codex_thinking" "$clarify_mode" "$pushback_mode"
+        start_tmux_mode "$feature" "$root_worktree" "$worktree_claude" "$worktree_codex" "$peer_sync" "$codex_thinking" "$clarify_mode" "$pushback_mode" "$plan_mode"
     fi
 }
 
@@ -989,6 +991,7 @@ start_tmux_mode() {
     local codex_thinking="${6:-$DEFAULT_CODEX_THINKING}"
     local clarify_mode="${7:-false}"
     local pushback_mode="${8:-false}"
+    local plan_mode="${9:-false}"
 
     local session_name="duo-${feature}"
 
@@ -1053,6 +1056,12 @@ start_tmux_mode() {
         echo "  1. Propose improvements to the task file"
         echo "  2. You can accept, reject, or modify the pushbacks"
     fi
+    if [ "$plan_mode" = "true" ]; then
+        echo ""
+        echo "Plan stage enabled. After pushback (if enabled), agents will:"
+        echo "  1. Write implementation plans"
+        echo "  2. Review each other's plans before work begins"
+    fi
 }
 
 start_ttyd_mode() {
@@ -1070,6 +1079,8 @@ start_ttyd_mode() {
     local clarify_timeout="${12:-$DEFAULT_CLARIFY_TIMEOUT}"
     local pushback_mode="${13:-false}"
     local pushback_timeout="${14:-$DEFAULT_PUSHBACK_TIMEOUT}"
+    local plan_mode="${15:-false}"
+    local plan_timeout="${16:-$DEFAULT_PLAN_TIMEOUT}"
 
     local session_name="duo-${feature}"
 

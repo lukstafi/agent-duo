@@ -464,9 +464,11 @@ start_single_solo_session() {
 
     if [ "$ttyd_mode" = "true" ]; then
         start_ttyd_mode_solo "$feature" "$worktree" "$worktree" "$peer_sync" \
-            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" "$clarify_mode" "$clarify_timeout" "$coder" "$reviewer" "$pushback_mode" "$pushback_timeout" "$gather_mode" "$gather_timeout"
+            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" \
+            "$clarify_mode" "$clarify_timeout" "$coder" "$reviewer" "$pushback_mode" "$pushback_timeout" \
+            "$gather_mode" "$gather_timeout" "$plan_mode" "$plan_timeout"
     else
-        start_tmux_mode_solo "$feature" "$worktree" "$worktree" "$peer_sync" "$codex_thinking" "$clarify_mode" "$coder" "$reviewer" "$pushback_mode" "$gather_mode"
+        start_tmux_mode_solo "$feature" "$worktree" "$worktree" "$peer_sync" "$codex_thinking" "$clarify_mode" "$coder" "$reviewer" "$pushback_mode" "$gather_mode" "$plan_mode"
     fi
 }
 
@@ -481,6 +483,7 @@ start_tmux_mode_solo() {
     local reviewer="${8:-$DEFAULT_REVIEWER}"
     local pushback_mode="${9:-false}"
     local gather_mode="${10:-false}"
+    local plan_mode="${11:-false}"
 
     local session_name="solo-${feature}"
 
@@ -551,6 +554,12 @@ start_tmux_mode_solo() {
         echo "  1. Propose improvements to the task file"
         echo "  2. You can accept, reject, or modify the pushback"
     fi
+    if [ "$plan_mode" = "true" ]; then
+        echo ""
+        echo "Plan stage enabled. After pushback (if enabled):"
+        echo "  1. Coder writes an implementation plan"
+        echo "  2. Reviewer evaluates it before work begins"
+    fi
 }
 
 start_ttyd_mode_solo() {
@@ -571,6 +580,8 @@ start_ttyd_mode_solo() {
     local pushback_timeout="${15:-$DEFAULT_PUSHBACK_TIMEOUT}"
     local gather_mode="${16:-false}"
     local gather_timeout="${17:-$DEFAULT_GATHER_TIMEOUT}"
+    local plan_mode="${18:-false}"
+    local plan_timeout="${19:-$DEFAULT_PLAN_TIMEOUT}"
 
     local session_name="solo-${feature}"
 
@@ -774,6 +785,7 @@ cmd_restart() {
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
     local pushback_timeout=$DEFAULT_PUSHBACK_TIMEOUT
+    local plan_timeout=$DEFAULT_PLAN_TIMEOUT
     local max_rounds=10
     local feature_arg=""
     local ttyd_mode_override=""  # Empty means use recorded setting
@@ -787,6 +799,7 @@ cmd_restart() {
             --review-timeout) review_timeout="$2"; shift 2 ;;
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
             --pushback-timeout) pushback_timeout="$2"; shift 2 ;;
+            --plan-timeout) plan_timeout="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --feature) feature_arg="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
