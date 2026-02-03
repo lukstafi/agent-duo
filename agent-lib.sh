@@ -419,10 +419,11 @@ get_agent_cmd() {
             fi
             ;;
         codex)
+            # Disable update prompts via -c to avoid interactive prompts in automation
             if [ -n "$codex_model" ]; then
-                echo "codex --yolo -m \"$codex_model\" -c model_reasoning_effort=\"$thinking\""
+                echo "codex --yolo -m \"$codex_model\" -c model_reasoning_effort=\"$thinking\" -c check_for_update_on_startup=false"
             else
-                echo "codex --yolo -c model_reasoning_effort=\"$thinking\""
+                echo "codex --yolo -c model_reasoning_effort=\"$thinking\" -c check_for_update_on_startup=false"
             fi
             ;;
         *) echo "$agent" ;;  # Allow custom agents

@@ -302,6 +302,10 @@ agent-duo doctor --send-ntfy  # Test ntfy notifications
 
 The doctor command checks: required tools, AI CLIs, git config, email/ntfy setup, skills installation, hook configuration, and PATH.
 
+### Codex Update Prompts
+
+Agent-duo automatically passes `-c check_for_update_on_startup=false` when launching Codex to prevent interactive update prompts from interfering with automation. Manual Codex runs remain unaffected and will still prompt for updates.
+
 ## License
 
 MIT
