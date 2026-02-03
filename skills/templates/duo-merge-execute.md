@@ -2,16 +2,17 @@
 name: duo-merge-execute
 description: Agent-duo merge phase - execute merge and cherry-pick
 metadata:
-  short-description: Merge winning PR and cherry-pick from losing PR
+  short-description: Cherry-pick from losing PR into winning PR's branch
 ---
 
 # Agent Duo - Merge Execute Phase
 
-**PHASE: MERGE EXECUTE** - A decision has been made. Your ancestor's PR was not chosen, so you will merge the winning PR and cherry-pick valuable features from your ancestor's PR.
+**PHASE: MERGE EXECUTE** - A decision has been made. Your ancestor's PR was not chosen, so you will cherry-pick valuable features from your ancestor's PR into the winning PR's branch.
 
 ## Your Environment
 
-- **Working directory**: Main branch
+- **Your original worktree**: `$MY_WORKTREE` (losing PR's code, for reference)
+- **Winning worktree**: `$PEER_WORKTREE` (where you'll do the work)
 - **Sync directory**: `$PEER_SYNC`
 - **Your name**: `$MY_NAME`
 - **Peer's name**: `$PEER_NAME`
@@ -21,12 +22,14 @@ metadata:
 
 The merge decision is in `$PEER_SYNC/merge-decision`. Since your "ancestor" (the agent whose name matches yours from the original duo session) had the losing PR, you are responsible for:
 
-1. Merging the winning PR into main
-2. Cherry-picking valuable features from the losing PR
-3. Resolving any conflicts
-4. Creating a clean final state
+1. Cherry-picking valuable features from the losing PR into the winning branch
+2. Resolving any conflicts
+3. Closing the losing PR
+4. Preparing the winning PR for human merge
 
 Your peer (who has the winning PR's perspective) will review your work.
+
+**IMPORTANT**: You will work in the winning agent's worktree (`$PEER_WORKTREE`), not your own. Your original worktree remains available for reference.
 
 ## Your Task
 
@@ -40,11 +43,22 @@ WINNING_PR="$(cat "$PEER_SYNC/${DECISION}.pr")"
 LOSING_AGENT=$([[ "$DECISION" == "claude" ]] && echo "codex" || echo "claude")
 LOSING_PR="$(cat "$PEER_SYNC/${LOSING_AGENT}.pr")"
 
-echo "Merging: $WINNING_PR"
+echo "Winning PR: $WINNING_PR"
 echo "Cherry-picking from: $LOSING_PR"
 ```
 
-### 2. Review Cherry-Pick Recommendations
+### 2. Move to the Winning Worktree
+
+**Change your working directory to the winning agent's worktree:**
+
+```bash
+cd "$PEER_WORKTREE"
+pwd  # Verify you're in the right place
+```
+
+This worktree has the winning PR's branch checked out. All your work happens here.
+
+### 3. Review Cherry-Pick Recommendations
 
 Read both agents' final analyses to understand what to cherry-pick:
 
@@ -55,41 +69,53 @@ cat "$PEER_SYNC/merge-votes/round-${FINAL_ROUND}-claude-vote.md"
 cat "$PEER_SYNC/merge-votes/round-${FINAL_ROUND}-codex-vote.md"
 ```
 
-### 3. Merge the Winning PR
+You can also reference your original worktree for context:
 
 ```bash
-# Ensure we're on main and up-to-date
-git checkout main
-git pull origin main
-
-# Merge the winning PR (squash to keep history clean)
-gh pr merge "$WINNING_PR" --squash --delete-branch
+# View your original implementation
+ls "$MY_WORKTREE/src/"
+cat "$MY_WORKTREE/path/to/relevant/file"
 ```
 
-### 4. Cherry-Pick from the Losing PR
-
-Identify valuable commits or changes from the losing PR:
+### 4. Pull Latest and Identify Cherry-Pick Targets
 
 ```bash
+# Ensure the winning branch is up-to-date
+git pull origin
+
 # View the losing PR's commits
 gh pr view "$LOSING_PR" --json commits
 
-# View the diff
+# View the losing PR's diff
 gh pr diff "$LOSING_PR"
 ```
 
-For each valuable change, either:
-- Cherry-pick entire commits: `git cherry-pick <commit-sha>`
-- Manually apply specific changes if commits are too coarse
+### 5. Cherry-Pick Valuable Changes
 
-### 5. Handle Conflicts (if any)
+For each valuable change from the losing PR, either:
+- Cherry-pick entire commits: `git cherry-pick <commit-sha>`
+- Manually apply specific changes if commits are too coarse (copy from `$MY_WORKTREE`)
+
+```bash
+# Example: cherry-pick a specific commit
+git cherry-pick <commit-sha>
+
+# Or manually copy and adapt code
+cat "$MY_WORKTREE/src/useful-feature.ts"
+# Then edit the local file to incorporate the feature
+```
+
+### 6. Handle Conflicts (if any)
 
 If conflicts occur:
 1. Resolve them thoughtfully, preserving the intent of both solutions
-2. Ensure tests still pass
-3. Document significant conflict resolution decisions
+2. You can reference both worktrees:
+   - `$PEER_WORKTREE` (current dir) — winning solution
+   - `$MY_WORKTREE` — losing solution (your original)
+3. Ensure tests still pass
+4. Document significant conflict resolution decisions
 
-### 6. Verify the Result
+### 7. Verify the Result
 
 ```bash
 # Run tests to ensure nothing broke
@@ -97,10 +123,10 @@ If conflicts occur:
 
 # Review the final state
 git log --oneline -10
-git diff HEAD~1
+git diff origin/$(git branch --show-current)
 ```
 
-### 7. Commit Cherry-Picked Changes
+### 8. Commit and Push Cherry-Picked Changes
 
 ```bash
 git add -A
@@ -110,34 +136,39 @@ Incorporated:
 - [List specific features/changes picked]
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
+
+# Push to update the winning PR
+git push origin
 ```
 
-### 8. Close the Losing PR
+### 9. Close the Losing PR
 
 ```bash
-gh pr close "$LOSING_PR" --comment "Superseded by $WINNING_PR. Valuable features have been cherry-picked into main:
+gh pr close "$LOSING_PR" --comment "Consolidated into $WINNING_PR. Valuable features have been cherry-picked:
 - [List what was incorporated]
 
 Thank you for the alternative approach!"
 ```
 
-### 9. Signal Completion
+### 10. Signal Completion
 
 ```bash
-agent-duo signal "$MY_NAME" merge-done "merged $DECISION's PR, cherry-picked from $LOSING_AGENT"
+agent-duo signal "$MY_NAME" merge-done "cherry-picked into $DECISION's PR, closed $LOSING_AGENT's PR"
 ```
 
-Then **STOP and wait**. Your peer will review the merge result.
+Then **STOP and wait**. Your peer will review the cherry-pick work.
 
 ### After Review
 
 Your peer's review will be written to: `$PEER_SYNC/merge-review-${PEER_NAME}.md`
 
-If they request changes, you'll be triggered again with the `duo-merge-amend` skill to address their feedback.
+If they request changes, you'll be triggered again with the `duo-merge-amend` skill to address their feedback. You'll continue working in `$PEER_WORKTREE`.
 
 ## Guidelines
 
+- **Work in `$PEER_WORKTREE`**: All commits go to the winning branch
+- **Reference `$MY_WORKTREE`**: Your original code is still there for context
 - **Don't lose valuable work**: The losing PR had merit - extract what's good
-- **Keep history clean**: Squash merge + cherry-pick keeps the git log readable
-- **Test thoroughly**: The merge must not break anything
-- **Document what you picked**: Future maintainers should understand what came from where
+- **Test thoroughly**: The cherry-picks must not break anything
+- **Document what you picked**: The commit message should list incorporated features
+- **Don't merge to main**: The user will merge the winning PR when ready

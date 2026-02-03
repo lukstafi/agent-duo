@@ -991,6 +991,8 @@ start_tmux_mode() {
     tmux send-keys -t "$session_name:claude" C-m
     tmux send-keys -t "$session_name:claude" "export PEER_NAME='codex'"
     tmux send-keys -t "$session_name:claude" C-m
+    tmux send-keys -t "$session_name:claude" "export MY_WORKTREE='$worktree_claude'"
+    tmux send-keys -t "$session_name:claude" C-m
     tmux send-keys -t "$session_name:claude" "export PEER_WORKTREE='$worktree_codex'"
     tmux send-keys -t "$session_name:claude" C-m
     tmux send-keys -t "$session_name:claude" "export FEATURE='$feature'"
@@ -1003,6 +1005,8 @@ start_tmux_mode() {
     tmux send-keys -t "$session_name:codex" "export MY_NAME='codex'"
     tmux send-keys -t "$session_name:codex" C-m
     tmux send-keys -t "$session_name:codex" "export PEER_NAME='claude'"
+    tmux send-keys -t "$session_name:codex" C-m
+    tmux send-keys -t "$session_name:codex" "export MY_WORKTREE='$worktree_codex'"
     tmux send-keys -t "$session_name:codex" C-m
     tmux send-keys -t "$session_name:codex" "export PEER_WORKTREE='$worktree_claude'"
     tmux send-keys -t "$session_name:codex" C-m
@@ -1074,12 +1078,12 @@ start_ttyd_mode() {
     done
 
     # Set environment variables for agents
-    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "MY_WORKTREE='$worktree_claude'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
         tmux send-keys -t "${session_name}-claude" "export $var"
         tmux send-keys -t "${session_name}-claude" C-m
     done
 
-    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'"; do
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "MY_WORKTREE='$worktree_codex'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'"; do
         tmux send-keys -t "${session_name}-codex" "export $var"
         tmux send-keys -t "${session_name}-codex" C-m
     done
@@ -1404,7 +1408,7 @@ cmd_restart() {
             else
                 info "Creating tmux session: $claude_target"
                 tmux new-session -d -s "$claude_target" -c "$worktree_claude"
-                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "MY_WORKTREE='$worktree_claude'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
                     tmux send-keys -t "$claude_target" "export $var"
                     tmux send-keys -t "$claude_target" C-m
                 done
@@ -1422,7 +1426,7 @@ cmd_restart() {
             else
                 info "Creating tmux session: $codex_target"
                 tmux new-session -d -s "$codex_target" -c "$worktree_codex"
-                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'"; do
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "MY_WORKTREE='$worktree_codex'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'"; do
                     tmux send-keys -t "$codex_target" "export $var"
                     tmux send-keys -t "$codex_target" C-m
                 done
@@ -1445,7 +1449,7 @@ cmd_restart() {
             # Create claude window
             if [ -d "$worktree_claude" ]; then
                 tmux new-window -t "$session_name" -n "claude" -c "$worktree_claude"
-                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "MY_WORKTREE='$worktree_claude'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
                     tmux send-keys -t "$claude_target" "export $var"
                     tmux send-keys -t "$claude_target" C-m
                 done
@@ -1457,7 +1461,7 @@ cmd_restart() {
             # Create codex window
             if [ -d "$worktree_codex" ]; then
                 tmux new-window -t "$session_name" -n "codex" -c "$worktree_codex"
-                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'"; do
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "MY_WORKTREE='$worktree_codex'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'"; do
                     tmux send-keys -t "$codex_target" "export $var"
                     tmux send-keys -t "$codex_target" C-m
                 done
@@ -2733,9 +2737,28 @@ cmd_run_merge() {
 
     echo ""
     info "=== Merge Phase Complete ==="
-    echo "Decision: $decision's PR was merged"
-    if [ -f "$peer_sync/merge-review-${reviewer}.md" ]; then
-        echo "See merge review: $peer_sync/merge-review-${reviewer}.md"
+
+    if $merge_approved; then
+        # Get the winning PR URL
+        local winning_pr
+        winning_pr="$(cat "$peer_sync/${decision}.pr")"
+
+        echo "Cherry-picks consolidated into $decision's PR: $winning_pr"
+        echo "Losing PR has been closed."
+        echo ""
+        success "Winning PR is ready for human merge!"
+
+        # Notify user that PR is ready
+        send_notification "PR ready for merge" "$decision's PR ($winning_pr) has cherry-picks incorporated and is ready for merge to main." "high"
+
+        # Return to PR-comments phase for the winning PR only
+        echo "pr-comments" > "$peer_sync/phase"
+        info "Returning to PR comment watch phase for final review..."
+    else
+        warn "Merge phase ended without approval. Manual intervention may be needed."
+        if [ -f "$peer_sync/merge-review-${reviewer}.md" ]; then
+            echo "See merge review: $peer_sync/merge-review-${reviewer}.md"
+        fi
     fi
 }
 
@@ -2852,8 +2875,8 @@ cmd_signal() {
 
     # Validate status
     case "$status" in
-        clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|interrupted|error|pr-created|escalated|voting|vote-done|debating|debate-done|merging|merge-done|merge-reviewing|merge-review-done) ;;
-        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, interrupted, error, pr-created, escalated, voting, vote-done, debating, debate-done, merging, merge-done, merge-reviewing, merge-review-done)" ;;
+        clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|integrating|integrate-done|interrupted|error|pr-created|escalated|voting|vote-done|debating|debate-done|merging|merge-done|merge-reviewing|merge-review-done) ;;
+        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, integrating, integrate-done, interrupted, error, pr-created, escalated, voting, vote-done, debating, debate-done, merging, merge-done, merge-reviewing, merge-review-done)" ;;
     esac
 
     local content="${status}|$(date +%s)|${message}"
@@ -4034,7 +4057,20 @@ cmd_run() {
                     echo ""
                     info "Transitioning to merge phase..."
                     cmd_run_merge
-                    break
+                    # After merge phase, continue watching for the winning PR
+                    # (The losing PR is closed, so only the winning PR remains)
+                    # Update open status - losing PR should now be closed
+                    claude_open=false codex_open=false
+                    is_pr_open "$claude_pr" && claude_open=true
+                    is_pr_open "$codex_pr" && codex_open=true
+                    if ! $claude_open && ! $codex_open; then
+                        # Both closed means winning PR was merged by user during merge phase
+                        success "All PRs closed. Session complete!"
+                        echo "complete" > "$peer_sync/session"
+                        break
+                    fi
+                    info "Continuing to monitor remaining open PR(s)..."
+                    continue
                 fi
 
                 # Check for new comments on each open PR
@@ -4368,9 +4404,9 @@ AGENT COMMANDS (used by AI agents)
     signal <agent> <status> [message]
         Signal a status change. Status values:
         clarifying, clarify-done, pushing-back, pushback-done, working, done,
-        reviewing, review-done, interrupted, error, pr-created, escalated,
-        voting, vote-done, debating, debate-done, merging, merge-done,
-        merge-reviewing, merge-review-done
+        reviewing, review-done, integrating, integrate-done, interrupted,
+        error, pr-created, escalated, voting, vote-done, debating, debate-done,
+        merging, merge-done, merge-reviewing, merge-review-done
 
     peer-status
         Read peer's current status (requires PEER_NAME env var).
@@ -4391,6 +4427,7 @@ ENVIRONMENT VARIABLES (set in agent sessions)
     PEER_SYNC       Path to .peer-sync directory
     MY_NAME         This agent's name (claude or codex)
     PEER_NAME       Other agent's name
+    MY_WORKTREE     Path to this agent's worktree
     PEER_WORKTREE   Path to peer's worktree
     FEATURE         Feature name
 

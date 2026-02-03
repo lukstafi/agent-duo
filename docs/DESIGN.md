@@ -281,19 +281,29 @@ Given project directory `myapp` and feature `auth`:
 │                                                                 │
 │  EXECUTION PHASE                                                │
 │  ───────────────                                                │
-│  8. "Losing" agent merges winning PR (status: merging)          │
-│     - Squash merge the winning PR                               │
+│  8. "Losing" agent works in WINNING worktree (status: merging)  │
+│     - cd to $PEER_WORKTREE (winning agent's directory)          │
 │     - Cherry-pick valuable features from losing PR              │
+│     - Commit and push to winning branch                         │
 │     - Close losing PR with explanation                          │
-│  9. "Winning" agent reviews merge (status: merge-reviewing)     │
+│  9. "Winning" agent reviews cherry-picks (status: merge-reviewing)│
+│     - Reviews work in their own worktree ($MY_WORKTREE)         │
+│     - Can reference losing worktree for comparison              │
 │                                                                 │
 │  AMEND LOOP (if review requests changes)                        │
 │  ─────────────────────────────────────────                      │
-│  10. "Losing" agent addresses feedback (duo-merge-amend skill)  │
+│  10. "Losing" agent addresses feedback in winning worktree      │
 │  11. "Winning" agent re-reviews                                 │
 │  12. Repeat until approved (max 3 rounds)                       │
 │                                                                 │
-│  Roles: Losing agent = implementer, Winning agent = reviewer    │
+│  COMPLETION                                                     │
+│  ──────────                                                     │
+│  13. On approval: notify user, return to PR-comments phase      │
+│  14. Orchestrator monitors winning PR for comments/merge        │
+│  15. User merges winning PR to main when ready                  │
+│                                                                 │
+│  Key: Agents do NOT merge to main. User retains merge control.  │
+│  Both worktrees remain available for reference throughout.      │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -452,9 +462,9 @@ Key skill behaviors:
 - **Integrate phase**: Rebase branch onto updated main after another feature was merged, signal `integrate-done`
 - **Merge Vote phase**: Analyze both PRs objectively, vote on which to merge, signal `vote-done`
 - **Merge Debate phase**: Read peer's vote, reconsider or defend position, signal `debate-done`
-- **Merge Execute phase**: For losing agent — merge winning PR, cherry-pick from losing PR, signal `merge-done`
-- **Merge Review phase**: For winning agent — verify merge was done correctly, signal `merge-review-done`
-- **Merge Amend phase**: For losing agent — address review feedback on merge, signal `merge-done`
+- **Merge Execute phase**: For losing agent — cd to winning worktree, cherry-pick from losing PR into winning branch, close losing PR, signal `merge-done`
+- **Merge Review phase**: For winning agent — review cherry-picks in own worktree, can reference losing worktree, signal `merge-review-done`
+- **Merge Amend phase**: For losing agent — address review feedback in winning worktree, signal `merge-done`
 - **Divergence**: Maintain distinct approach from peer
 - **Interrupts**: If interrupted, gracefully yield and continue next round
 
@@ -499,6 +509,7 @@ Set by orchestrator in each agent's tmux/ttyd session:
 | `PEER_SYNC` | Path to .peer-sync | `/Users/me/myapp/.peer-sync` |
 | `MY_NAME` | This agent's name | `claude` |
 | `PEER_NAME` | Other agent's name | `codex` |
+| `MY_WORKTREE` | Path to this agent's worktree | `/Users/me/myapp-auth-claude` |
 | `PEER_WORKTREE` | Path to peer's worktree | `/Users/me/myapp-auth-codex` |
 | `FEATURE` | Feature name | `auth` |
 
