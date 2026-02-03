@@ -706,6 +706,7 @@ DEFAULT_CLARIFY_TIMEOUT=600  # 10 minutes
 DEFAULT_PUSHBACK_TIMEOUT=600 # 10 minutes
 DEFAULT_PLAN_TIMEOUT=600     # 10 minutes
 DEFAULT_INTEGRATE_TIMEOUT=600 # 10 minutes
+DEFAULT_DOCS_UPDATE_TIMEOUT=600 # 10 minutes
 DEFAULT_POLL_INTERVAL=10     # Check every 10 seconds
 DEFAULT_TUI_EXIT_BEHAVIOR="pause"  # What to do on TUI exit: pause, quit, or ignore
 
@@ -917,12 +918,15 @@ lib_cmd_signal() {
 
     # Validate status
     case "$status" in
-        gathering|gather-done|clarifying|clarify-done|pushing-back|pushback-done|planning|plan-done|plan-reviewing|plan-review-done|needs-clarify|working|done|reviewing|review-done|integrating|integrate-done|interrupted|error|pr-created|escalated) ;;
-        *) die "Invalid status: $status (valid: gathering, gather-done, clarifying, clarify-done, pushing-back, pushback-done, planning, plan-done, plan-reviewing, plan-review-done, needs-clarify, working, done, reviewing, review-done, integrating, integrate-done, interrupted, error, pr-created, escalated)" ;;
+        gathering|gather-done|clarifying|clarify-done|pushing-back|pushback-done|planning|plan-done|plan-reviewing|plan-review-done|needs-clarify|working|done|reviewing|review-done|updating-docs|docs-update-done|integrating|integrate-done|interrupted|error|pr-created|escalated) ;;
+        *) die "Invalid status: $status (valid: gathering, gather-done, clarifying, clarify-done, pushing-back, pushback-done, planning, plan-done, plan-reviewing, plan-review-done, needs-clarify, working, done, reviewing, review-done, updating-docs, docs-update-done, integrating, integrate-done, interrupted, error, pr-created, escalated)" ;;
     esac
 
     local content="${status}|$(date +%s)|${message}"
     atomic_write "$peer_sync/${agent}.status" "$content"
+    if [ "$status" = "docs-update-done" ]; then
+        touch "$peer_sync/docs-update-${agent}.done"
+    fi
 
     success "$agent status: $status"
 }
@@ -1797,6 +1801,14 @@ case "$phase" in
         fi
         log_debug "signaling plan-review-done"
         $signal_cmd signal "$agent" plan-review-done "completed via hook"
+        ;;
+    update-docs)
+        # Don't override if already docs-update-done or beyond
+        case "$current_status" in
+            docs-update-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
+        esac
+        log_debug "signaling docs-update-done"
+        $signal_cmd signal "$agent" docs-update-done "completed via hook"
         ;;
     *)
         log_debug "unknown phase: $phase"

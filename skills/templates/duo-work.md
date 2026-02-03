@@ -48,6 +48,19 @@ agent-duo escalate misguided "this feature already exists in module Z"
 ```
 This notifies the user without interrupting your work. Continue with your best interpretation.
 
+## Capture Learnings
+
+As you work, record any valuable discoveries for future developers:
+
+```bash
+# Project-specific learnings (conventions, gotchas, setup requirements)
+agent-duo learn "Title" "Details about what you learned"
+
+# Feedback about agent-duo workflow (if something was confusing or could be improved)
+agent-duo workflow-feedback <category> "Description"
+# Categories: skill-unclear, coordination, tooling, friction, other
+```
+
 ## Before You Stop
 
 Do one of the following:
@@ -57,9 +70,9 @@ Do one of the following:
 agent-duo signal "$MY_NAME" done "brief summary"
 ```
 
-**If your solution is complete** — create the PR now:
+**If your solution is complete** — capture learnings and create the PR now:
 ```bash
-agent-duo pr "$MY_NAME"
+agent-duo pr "$MY_NAME"   # will prompt for update-docs if needed
 ```
 
 The orchestrator waits for your signal or PR before proceeding.
