@@ -1905,6 +1905,9 @@ accumulate_workflow_feedback() {
 
     [ ! -d "$peer_sync" ] && return 0
 
+    # Skip if already accumulated (e.g., during PR creation)
+    [ -f "$peer_sync/workflow-feedback-copied" ] && return 0
+
     local feedback_dir="$HOME/.agent-duo/workflow-feedback"
     local date_str
     date_str="$(date +%Y-%m-%d)"
@@ -1934,6 +1937,7 @@ accumulate_workflow_feedback() {
 
     if [ "$found_feedback" = "true" ]; then
         info "Workflow feedback accumulated to ~/.agent-duo/workflow-feedback/"
+        touch "$peer_sync/workflow-feedback-copied"
     fi
 }
 
@@ -2980,12 +2984,13 @@ cmd_phase() {
 #------------------------------------------------------------------------------
 
 cmd_learn() {
-    local title="$1"
-    shift
-    local content="$*"
+    local title="${1:-}"
 
     [ -z "$title" ] && die "Usage: agent-duo learn \"<title>\" [content]
        Or pipe content: echo 'details' | agent-duo learn \"<title>\""
+
+    shift || true
+    local content="$*"
 
     # Get agent name
     local agent="${MY_NAME:-unknown}"
@@ -3039,13 +3044,14 @@ EOF
 #------------------------------------------------------------------------------
 
 cmd_workflow_feedback() {
-    local category="$1"
-    shift
-    local content="$*"
+    local category="${1:-}"
 
     [ -z "$category" ] && die "Usage: agent-duo workflow-feedback <category> [content]
        Categories: skill-unclear, coordination, tooling, friction, other
        Or pipe content: echo 'details' | agent-duo workflow-feedback <category>"
+
+    shift || true
+    local content="$*"
 
     # Validate category
     case "$category" in
