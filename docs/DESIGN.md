@@ -103,8 +103,8 @@ Given project directory `myapp` and feature `auth`:
 
 | Concept | Who sets | Values | Purpose |
 |---------|----------|--------|---------|
-| **Phase** | Orchestrator | `gather`, `clarify`, `pushback`, `work`, `review`, `pr-comments`, `merge` | Current stage of the round |
-| **Agent Status** | Agent | `gathering`, `gather-done`, `clarifying`, `clarify-done`, `pushing-back`, `pushback-done`, `working`, `done`, `reviewing`, `review-done`, `interrupted`, `error`, `escalated`, `pr-created`, `voting`, `vote-done`, `debating`, `debate-done`, `merging`, `merge-done`, `merge-reviewing`, `merge-review-done` | What agent is doing |
+| **Phase** | Orchestrator | `gather`, `clarify`, `pushback`, `work`, `review`, `update-docs`, `pr-comments`, `merge` | Current stage of the round |
+| **Agent Status** | Agent | `gathering`, `gather-done`, `clarifying`, `clarify-done`, `pushing-back`, `pushback-done`, `working`, `done`, `reviewing`, `review-done`, `updating-docs`, `docs-update-done`, `interrupted`, `error`, `escalated`, `pr-created`, `voting`, `vote-done`, `debating`, `debate-done`, `merging`, `merge-done`, `merge-reviewing`, `merge-review-done` | What agent is doing |
 | **Session State** | Orchestrator | `active`, `complete` | Overall progress |
 
 ### State Files (in `.peer-sync/`)
@@ -112,13 +112,14 @@ Given project directory `myapp` and feature `auth`:
 ```
 .peer-sync/
 ├── session           # "active" or "complete"
-├── phase             # "gather", "clarify", "pushback", "work", "review", "pr-comments", or "merge"
+├── phase             # "gather", "clarify", "pushback", "work", "review", "update-docs", "pr-comments", or "merge"
 ├── round             # Current round number (1, 2, 3...)
 ├── feature           # Feature name for this session
 ├── ports             # Port allocations (ORCHESTRATOR_PORT, CLAUDE_PORT, CODEX_PORT)
 ├── gather-mode       # "true" or "false" - whether gather phase is enabled (solo mode)
 ├── clarify-mode      # "true" or "false" - whether clarify phase is enabled
 ├── pushback-mode     # "true" or "false" - whether pushback phase is enabled
+├── docs-update-mode  # "true" or "false" - whether update-docs phase is enabled
 ├── gather-confirmed  # Present when gather phase is complete (solo mode)
 ├── clarify-confirmed # Present when user confirms clarify phase
 ├── pushback-confirmed # Present when user confirms pushback phase
@@ -133,6 +134,11 @@ Given project directory `myapp` and feature `auth`:
 ├── escalation-resolved   # Present when escalations have been resolved
 ├── claude.pr         # Claude's PR URL (when created)
 ├── codex.pr          # Codex's PR URL (when created)
+├── docs-update-claude.done # Present when Claude completes update-docs phase
+├── docs-update-codex.done  # Present when Codex completes update-docs phase
+├── workflow-feedback-claude.md # Claude's workflow feedback
+├── workflow-feedback-codex.md  # Codex's workflow feedback
+├── workflow-feedback-copied    # Present when feedback has been persisted locally
 ├── claude.pr-hash    # Hash of claude PR comments (for change detection)
 ├── codex.pr-hash     # Hash of codex PR comments (for change detection)
 ├── merge-round       # Current merge debate round (0=initial, 1-2=debate)
@@ -363,6 +369,8 @@ This differs from clarify/pushback phases which are enforced blocking points. Es
 | `done` | Finished work phase | Agent |
 | `reviewing` | Reading peer's changes | Agent (start of review phase) |
 | `review-done` | Finished review phase | Agent |
+| `updating-docs` | Capturing project/workflow learnings | Agent (start of update-docs phase) |
+| `docs-update-done` | Finished update-docs phase | Agent |
 | `interrupted` | Timed out, yielding to review | Orchestrator |
 | `error` | Something failed | Agent or Orchestrator |
 | `escalated` | Issue needs user input | Agent (after `agent-duo escalate`) |
@@ -448,8 +456,8 @@ agent-duo start myfeature --port 8000
 ## Skills
 
 Skills provide phase-specific instructions to agents. Installed to:
-- Claude: `~/.claude/commands/duo-{work,review,clarify,pushback,amend,pr-comment,integrate,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}.md`
-- Codex: `~/.codex/skills/duo-{work,review,clarify,pushback,amend,pr-comment,integrate,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}/SKILL.md`
+- Claude: `~/.claude/commands/duo-{work,review,clarify,pushback,amend,update-docs,pr-comment,integrate,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}.md`
+- Codex: `~/.codex/skills/duo-{work,review,clarify,pushback,amend,update-docs,pr-comment,integrate,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}/SKILL.md`
 
 Key skill behaviors:
 - **Gather phase** (solo mode): Explore codebase, collect relevant file links and notes, write `task-context.md`, signal `gather-done`
@@ -458,6 +466,7 @@ Key skill behaviors:
 - **Work phase**: Implement solution, signal `done` when ready
 - **Amend phase**: For agents with PRs — review peer feedback and amend PR if warranted
 - **Review phase**: Read peer's worktree via git, write review, signal `review-done`; agents with PRs still participate
+- **Update-Docs phase**: Capture project learnings and workflow feedback, signal `docs-update-done`
 - **PR Comment phase**: Fetch GitHub PR comments via `gh pr view`, address feedback, push amendments
 - **Integrate phase**: Rebase branch onto updated main after another feature was merged, signal `integrate-done`
 - **Merge Vote phase**: Analyze both PRs objectively, vote on which to merge, signal `vote-done`
@@ -479,7 +488,7 @@ Both hooks run `~/.local/bin/agent-duo-notify <agent-name>` which:
 1. Receives agent name as `$1` (required - hooks don't inherit shell environment variables)
 2. Discovers `PEER_SYNC` from `$PWD/.peer-sync` symlink (present in worktrees)
 3. Reads the current phase from `$PEER_SYNC/phase`
-4. Signals appropriate status: `gather-done` (gather), `done` (work), `review-done` (review), `clarify-done` (clarify), `pushback-done` (pushback)
+4. Signals appropriate status: `gather-done` (gather), `done` (work), `review-done` (review), `clarify-done` (clarify), `pushback-done` (pushback), `docs-update-done` (update-docs)
 5. Skips if already in a terminal state
 
 ## Notifications

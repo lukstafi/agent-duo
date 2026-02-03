@@ -7,7 +7,7 @@
 # Usage: agent-duo <command> [options]
 #
 # Session Commands:
-#   start <feature> [--auto-run] [--no-ttyd] [--clarify]  Start session
+#   start <feature> [--auto-run] [--no-ttyd] [--clarify] [--skip-docs-update]  Start session
 #   run [options]        Run orchestrator loop with timeouts
 #                        --on-tui-exit=pause|quit|ignore  TUI exit behavior
 #   stop                 Stop ttyd servers, keep worktrees
@@ -15,6 +15,7 @@
 #   status               Show session state
 #   confirm              Confirm clarify phase completion (proceed to work)
 #   pr <agent>           Create PR for agent's solution
+#   feedback             View/manage accumulated workflow feedback
 #   cleanup [--full]     Remove session state (--full: also worktrees/branches)
 #   setup                Install agent-duo to PATH and skills
 #   doctor [--send-email|--send-ntfy]  Check system health and configuration
@@ -190,6 +191,7 @@ cmd_setup() {
     install_skill "$templates_dir/duo-clarify.md" "$claude_skills/duo-clarify.md" "/duo-clarify"
     install_skill "$templates_dir/duo-pushback.md" "$claude_skills/duo-pushback.md" "/duo-pushback"
     install_skill "$templates_dir/duo-amend.md" "$claude_skills/duo-amend.md" "/duo-amend"
+    install_skill "$templates_dir/duo-update-docs.md" "$claude_skills/duo-update-docs.md" "/duo-update-docs"
     install_skill "$templates_dir/duo-pr-comment.md" "$claude_skills/duo-pr-comment.md" "/duo-pr-comment"
     install_skill "$templates_dir/duo-merge-vote.md" "$claude_skills/duo-merge-vote.md" "/duo-merge-vote"
     install_skill "$templates_dir/duo-merge-debate.md" "$claude_skills/duo-merge-debate.md" "/duo-merge-debate"
@@ -202,7 +204,7 @@ cmd_setup() {
     # Install Codex skills (uses $command syntax)
     # Codex expects skills as directories with SKILL.md inside
     local codex_skills="$HOME/.codex/skills"
-    mkdir -p "$codex_skills/duo-work" "$codex_skills/duo-review" "$codex_skills/duo-clarify" "$codex_skills/duo-pushback" "$codex_skills/duo-amend" "$codex_skills/duo-pr-comment"
+    mkdir -p "$codex_skills/duo-work" "$codex_skills/duo-review" "$codex_skills/duo-clarify" "$codex_skills/duo-pushback" "$codex_skills/duo-amend" "$codex_skills/duo-update-docs" "$codex_skills/duo-pr-comment"
     mkdir -p "$codex_skills/duo-merge-vote" "$codex_skills/duo-merge-debate" "$codex_skills/duo-merge-execute" "$codex_skills/duo-merge-review" "$codex_skills/duo-merge-amend"
     mkdir -p "$codex_skills/duo-integrate"
 
@@ -211,6 +213,7 @@ cmd_setup() {
     install_skill "$templates_dir/duo-clarify.md" "$codex_skills/duo-clarify/SKILL.md" "\$duo-clarify"
     install_skill "$templates_dir/duo-pushback.md" "$codex_skills/duo-pushback/SKILL.md" "\$duo-pushback"
     install_skill "$templates_dir/duo-amend.md" "$codex_skills/duo-amend/SKILL.md" "\$duo-amend"
+    install_skill "$templates_dir/duo-update-docs.md" "$codex_skills/duo-update-docs/SKILL.md" "\$duo-update-docs"
     install_skill "$templates_dir/duo-pr-comment.md" "$codex_skills/duo-pr-comment/SKILL.md" "\$duo-pr-comment"
     install_skill "$templates_dir/duo-merge-vote.md" "$codex_skills/duo-merge-vote/SKILL.md" "\$duo-merge-vote"
     install_skill "$templates_dir/duo-merge-debate.md" "$codex_skills/duo-merge-debate/SKILL.md" "\$duo-merge-debate"
@@ -473,7 +476,7 @@ Sent: $(date)"
     # Claude skills
     local claude_skills="$HOME/.claude/commands"
     local claude_skills_ok=true
-    for skill in duo-work duo-review duo-clarify duo-pushback duo-amend; do
+    for skill in duo-work duo-review duo-clarify duo-pushback duo-amend duo-update-docs; do
         if [ -f "$claude_skills/$skill.md" ]; then
             success "Claude skill: $skill"
         else
@@ -489,7 +492,7 @@ Sent: $(date)"
     # Codex skills
     local codex_skills="$HOME/.codex/skills"
     local codex_skills_ok=true
-    for skill in duo-work duo-review duo-clarify duo-pushback duo-amend; do
+    for skill in duo-work duo-review duo-clarify duo-pushback duo-amend duo-update-docs; do
         if [ -f "$codex_skills/$skill/SKILL.md" ]; then
             success "Codex skill: $skill"
         else
@@ -710,6 +713,7 @@ cmd_start() {
     local auto_run=false
     local clarify_mode=false
     local pushback_mode=false
+    local docs_update_mode=true
     local work_timeout=$DEFAULT_WORK_TIMEOUT
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
@@ -727,6 +731,7 @@ cmd_start() {
             --auto-run) auto_run=true; shift ;;
             --clarify) clarify_mode=true; shift ;;
             --pushback) pushback_mode=true; shift ;;
+            --skip-docs-update) docs_update_mode=false; shift ;;
             --work-timeout) work_timeout="$2"; shift 2 ;;
             --review-timeout) review_timeout="$2"; shift 2 ;;
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
@@ -745,7 +750,7 @@ cmd_start() {
     [ -n "$codex_model" ] && export AGENT_DUO_CODEX_MODEL="$codex_model"
     [ -n "$claude_model" ] && export AGENT_DUO_CLAUDE_MODEL="$claude_model"
 
-    [ ${#features[@]} -eq 0 ] && die "Usage: agent-duo start <feature> [feature2 ...] [--no-ttyd] [--auto-run] [--clarify]"
+    [ ${#features[@]} -eq 0 ] && die "Usage: agent-duo start <feature> [feature2 ...] [--no-ttyd] [--auto-run] [--clarify] [--skip-docs-update]"
 
     # Validate codex thinking effort
     case "$codex_thinking" in
@@ -772,7 +777,7 @@ cmd_start() {
             echo ""
             info "=== Starting session: $feature ==="
             if start_single_session "$feature" "$main_project_root" "$project_name" \
-                "$ttyd_mode" "$auto_run" "$clarify_mode" "$pushback_mode" \
+                "$ttyd_mode" "$auto_run" "$clarify_mode" "$pushback_mode" "$docs_update_mode" \
                 "$work_timeout" "$review_timeout" "$clarify_timeout" "$pushback_timeout" \
                 "$max_rounds" "$codex_thinking" "$base_port"; then
                 started=$((started + 1))
@@ -794,7 +799,7 @@ cmd_start() {
     # Single feature
     local feature="${features[0]}"
     start_single_session "$feature" "$main_project_root" "$project_name" \
-        "$ttyd_mode" "$auto_run" "$clarify_mode" "$pushback_mode" \
+        "$ttyd_mode" "$auto_run" "$clarify_mode" "$pushback_mode" "$docs_update_mode" \
         "$work_timeout" "$review_timeout" "$clarify_timeout" "$pushback_timeout" \
         "$max_rounds" "$codex_thinking" "$base_port"
 }
@@ -809,13 +814,14 @@ start_single_session() {
     local auto_run="$5"
     local clarify_mode="$6"
     local pushback_mode="$7"
-    local work_timeout="$8"
-    local review_timeout="$9"
-    local clarify_timeout="${10}"
-    local pushback_timeout="${11}"
-    local max_rounds="${12}"
-    local codex_thinking="${13}"
-    local base_port="${14}"
+    local docs_update_mode="$8"
+    local work_timeout="$9"
+    local review_timeout="${10}"
+    local clarify_timeout="${11}"
+    local pushback_timeout="${12}"
+    local max_rounds="${13}"
+    local codex_thinking="${14}"
+    local base_port="${15}"
 
     # Check for existing session for THIS feature
     local sessions_dir="$main_project_root/.agent-sessions"
@@ -923,6 +929,7 @@ start_single_session() {
     fi
     echo "$clarify_mode" > "$peer_sync/clarify-mode"
     echo "$pushback_mode" > "$peer_sync/pushback-mode"
+    echo "$docs_update_mode" > "$peer_sync/docs-update-mode"
     echo "1" > "$peer_sync/round"
     echo "$feature" > "$peer_sync/feature"
     echo "$codex_thinking" > "$peer_sync/codex-thinking"
@@ -1754,6 +1761,134 @@ show_single_status() {
 }
 
 #------------------------------------------------------------------------------
+# Workflow feedback helpers
+#------------------------------------------------------------------------------
+
+workflow_feedback_dir() {
+    echo "$HOME/.agent-duo/workflow-feedback"
+}
+
+persist_workflow_feedback() {
+    local peer_sync="$1"
+    local feature="$2"
+    local mode="${3:-duo}"
+
+    [ -f "$peer_sync/workflow-feedback-copied" ] && return 0
+
+    local dest_dir
+    dest_dir="$(workflow_feedback_dir)"
+    mkdir -p "$dest_dir"
+
+    local date_stamp
+    date_stamp="$(date +%F)"
+
+    local agents=()
+    if [ "$mode" = "solo" ]; then
+        agents=("coder" "reviewer")
+    else
+        agents=("claude" "codex")
+    fi
+
+    local copied_any=false
+    for agent in "${agents[@]}"; do
+        local src="$peer_sync/workflow-feedback-${agent}.md"
+        if [ -f "$src" ]; then
+            local dest="$dest_dir/${date_stamp}-${feature}-${agent}.md"
+            if [ -f "$dest" ]; then
+                local i=2
+                while [ -f "$dest_dir/${date_stamp}-${feature}-${agent}-${i}.md" ]; do
+                    i=$((i + 1))
+                done
+                dest="$dest_dir/${date_stamp}-${feature}-${agent}-${i}.md"
+            fi
+            cp "$src" "$dest"
+            copied_any=true
+        fi
+    done
+
+    if [ "$copied_any" = true ]; then
+        touch "$peer_sync/workflow-feedback-copied"
+    fi
+}
+
+ensure_docs_update() {
+    local agent="$1"
+    local peer_sync="$2"
+    local feature="$3"
+
+    local docs_update_mode
+    docs_update_mode="$(cat "$peer_sync/docs-update-mode" 2>/dev/null)" || docs_update_mode="true"
+    if [ "$docs_update_mode" != "true" ]; then
+        return 0
+    fi
+
+    local current_status
+    current_status="$(get_agent_status "$agent" "$peer_sync")"
+    if [ -f "$peer_sync/docs-update-${agent}.done" ] || [ "$current_status" = "docs-update-done" ]; then
+        return 0
+    fi
+
+    info "Docs update required before PR creation."
+    local previous_phase
+    previous_phase="$(cat "$peer_sync/phase" 2>/dev/null)"
+    echo "update-docs" > "$peer_sync/phase"
+    atomic_write "$peer_sync/${agent}.status" "updating-docs|$(date +%s)|capturing learnings"
+
+    local session_name="duo-${feature}"
+    local target=""
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+        target="${session_name}:${agent}"
+    elif tmux has-session -t "${session_name}-${agent}" 2>/dev/null; then
+        target="${session_name}-${agent}"
+    fi
+
+    local in_agent_session=false
+    if [ -n "$TMUX" ]; then
+        local current_session current_window
+        current_session="$(tmux display-message -p '#S' 2>/dev/null)" || current_session=""
+        current_window="$(tmux display-message -p '#W' 2>/dev/null)" || current_window=""
+        if [ "$current_session" = "$session_name" ] && [ "$current_window" = "$agent" ]; then
+            in_agent_session=true
+        elif [ "$current_session" = "${session_name}-${agent}" ]; then
+            in_agent_session=true
+        fi
+    fi
+
+    if [ "$in_agent_session" = true ] || [ -z "$target" ]; then
+        warn "Run the duo-update-docs skill, then re-run: agent-duo pr $agent"
+        [ -n "$previous_phase" ] && echo "$previous_phase" > "$peer_sync/phase"
+        return 1
+    fi
+
+    info "Triggering duo-update-docs for $agent..."
+    trigger_skill "$agent" "$target" "duo-update-docs"
+
+    local timeout="${DEFAULT_DOCS_UPDATE_TIMEOUT:-600}"
+    local start=$SECONDS
+    while true; do
+        if [ -f "$peer_sync/docs-update-${agent}.done" ]; then
+            break
+        fi
+        local status
+        status="$(get_agent_status "$agent" "$peer_sync")"
+        [ "$status" = "docs-update-done" ] && break
+
+        local elapsed=$((SECONDS - start))
+        if [ "$elapsed" -ge "$timeout" ]; then
+            warn "Docs update timeout (${timeout}s)"
+            [ -n "$previous_phase" ] && echo "$previous_phase" > "$peer_sync/phase"
+            return 1
+        fi
+        printf "\r  Waiting for %s to finish update-docs... (%ds/%ds)  " "$agent" "$elapsed" "$timeout"
+        sleep 5
+    done
+    echo ""
+    success "Docs update completed for $agent"
+    [ -n "$previous_phase" ] && echo "$previous_phase" > "$peer_sync/phase"
+    return 0
+}
+
+#------------------------------------------------------------------------------
 # Command: pr
 #------------------------------------------------------------------------------
 
@@ -1800,6 +1935,10 @@ cmd_pr() {
 
     cd "$worktree"
 
+    if ! ensure_docs_update "$agent" "$peer_sync" "$feature"; then
+        return 1
+    fi
+
     # Check if feature file exists and was NOT modified (should be deleted)
     # The feature file is copied to the worktree root during start
     local feature_file="$worktree/${feature}.md"
@@ -1840,8 +1979,12 @@ cmd_pr() {
 
         if [ "$file_modified" = "false" ]; then
             info "Feature file ${feature}.md was not modified - removing it"
-            git rm "${feature}.md"
-            git commit -m "Remove unmodified feature file ${feature}.md"
+            if git ls-files --error-unmatch "${feature}.md" >/dev/null 2>&1; then
+                git rm "${feature}.md"
+                git commit -m "Remove unmodified feature file ${feature}.md"
+            else
+                rm -f "${feature}.md"
+            fi
         fi
     fi
 
@@ -1886,7 +2029,95 @@ cmd_pr() {
     if [ -f "$peer_sync/claude.pr" ] && [ -f "$peer_sync/codex.pr" ]; then
         echo "complete" > "$peer_sync/session"
         success "Both PRs created - session complete!"
+        persist_workflow_feedback "$peer_sync" "$feature" "duo"
     fi
+}
+
+#------------------------------------------------------------------------------
+# Command: feedback
+#------------------------------------------------------------------------------
+
+cmd_feedback() {
+    local action="list"
+    local target=""
+    local repo="lukstafi/agent-duo"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --list) action="list"; shift ;;
+            --view) action="view"; target="$2"; shift 2 ;;
+            --delete) action="delete"; target="$2"; shift 2 ;;
+            --submit) action="submit"; target="$2"; shift 2 ;;
+            --repo) repo="$2"; shift 2 ;;
+            -*) die "Unknown option: $1" ;;
+            *) target="$1"; shift ;;
+        esac
+    done
+
+    local dir
+    dir="$(workflow_feedback_dir)"
+    mkdir -p "$dir"
+
+    local files=()
+    if [ -d "$dir" ]; then
+        mapfile -t files < <(ls -1 "$dir" 2>/dev/null)
+    fi
+
+    if [ "$action" = "list" ]; then
+        if [ "${#files[@]}" -eq 0 ]; then
+            info "No workflow feedback files found in $dir"
+            return 0
+        fi
+        echo "Workflow feedback files:"
+        local i=1
+        for file in "${files[@]}"; do
+            echo "  $i. $file"
+            i=$((i + 1))
+        done
+        echo ""
+        echo "View:   agent-duo feedback --view <number|filename>"
+        echo "Delete: agent-duo feedback --delete <number|filename>"
+        echo "Submit: agent-duo feedback --submit <number|filename> [--repo owner/repo]"
+        return 0
+    fi
+
+    if [ "${#files[@]}" -eq 0 ]; then
+        die "No workflow feedback files found in $dir"
+    fi
+
+    [ -z "$target" ] && die "Specify a feedback file or index"
+
+    local file="$target"
+    if [[ "$target" =~ ^[0-9]+$ ]]; then
+        local index=$((target - 1))
+        if [ "$index" -lt 0 ] || [ "$index" -ge "${#files[@]}" ]; then
+            die "Invalid feedback index: $target"
+        fi
+        file="${files[$index]}"
+    fi
+
+    local path="$dir/$file"
+    [ -f "$path" ] || die "Feedback file not found: $file"
+
+    case "$action" in
+        view)
+            cat "$path"
+            ;;
+        delete)
+            rm -f "$path"
+            success "Deleted feedback file: $file"
+            ;;
+        submit)
+            command -v gh >/dev/null 2>&1 || die "gh CLI not found (required for --submit)"
+            local title="agent-duo workflow feedback: $file"
+            local body
+            body="$(cat "$path")"
+            local pr_url
+            pr_url="$(gh issue create --repo "$repo" --title "$title" --body "$body" 2>/dev/null)" || \
+                die "Failed to create GitHub issue (check gh auth and repo access)"
+            success "Issue created: $pr_url"
+            ;;
+    esac
 }
 
 #------------------------------------------------------------------------------
@@ -2875,12 +3106,15 @@ cmd_signal() {
 
     # Validate status
     case "$status" in
-        clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|integrating|integrate-done|interrupted|error|pr-created|escalated|voting|vote-done|debating|debate-done|merging|merge-done|merge-reviewing|merge-review-done) ;;
-        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, integrating, integrate-done, interrupted, error, pr-created, escalated, voting, vote-done, debating, debate-done, merging, merge-done, merge-reviewing, merge-review-done)" ;;
+        clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|updating-docs|docs-update-done|integrating|integrate-done|interrupted|error|pr-created|escalated|voting|vote-done|debating|debate-done|merging|merge-done|merge-reviewing|merge-review-done) ;;
+        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, updating-docs, docs-update-done, integrating, integrate-done, interrupted, error, pr-created, escalated, voting, vote-done, debating, debate-done, merging, merge-done, merge-reviewing, merge-review-done)" ;;
     esac
 
     local content="${status}|$(date +%s)|${message}"
     atomic_write "$peer_sync/${agent}.status" "$content"
+    if [ "$status" = "docs-update-done" ]; then
+        touch "$peer_sync/docs-update-${agent}.done"
+    fi
 
     success "$agent status: $status"
 }
@@ -3278,9 +3512,10 @@ The orchestrator will then trigger the review phase.
 
 ### When Ready to Submit Final PR
 
-When your solution is complete and tested, create your PR:
+Before creating your PR, capture learnings (you may be prompted to run update-docs).
+Then create your PR:
 \`\`\`bash
-agent-duo pr "$agent"   # recommended: handles commit, push, and orchestrator sync
+agent-duo pr "$agent"   # handles doc updates (if needed), commit, push, and sync
 # or: gh pr create ...  # also works, orchestrator will detect it
 \`\`\`
 EOF
@@ -3759,8 +3994,8 @@ cmd_run() {
                 codex_status="$(get_agent_status "codex" "$peer_sync")"
 
                 # Accept done, review-done (agent jumped ahead), or pr-created
-                [[ "$claude_status" =~ ^(done|review-done|pr-created)$ ]] && claude_done=true
-                [[ "$codex_status" =~ ^(done|review-done|pr-created)$ ]] && codex_done=true
+                [[ "$claude_status" =~ ^(done|review-done|updating-docs|docs-update-done|pr-created)$ ]] && claude_done=true
+                [[ "$codex_status" =~ ^(done|review-done|updating-docs|docs-update-done|pr-created)$ ]] && codex_done=true
 
                 # Check for PRs created mid-phase
                 has_pr "claude" "$peer_sync" && claude_done=true
@@ -3847,8 +4082,8 @@ cmd_run() {
                 codex_status="$(get_agent_status "codex" "$peer_sync")"
 
                 # Accept review-done, done (agent skipped review), or pr-created
-                [[ "$claude_status" =~ ^(done|review-done|pr-created)$ ]] && claude_done=true
-                [[ "$codex_status" =~ ^(done|review-done|pr-created)$ ]] && codex_done=true
+                [[ "$claude_status" =~ ^(done|review-done|updating-docs|docs-update-done|pr-created)$ ]] && claude_done=true
+                [[ "$codex_status" =~ ^(done|review-done|updating-docs|docs-update-done|pr-created)$ ]] && codex_done=true
 
                 has_pr "claude" "$peer_sync" && claude_done=true
                 has_pr "codex" "$peer_sync" && codex_done=true
@@ -3912,6 +4147,7 @@ cmd_run() {
     # After both PRs are created, monitor for new comments/reviews
     # This also works for backward compatibility: running on old sessions with PRs
     if has_pr "claude" "$peer_sync" && has_pr "codex" "$peer_sync"; then
+        persist_workflow_feedback "$peer_sync" "$feature" "duo"
         local claude_pr codex_pr
         claude_pr="$(cat "$peer_sync/claude.pr")"
         codex_pr="$(cat "$peer_sync/codex.pr")"
@@ -4264,6 +4500,7 @@ SESSION COMMANDS
           --no-ttyd                Use single tmux session instead of web terminals
           --clarify                Enable clarify stage before work starts
           --pushback               Enable pushback stage (after clarify if both enabled)
+          --skip-docs-update       Skip update-docs phase before PR creation
           --work-timeout <secs>    Work phase timeout (default: 1200, with --auto-run)
           --review-timeout <secs>  Review phase timeout (default: 600, with --auto-run)
           --clarify-timeout <secs> Clarify stage timeout (default: 600, with --clarify)
@@ -4339,6 +4576,16 @@ SESSION COMMANDS
     pr <agent>
         Create a PR for the specified agent (claude or codex).
         Auto-commits uncommitted changes and pushes.
+        Runs update-docs phase before PR creation (unless skipped).
+
+    feedback [options]
+        View/manage accumulated workflow feedback files.
+        Options:
+          --list                  List feedback files (default)
+          --view <n|file>         Show a feedback file by index or name
+          --delete <n|file>       Delete a feedback file by index or name
+          --submit <n|file>       Create a GitHub issue from a feedback file
+          --repo <owner/repo>     Target repo for --submit (default: lukstafi/agent-duo)
 
     merge [options]
         Start merge phase to consolidate both PRs into main.
@@ -4404,7 +4651,7 @@ AGENT COMMANDS (used by AI agents)
     signal <agent> <status> [message]
         Signal a status change. Status values:
         clarifying, clarify-done, pushing-back, pushback-done, working, done,
-        reviewing, review-done, integrating, integrate-done, interrupted,
+        reviewing, review-done, updating-docs, docs-update-done, integrating, integrate-done, interrupted,
         error, pr-created, escalated, voting, vote-done, debating, debate-done,
         merging, merge-done, merge-reviewing, merge-review-done
 
@@ -4412,7 +4659,7 @@ AGENT COMMANDS (used by AI agents)
         Read peer's current status (requires PEER_NAME env var).
 
     phase
-        Read current phase (clarify, pushback, work, review, or merge).
+        Read current phase (clarify, pushback, work, review, update-docs, or merge).
 
     escalate <reason> [message]
         Escalate an issue requiring user input. Does not interrupt the agent.
@@ -4493,6 +4740,7 @@ main() {
         escalate)    cmd_escalate "$@" ;;
         escalate-resolve) cmd_escalate_resolve "$@" ;;
         pr)          cmd_pr "$@" ;;
+        feedback)    cmd_feedback "$@" ;;
         merge)       cmd_merge "$@" ;;
         run-merge)   cmd_run_merge "$@" ;;
         cleanup)     cmd_cleanup "$@" ;;

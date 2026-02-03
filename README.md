@@ -157,6 +157,7 @@ agent-duo start <feature> --port 8000  # Use fixed ports 8000, 8001, 8002 (fails
 agent-duo start <feature> --auto-run   # Start and run orchestrator immediately
 agent-duo start <feature> --clarify    # Enable clarify stage (agents propose approaches)
 agent-duo start <feature> --pushback   # Enable pushback stage (agents improve task)
+agent-duo start <feature> --skip-docs-update  # Skip update-docs phase before PR creation
 agent-duo start <feature> --no-ttyd    # Start with single tmux session (no web terminals)
 agent-duo run [options]                # Run orchestrator loop (if not using --auto-run)
 agent-duo status                       # Show current state
@@ -200,6 +201,7 @@ agent-duo config codex_model gpt-5.2-codex
 agent-duo nudge claude "Please wrap up and signal done."
 agent-duo interrupt codex
 agent-duo pr claude          # Create PR for an agent
+agent-duo feedback           # View/manage workflow feedback
 agent-duo confirm            # Confirm clarify phase, proceed to work
 ```
 
@@ -227,7 +229,30 @@ Each round consists of:
    - Note different tradeoffs, not defects
    - Signal `review-done` when finished
 
-5. **Repeat** until both agents create PRs
+5. **Update-Docs Phase** (before PR creation)
+   - Append project learnings to `AGENTS_STAGING.md`
+   - Write workflow feedback to `.peer-sync/workflow-feedback-<agent>.md`
+
+6. **Repeat** until both agents create PRs
+
+## Task Learning (Update-Docs)
+
+Before PR creation, agents capture learnings in two places:
+
+- **Project learnings** -> `AGENTS_STAGING.md` in the project root (later curated into `CLAUDE.md` / `AGENTS.md`)
+- **Workflow feedback** -> `.peer-sync/workflow-feedback-<agent>.md`, copied to `~/.agent-duo/workflow-feedback/` when the session completes
+
+You can review or delete accumulated workflow feedback with:
+
+```bash
+agent-duo feedback
+```
+
+To opt out of the update-docs phase for a session:
+
+```bash
+agent-duo start <feature> --skip-docs-update
+```
 
 ## Notifications
 
