@@ -739,22 +739,39 @@ has_pr() {
         branch="${feature}-${agent}"  # Duo uses agent-specific branches
     fi
 
+    # Derive worktree from peer_sync path
+    # peer_sync is either worktree/.peer-sync or a symlink pointing there
+    local worktree
+    worktree="$(cd "$peer_sync" && cd .. && pwd)"
+
     # Check if there's a PR for this branch
-    # Note: gh pr view returns closed/merged PRs too, so we verify the PR
-    # belongs to our current branch by checking if its head commit is in our history
-    local pr_info pr_url pr_commit
-    pr_info="$(gh pr view "$branch" --json url,headRefOid -q '.url + " " + .headRefOid' 2>/dev/null)" || return 1
+    # We verify the PR belongs to the current session by checking:
+    # 1. PR's head branch name matches our branch
+    # 2. PR was created after our session started (using last-main-commit timestamp as proxy)
+    local pr_info pr_url pr_created
+    # Run gh pr view from worktree so it can find the repo
+    pr_info="$(cd "$worktree" && gh pr view "$branch" --json url,createdAt -q '.url + " " + .createdAt' 2>/dev/null)" || return 1
     pr_url="${pr_info% *}"
-    pr_commit="${pr_info##* }"
+    pr_created="${pr_info##* }"
 
     if [ -z "$pr_url" ]; then
         return 1
     fi
 
-    # Check if PR's head commit is reachable from current branch HEAD
-    # If not, this is a stale PR from a previous (deleted) branch with same name
-    if ! git merge-base --is-ancestor "$pr_commit" HEAD 2>/dev/null; then
-        return 1
+    # Verify this isn't a stale PR from a previous session with the same branch name
+    # Check if PR was created after our session's last-main-commit was recorded
+    if [ -f "$peer_sync/last-main-commit" ]; then
+        local session_commit session_time
+        session_commit="$(cat "$peer_sync/last-main-commit")"
+        # Get commit timestamp in ISO format (run from worktree)
+        session_time="$(cd "$worktree" && git log -1 --format=%cI "$session_commit" 2>/dev/null)" || session_time=""
+        if [ -n "$session_time" ] && [ -n "$pr_created" ]; then
+            # Compare timestamps (ISO format sorts correctly)
+            if [[ "$pr_created" < "$session_time" ]]; then
+                # PR was created before our session started - it's stale
+                return 1
+            fi
+        fi
     fi
 
     # Cache the result in the .pr file
