@@ -101,6 +101,9 @@ agent-solo start add-auth --auto-run
 
 # Swap roles (codex codes, claude reviews)
 agent-solo start add-auth --auto-run --coder codex --reviewer claude
+
+# With gather phase (reviewer collects context for coder first)
+agent-solo start add-auth --auto-run --gather
 ```
 
 ## Example Session
@@ -216,39 +219,44 @@ agent-duo confirm            # Confirm clarify phase, proceed to work
 
 Each round consists of:
 
-1. **Clarify Phase** (optional, `--clarify`): Agents propose approaches
+1. **Gather Phase** (solo mode only, `--gather`): Reviewer collects context
+   - Reviewer explores codebase and writes `.peer-sync/task-context.md`
+   - Coder reads this context before starting work
+   - Run `agent-solo confirm` to proceed
+
+2. **Clarify Phase** (optional, `--clarify`): Agents propose approaches
    - Write approach and questions to `.peer-sync/clarify-<agent>.md`
    - User receives notification (email/ntfy) and can respond
    - Run `agent-duo confirm` to proceed
 
-2. **Pushback Phase** (optional, `--pushback`): Agents improve the task
+3. **Pushback Phase** (optional, `--pushback`): Agents improve the task
    - Agents propose edits to the task file
    - User can accept, reject, or modify suggestions
    - Run `agent-duo confirm` to proceed
 
-3. **Plan Phase** (optional, `--plan`): Agents write implementation plans
+4. **Plan Phase** (optional, `--plan`): Agents write implementation plans
    - Write to `.peer-sync/plan-<agent>.md`
    - Signal `plan-done` when finished
 
-4. **Plan-Review Phase** (optional, `--plan`): Agents review peer plans
+5. **Plan-Review Phase** (optional, `--plan`): Agents review peer plans
    - Write reviews to `.peer-sync/plan-review-<agent>.md`
    - Signal `plan-review-done` when finished
 
-5. **Work Phase**: Agents implement their solution independently
+6. **Work Phase**: Agents implement their solution independently
    - They can peek at peer's worktree for insight (not imitation)
    - Signal `done` when ready for review
    - Orchestrator interrupts if timeout reached
 
-6. **Review Phase**: Agents review each other's code
+7. **Review Phase**: Agents review each other's code
    - Write structured review to `.peer-sync/reviews/`
    - Note different tradeoffs, not defects
    - Signal `review-done` when finished
 
-7. **Update-Docs Phase** (before PR creation)
+8. **Update-Docs Phase** (before PR creation)
    - Append project learnings to `AGENTS_STAGING.md`
    - Write workflow feedback to `.peer-sync/workflow-feedback-<agent>.md`
 
-8. **Repeat** until both agents create PRs
+9. **Repeat** until both agents create PRs
 
 ## Task Learning (Update-Docs)
 
