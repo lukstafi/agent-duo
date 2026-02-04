@@ -354,18 +354,6 @@ start_single_solo_session() {
         return 1
     fi
 
-    # Also check for legacy single-session mode
-    if [ -d "$main_project_root/.peer-sync" ]; then
-        local existing_feature
-        existing_feature="$(cat "$main_project_root/.peer-sync/feature" 2>/dev/null)"
-        if [ "$existing_feature" = "$feature" ]; then
-            warn "Legacy session exists for feature '$feature'."
-            warn "To continue: agent-solo run"
-            warn "To start fresh: agent-solo cleanup && agent-solo start $feature"
-            return 1
-        fi
-    fi
-
     # Check for task file in main project
     local task_file
     if task_file="$(find_task_file "$main_project_root" "$feature")"; then
@@ -731,15 +719,7 @@ cmd_stop() {
         return
     fi
 
-    # In main project - stop all sessions
-    if [ -d "$main_root/.peer-sync" ]; then
-        local legacy_feature
-        legacy_feature="$(cat "$main_root/.peer-sync/feature" 2>/dev/null)"
-        stop_single_solo_session "$legacy_feature" "$main_root" "$main_root/.peer-sync"
-        return
-    fi
-
-    # Stop all sessions from registry
+    # In main project - stop all sessions from registry
     local sessions
     sessions="$(list_active_sessions "$main_root")"
 
@@ -1193,12 +1173,6 @@ cmd_status() {
     else
         local main_root
         main_root="$(get_main_project_root 2>/dev/null)" || die "Not in a git repository"
-
-        # Check for legacy single-session first
-        if [ -d "$main_root/.peer-sync" ]; then
-            show_single_solo_status "$main_root/.peer-sync"
-            return
-        fi
 
         # Show all sessions from registry
         local sessions
@@ -2764,15 +2738,7 @@ cmd_cleanup() {
         return
     fi
 
-    # In main project - clean all sessions
-    if [ -d "$main_root/.peer-sync" ]; then
-        local legacy_feature
-        legacy_feature="$(cat "$main_root/.peer-sync/feature" 2>/dev/null)"
-        cleanup_legacy_solo_session "$legacy_feature" "$main_root" "$full"
-        return
-    fi
-
-    # Clean all sessions from registry
+    # In main project - clean all sessions from registry
     local sessions
     sessions="$(list_active_sessions "$main_root")"
 
@@ -2846,42 +2812,6 @@ cleanup_single_solo_session() {
     fi
 
     success "Cleanup complete for $feature"
-}
-
-# Cleanup legacy single-session (backward compatibility)
-cleanup_legacy_solo_session() {
-    local feature="$1"
-    local root="$2"
-    local full="$3"
-
-    local peer_sync="$root/.peer-sync"
-    local project_name
-    project_name="$(basename "$root")"
-    local parent_dir
-    parent_dir="$(dirname "$root")"
-
-    info "Cleaning up legacy session: $feature"
-
-    cmd_stop --feature "$feature" 2>/dev/null || true
-
-    rm -rf "$peer_sync"
-    info "Removed .peer-sync"
-
-    if [ "$full" = "true" ]; then
-        local worktree="$parent_dir/${project_name}-${feature}"
-
-        cd "$root"
-
-        if [ -d "$worktree" ]; then
-            git worktree remove --force "$worktree" 2>/dev/null || rm -rf "$worktree"
-            info "Removed worktree: $worktree"
-        fi
-
-        git worktree prune
-        git branch -D "${feature}" 2>/dev/null && info "Deleted branch: ${feature}" || true
-    fi
-
-    success "Cleanup complete"
 }
 
 #------------------------------------------------------------------------------

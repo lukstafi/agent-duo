@@ -73,8 +73,7 @@ get_project_root() {
 }
 
 # Get feature name from session
-# For multi-session: if root is a root worktree (has .peer-sync), read from there
-# For single-session (legacy): read from project root's .peer-sync
+# Reads from .peer-sync/feature in the session's root worktree
 get_feature() {
     local root
     root="$(get_project_root)"
@@ -246,14 +245,7 @@ resolve_session() {
         sessions="$(list_active_sessions "$main_root")"
 
         if [ -z "$sessions" ]; then
-            # No multi-session setup, check for legacy single session
-            if [ -d "$main_root/.peer-sync" ]; then
-                RESOLVED_ROOT="$main_root"
-                RESOLVED_PEER_SYNC="$main_root/.peer-sync"
-                RESOLVED_FEATURE="$(cat "$RESOLVED_PEER_SYNC/feature" 2>/dev/null)"
-                return 0
-            fi
-            die "No active sessions found. Start one with: agent-duo start <feature>"
+            die "No active sessions found. Start one with: agent-duo start <feature> or agent-solo start <feature>"
         fi
 
         # Count sessions

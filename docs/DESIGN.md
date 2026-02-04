@@ -656,14 +656,15 @@ agent-duo cleanup --feature auth --full
 Commands resolve which session to operate on:
 
 1. **From agent/root worktree**: Auto-detect via `.peer-sync` symlink
-2. **From main project with single session**: Auto-detect
+2. **From main project with single session**: Auto-detect (uses the only active session)
 3. **From main project with multiple sessions**: Operate on ALL sessions (default)
 4. **`--feature` flag**: Override to target specific session
 
-### Backward Compatibility
+### Single vs Multiple Sessions
 
-- Legacy sessions (`.peer-sync` in main project) still work
-- Single-session workflow unchanged (no `--feature` needed)
+All sessions use the same unified architecture:
+- Single session = multi-session with N=1
+- No `--feature` needed when only one session exists
 - Commands auto-detect the appropriate mode
 
 ### Integrate Phase (Cross-Session Rebasing)

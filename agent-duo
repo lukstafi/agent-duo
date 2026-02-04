@@ -854,18 +854,6 @@ start_single_session() {
         return 1
     fi
 
-    # Also check for legacy single-session mode (backward compatibility)
-    if [ -d "$main_project_root/.peer-sync" ] && [ ${#features[@]} -eq 1 ]; then
-        local existing_feature
-        existing_feature="$(cat "$main_project_root/.peer-sync/feature" 2>/dev/null)"
-        if [ "$existing_feature" = "$feature" ]; then
-            warn "Legacy session exists for feature '$feature'."
-            warn "To continue: agent-duo run"
-            warn "To start fresh: agent-duo cleanup && agent-duo start $feature"
-            return 1
-        fi
-    fi
-
     # Check for task file in main project
     local task_file
     if task_file="$(find_task_file "$main_project_root" "$feature")"; then
@@ -1231,16 +1219,7 @@ cmd_stop() {
         return
     fi
 
-    # In main project - stop all sessions
-    # First check for legacy single-session
-    if [ -d "$main_root/.peer-sync" ]; then
-        local legacy_feature
-        legacy_feature="$(cat "$main_root/.peer-sync/feature" 2>/dev/null)"
-        stop_single_session "$legacy_feature" "$main_root" "$main_root/.peer-sync"
-        return
-    fi
-
-    # Stop all sessions from registry
+    # In main project - stop all sessions from registry
     local sessions
     sessions="$(list_active_sessions "$main_root")"
 
@@ -1699,12 +1678,6 @@ cmd_status() {
         # In main project with multiple sessions or no session
         local main_root
         main_root="$(get_main_project_root 2>/dev/null)" || die "Not in a git repository"
-
-        # Check for legacy single-session first
-        if [ -d "$main_root/.peer-sync" ]; then
-            show_single_status "$main_root/.peer-sync"
-            return
-        fi
 
         # Show all sessions from registry
         local sessions
@@ -2246,25 +2219,11 @@ cmd_cleanup() {
 
     # Try to resolve session from current directory
     if resolve_session 2>/dev/null; then
-        # Check if this is a legacy session (RESOLVED_ROOT == main_root)
-        if [ "$RESOLVED_ROOT" = "$main_root" ] && [ -d "$main_root/.peer-sync" ]; then
-            cleanup_legacy_session "$RESOLVED_FEATURE" "$main_root" "$full"
-        else
-            cleanup_single_session "$RESOLVED_FEATURE" "$main_root" "$full"
-        fi
+        cleanup_single_session "$RESOLVED_FEATURE" "$main_root" "$full"
         return
     fi
 
-    # In main project - clean all sessions
-    # First check for legacy single-session
-    if [ -d "$main_root/.peer-sync" ]; then
-        local legacy_feature
-        legacy_feature="$(cat "$main_root/.peer-sync/feature" 2>/dev/null)"
-        cleanup_legacy_session "$legacy_feature" "$main_root" "$full"
-        return
-    fi
-
-    # Clean all sessions from registry
+    # In main project - clean all sessions from registry
     local sessions
     sessions="$(list_active_sessions "$main_root")"
 
@@ -2365,54 +2324,6 @@ cleanup_single_session() {
     fi
 
     success "Cleanup complete for $feature"
-}
-
-# Cleanup legacy single-session (backward compatibility)
-cleanup_legacy_session() {
-    local feature="$1"
-    local root="$2"
-    local full="$3"
-
-    local peer_sync="$root/.peer-sync"
-    local project_name
-    project_name="$(basename "$root")"
-    local parent_dir
-    parent_dir="$(dirname "$root")"
-
-    info "Cleaning up legacy session: $feature"
-
-    # Stop any running processes first
-    stop_single_session "$feature" "$root" "$peer_sync" 2>/dev/null || true
-
-    # Accumulate workflow feedback before cleanup
-    persist_workflow_feedback "$peer_sync" "$feature" "duo"
-
-    # Remove session state
-    rm -rf "$peer_sync"
-    info "Removed .peer-sync"
-
-    if [ "$full" = "true" ]; then
-        local worktree_claude="$parent_dir/${project_name}-${feature}-claude"
-        local worktree_codex="$parent_dir/${project_name}-${feature}-codex"
-
-        cd "$root"
-
-        if [ -d "$worktree_claude" ]; then
-            git worktree remove --force "$worktree_claude" 2>/dev/null || rm -rf "$worktree_claude"
-            info "Removed worktree: $worktree_claude"
-        fi
-
-        if [ -d "$worktree_codex" ]; then
-            git worktree remove --force "$worktree_codex" 2>/dev/null || rm -rf "$worktree_codex"
-            info "Removed worktree: $worktree_codex"
-        fi
-
-        git worktree prune
-        git branch -D "${feature}-claude" 2>/dev/null && info "Deleted branch: ${feature}-claude" || true
-        git branch -D "${feature}-codex" 2>/dev/null && info "Deleted branch: ${feature}-codex" || true
-    fi
-
-    success "Cleanup complete"
 }
 
 #------------------------------------------------------------------------------
