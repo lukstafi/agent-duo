@@ -759,18 +759,26 @@ has_pr() {
     fi
 
     # Verify this isn't a stale PR from a previous session with the same branch name
-    # Check if PR was created after our session's last-main-commit was recorded
+    # Check if PR was created after our session started
+    local session_time=""
     if [ -f "$peer_sync/last-main-commit" ]; then
-        local session_commit session_time
+        local session_commit
         session_commit="$(cat "$peer_sync/last-main-commit")"
         # Get commit timestamp in ISO format (run from worktree)
         session_time="$(cd "$worktree" && git log -1 --format=%cI "$session_commit" 2>/dev/null)" || session_time=""
-        if [ -n "$session_time" ] && [ -n "$pr_created" ]; then
-            # Compare timestamps (ISO format sorts correctly)
-            if [[ "$pr_created" < "$session_time" ]]; then
-                # PR was created before our session started - it's stale
-                return 1
-            fi
+    fi
+    # Fallback: use the feature file's modification time as session start indicator
+    if [ -z "$session_time" ] && [ -f "$peer_sync/feature" ]; then
+        # Get file mtime in ISO format (works on macOS and Linux)
+        session_time="$(date -r "$peer_sync/feature" +%Y-%m-%dT%H:%M:%S%z 2>/dev/null)" || \
+            session_time="$(stat -c %y "$peer_sync/feature" 2>/dev/null | cut -d. -f1 | tr ' ' 'T')" || \
+            session_time=""
+    fi
+    if [ -n "$session_time" ] && [ -n "$pr_created" ]; then
+        # Compare timestamps (ISO format sorts correctly)
+        if [[ "$pr_created" < "$session_time" ]]; then
+            # PR was created before our session started - it's stale
+            return 1
         fi
     fi
 
