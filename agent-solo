@@ -1835,10 +1835,6 @@ cmd_run() {
         echo ""
         echo "=================================="
         echo ""
-        info "The task context has been collected."
-        info "The coder will read this context before starting work."
-        echo ""
-        read -r -p "Press Enter to proceed to the next phase... "
 
         # Mark gather as confirmed
         echo "confirmed" > "$peer_sync/gather-confirmed"
