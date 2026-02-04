@@ -2981,10 +2981,8 @@ cmd_signal() {
 
     # Validate status
     case "$status" in
-        clarifying|clarify-done|pushing-back|pushback-done|planning|plan-done|plan-reviewing|plan-review-done|needs-clarify|working|done|reviewing|review-done|integrating|integrate-done|interrupted|error|pr-created|escalated|voting|vote-done|debating|debate-done|merging|merge-done|merge-reviewing|merge-review-done) ;;
-        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, planning, plan-done, plan-reviewing, plan-review-done, needs-clarify, working, done, reviewing, review-done, integrating, integrate-done, interrupted, error, pr-created, escalated, voting, vote-done, debating, debate-done, merging, merge-done, merge-reviewing, merge-review-done)" ;;
-        clarifying|clarify-done|pushing-back|pushback-done|working|done|reviewing|review-done|updating-docs|docs-update-done|integrating|integrate-done|interrupted|error|pr-created|escalated|voting|vote-done|debating|debate-done|merging|merge-done|merge-reviewing|merge-review-done) ;;
-        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, working, done, reviewing, review-done, updating-docs, docs-update-done, integrating, integrate-done, interrupted, error, pr-created, escalated, voting, vote-done, debating, debate-done, merging, merge-done, merge-reviewing, merge-review-done)" ;;
+        clarifying|clarify-done|pushing-back|pushback-done|planning|plan-done|plan-reviewing|plan-review-done|needs-clarify|working|done|reviewing|review-done|updating-docs|docs-update-done|integrating|integrate-done|final-merging|final-merge-done|interrupted|error|pr-created|escalated|voting|vote-done|debating|debate-done|merging|merge-done|merge-reviewing|merge-review-done) ;;
+        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, planning, plan-done, plan-reviewing, plan-review-done, needs-clarify, working, done, reviewing, review-done, updating-docs, docs-update-done, integrating, integrate-done, final-merging, final-merge-done, interrupted, error, pr-created, escalated, voting, vote-done, debating, debate-done, merging, merge-done, merge-reviewing, merge-review-done)" ;;
     esac
 
     local content="${status}|$(date +%s)|${message}"

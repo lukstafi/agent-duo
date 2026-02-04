@@ -79,16 +79,28 @@ done
 
 ### 6. Merge the PR
 
-Attempt to merge using squash (preferred) or regular merge:
+Attempt to merge using squash (preferred) or regular merge.
+
+**Note**: Don't use `--delete-branch` as it fails when running from a worktree (tries to checkout main locally). Delete the remote branch separately instead.
 
 ```bash
-gh pr merge "$PR_URL" --squash --delete-branch
+# Get the branch name for later cleanup
+BRANCH_NAME=$(gh pr view "$PR_URL" --json headRefName -q '.headRefName')
+
+# Merge the PR (without --delete-branch)
+gh pr merge "$PR_URL" --squash
 ```
 
 If squash merge is not allowed by the repository settings:
 
 ```bash
-gh pr merge "$PR_URL" --merge --delete-branch
+gh pr merge "$PR_URL" --merge
+```
+
+After successful merge, delete the remote branch:
+
+```bash
+git push origin --delete "$BRANCH_NAME" 2>/dev/null || true
 ```
 
 ### 7. Signal Completion
