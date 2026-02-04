@@ -4,6 +4,53 @@ All notable changes to agent-duo will be documented in this file.
 
 ## [Unreleased]
 
+## [v0.3] - 2026-02-04
+
+### Added
+- **Parallel task execution**: Run multiple features simultaneously
+  - `agent-duo start feat1 feat2 feat3` creates isolated sessions for each
+  - Central `.agent-sessions/` registry tracks active sessions
+  - `--feature` flag to target specific session in multi-session context
+- **Auto-finish mode** (`--auto-finish`): Fully unattended session completion
+  - Auto-triggers merge phase after inactivity timeout (default 30 min)
+  - With 2 open PRs: triggers merge voting phase
+  - With 1 open PR: triggers final rebase and merge
+  - New `duo-final-merge` and `solo-final-merge` skills for automated merging
+- **Integrate phase**: Automatic rebase when main branch advances
+  - Detects when parallel sessions need rebasing after a PR merges
+  - New `duo-integrate` and `solo-integrate` skills
+  - Orchestrator polls origin/main and triggers integration automatically
+- **Plan/plan-review phase** (`--plan`): Agents write implementation plans
+  - Agents write plans to `.peer-sync/plan-<agent>.md`
+  - Peer review of plans before work begins
+  - New skills: `duo-plan`, `duo-plan-review`, `solo-coder-plan`, `solo-reviewer-plan`
+- **Gather phase** for solo mode (`--gather`): Reviewer collects task context
+  - Reviewer explores codebase and writes `task-context.md` for coder
+  - New `solo-reviewer-gather` skill
+- **Unified agent communication** with API error retry
+  - Automatic retry on 500/429 errors with exponential backoff
+  - New `send_to_agent`, `retry_last_send` helper functions
+
+### Changed
+- Stale PR detection: `has_pr()` verifies commit ancestry to handle recycled branch names
+- `cleanup --full` now also deletes remote branches
+- **Breaking**: Unified session architecture - all sessions now use root worktree model
+  - Legacy sessions with `.peer-sync/` in main project root no longer supported
+  - Users must cleanup and re-start existing sessions
+- Refactored `cmd_pr` to use shared `lib_create_pr` in agent-lib.sh
+
+### Fixed
+- Fix `has_pr` to work from any directory and after rebases
+- Workflow feedback now persisted in solo mode (moved to shared lib)
+- Fix final-merge phase: add missing status and worktree-safe merge
+- Fix merge phase to work in winning worktree instead of main
+- Fix spurious `/solo-pr-comment` triggers after rebase
+- Fix duplicate TUI startup command in restart flow
+- Fix undefined `DEFAULT_TIMEOUT` in integration loop
+- Fix cleanup `--full` for legacy sessions with missing worktrees
+- Fix non-existent `send_notification` calls in merge phase
+- Disable Codex update prompts in automated sessions (`check_for_update_on_startup=false`)
+
 ## [v0.2] - 2026-01-30
 
 ### Added

@@ -81,6 +81,9 @@ agent-duo start add-auth --auto-run
 agent-duo start add-auth --auto-run --clarify    # Agents propose approaches first
 agent-duo start add-auth --auto-run --pushback   # Agents suggest task improvements first
 
+# Fully unattended (auto-merge after 30 min inactivity):
+agent-duo start add-auth --auto-run --auto-finish
+
 # Alternative: manual control
 agent-duo start add-auth           # Start ttyd web terminals only
 agent-duo run --auto-start         # Then run orchestrator separately
@@ -179,7 +182,9 @@ agent-duo run \
   --pushback-timeout 600 \  # Seconds for pushback stage
   --plan-timeout 600 \      # Seconds for plan + plan-review stages
   --max-rounds 10 \         # Maximum work/review cycles
-  --auto-start              # Auto-launch agent CLIs
+  --auto-start \            # Auto-launch agent CLIs
+  --auto-finish \           # Auto-merge after inactivity timeout (for unattended runs)
+  --auto-finish-timeout 1800  # Inactivity timeout in seconds (default: 1800 = 30 min)
 ```
 
 ### Model Selection
