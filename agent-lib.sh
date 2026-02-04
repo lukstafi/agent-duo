@@ -709,6 +709,7 @@ DEFAULT_INTEGRATE_TIMEOUT=600 # 10 minutes
 DEFAULT_DOCS_UPDATE_TIMEOUT=600 # 10 minutes
 DEFAULT_POLL_INTERVAL=10     # Check every 10 seconds
 DEFAULT_TUI_EXIT_BEHAVIOR="pause"  # What to do on TUI exit: pause, quit, or ignore
+DEFAULT_AUTO_FINISH_TIMEOUT=1800   # 30 minutes (auto-finish mode inactivity timeout)
 
 # Get agent status (just the status part, not timestamp/message)
 get_agent_status() {

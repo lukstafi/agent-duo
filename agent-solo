@@ -169,6 +169,7 @@ cmd_setup() {
     install_skill "$templates_dir/solo-reviewer-plan.md" "$claude_skills/solo-reviewer-plan.md" "/solo-reviewer-plan"
     install_skill "$templates_dir/solo-pr-comment.md" "$claude_skills/solo-pr-comment.md" "/solo-pr-comment"
     install_skill "$templates_dir/solo-integrate.md" "$claude_skills/solo-integrate.md" "/solo-integrate"
+    install_skill "$templates_dir/solo-final-merge.md" "$claude_skills/solo-final-merge.md" "/solo-final-merge"
     success "Installed Claude solo skills to $claude_skills"
 
     # Install Codex skills (uses $command syntax)
@@ -176,7 +177,7 @@ cmd_setup() {
     mkdir -p "$codex_skills/solo-coder-work" "$codex_skills/solo-coder-clarify" "$codex_skills/solo-coder-plan"
     mkdir -p "$codex_skills/solo-reviewer-work" "$codex_skills/solo-reviewer-clarify" "$codex_skills/solo-reviewer-gather" "$codex_skills/solo-reviewer-pushback" "$codex_skills/solo-reviewer-plan"
     mkdir -p "$codex_skills/solo-pr-comment"
-    mkdir -p "$codex_skills/solo-integrate"
+    mkdir -p "$codex_skills/solo-integrate" "$codex_skills/solo-final-merge"
 
     install_skill "$templates_dir/solo-coder-work.md" "$codex_skills/solo-coder-work/SKILL.md" "\$solo-coder-work"
     install_skill "$templates_dir/solo-coder-clarify.md" "$codex_skills/solo-coder-clarify/SKILL.md" "\$solo-coder-clarify"
@@ -188,6 +189,7 @@ cmd_setup() {
     install_skill "$templates_dir/solo-reviewer-plan.md" "$codex_skills/solo-reviewer-plan/SKILL.md" "\$solo-reviewer-plan"
     install_skill "$templates_dir/solo-pr-comment.md" "$codex_skills/solo-pr-comment/SKILL.md" "\$solo-pr-comment"
     install_skill "$templates_dir/solo-integrate.md" "$codex_skills/solo-integrate/SKILL.md" "\$solo-integrate"
+    install_skill "$templates_dir/solo-final-merge.md" "$codex_skills/solo-final-merge/SKILL.md" "\$solo-final-merge"
     success "Installed Codex solo skills to $codex_skills"
 
     # Install unified notify hook script and configure agent hooks
@@ -219,6 +221,8 @@ cmd_start() {
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
     local pushback_timeout=$DEFAULT_PUSHBACK_TIMEOUT
     local plan_timeout=$DEFAULT_PLAN_TIMEOUT
+    local auto_finish=false
+    local auto_finish_timeout=$DEFAULT_AUTO_FINISH_TIMEOUT
     local max_rounds=10
     local codex_thinking=$DEFAULT_CODEX_THINKING
     local coder=$DEFAULT_CODER
@@ -236,6 +240,8 @@ cmd_start() {
             --clarify) clarify_mode=true; shift ;;
             --pushback) pushback_mode=true; shift ;;
             --plan) plan_mode=true; shift ;;
+            --auto-finish) auto_finish=true; shift ;;
+            --auto-finish-timeout) auto_finish_timeout="$2"; shift 2 ;;
             --work-timeout) work_timeout="$2"; shift 2 ;;
             --review-timeout) review_timeout="$2"; shift 2 ;;
             --gather-timeout) gather_timeout="$2"; shift 2 ;;
@@ -286,6 +292,7 @@ cmd_start() {
             info "=== Starting session: $feature ==="
             if start_single_solo_session "$feature" "$main_project_root" "$project_name" \
                 "$ttyd_mode" "$auto_run" "$gather_mode" "$clarify_mode" "$pushback_mode" "$plan_mode" \
+                "$auto_finish" "$auto_finish_timeout" \
                 "$work_timeout" "$review_timeout" "$gather_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
                 "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port"; then
                 started=$((started + 1))
@@ -308,6 +315,7 @@ cmd_start() {
     local feature="${features[0]}"
     start_single_solo_session "$feature" "$main_project_root" "$project_name" \
         "$ttyd_mode" "$auto_run" "$gather_mode" "$clarify_mode" "$pushback_mode" "$plan_mode" \
+        "$auto_finish" "$auto_finish_timeout" \
         "$work_timeout" "$review_timeout" "$gather_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
         "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port"
 }
@@ -323,17 +331,19 @@ start_single_solo_session() {
     local clarify_mode="$7"
     local pushback_mode="$8"
     local plan_mode="$9"
-    local work_timeout="${10}"
-    local review_timeout="${11}"
-    local gather_timeout="${12}"
-    local clarify_timeout="${13}"
-    local pushback_timeout="${14}"
-    local plan_timeout="${15}"
-    local max_rounds="${16}"
-    local codex_thinking="${17}"
-    local coder="${18}"
-    local reviewer="${19}"
-    local base_port="${20}"
+    local auto_finish="${10}"
+    local auto_finish_timeout="${11}"
+    local work_timeout="${12}"
+    local review_timeout="${13}"
+    local gather_timeout="${14}"
+    local clarify_timeout="${15}"
+    local pushback_timeout="${16}"
+    local plan_timeout="${17}"
+    local max_rounds="${18}"
+    local codex_thinking="${19}"
+    local coder="${20}"
+    local reviewer="${21}"
+    local base_port="${22}"
 
     # Check for existing session for THIS feature
     local sessions_dir="$main_project_root/.agent-sessions"
@@ -435,6 +445,8 @@ start_single_solo_session() {
     echo "$clarify_mode" > "$peer_sync/clarify-mode"
     echo "$pushback_mode" > "$peer_sync/pushback-mode"
     echo "$plan_mode" > "$peer_sync/plan-mode"
+    echo "$auto_finish" > "$peer_sync/auto-finish"
+    echo "$auto_finish_timeout" > "$peer_sync/auto-finish-timeout"
     echo "1" > "$peer_sync/round"
     echo "$feature" > "$peer_sync/feature"
     echo "$codex_thinking" > "$peer_sync/codex-thinking"
@@ -1607,6 +1619,62 @@ Do NOT start implementing - that's the coder's job in the work phase.
 EOF
 }
 
+#------------------------------------------------------------------------------
+# Trigger final merge for PR (auto-finish mode)
+# Usage: trigger_solo_final_merge <coder> <session> <peer_sync> <tui_exit_behavior>
+#------------------------------------------------------------------------------
+trigger_solo_final_merge() {
+    local coder="$1"
+    local session="$2"
+    local peer_sync="$3"
+    local tui_exit_behavior="${4:-$DEFAULT_TUI_EXIT_BEHAVIOR}"
+
+    local pr_url
+    pr_url="$(cat "$peer_sync/coder.pr")"
+
+    echo "final-merge" > "$peer_sync/phase"
+    check_tui_health "$coder" "$session" "$peer_sync" "$tui_exit_behavior"
+    atomic_write "$peer_sync/coder.status" "working|$(date +%s)|performing final merge"
+
+    info "Triggering solo-final-merge for coder..."
+    send_to_agent "coder" "$session" "$peer_sync" skill "solo-final-merge"
+
+    # Wait for completion
+    local merge_start=$SECONDS
+    local merge_timeout=600  # 10 minutes
+
+    while true; do
+        local elapsed=$((SECONDS - merge_start))
+        local status
+        status="$(get_agent_status "coder" "$peer_sync")"
+
+        if [[ "$status" =~ ^(final-merge-done|done)$ ]]; then
+            success "Final merge completed"
+            break
+        fi
+
+        # Check for API errors and retry
+        check_and_retry_on_error "coder" "$session" "$peer_sync"
+
+        if [ "$elapsed" -ge "$merge_timeout" ]; then
+            warn "Final merge timeout (${merge_timeout}s)"
+            break
+        fi
+
+        printf "\r  Waiting for final merge... coder=%s (%ds)  " "$status" "$elapsed"
+        sleep 5
+    done
+    echo ""
+
+    # Check if PR was merged
+    if is_pr_merged "$pr_url"; then
+        success "PR merged successfully!"
+        echo "accepted" > "$peer_sync/session"
+    else
+        warn "PR not yet merged - agent may need manual intervention"
+    fi
+}
+
 cmd_run() {
     local work_timeout=$DEFAULT_WORK_TIMEOUT
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
@@ -1621,6 +1689,9 @@ cmd_run() {
     local enable_clarify=""
     local enable_pushback=""
     local enable_plan=""
+    local enable_auto_finish=""
+    local auto_finish_timeout=""
+    local tui_exit_behavior=$DEFAULT_TUI_EXIT_BEHAVIOR
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -1635,9 +1706,12 @@ cmd_run() {
             --clarify) enable_clarify="true"; shift ;;
             --pushback) enable_pushback="true"; shift ;;
             --plan) enable_plan="true"; shift ;;
+            --auto-finish) enable_auto_finish="true"; shift ;;
+            --auto-finish-timeout) auto_finish_timeout="$2"; shift 2 ;;
             --poll) poll_interval="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --auto-start) auto_start=true; shift ;;
+            --on-tui-exit) tui_exit_behavior="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
             *) die "Unknown argument: $1" ;;
         esac
@@ -1917,6 +1991,20 @@ cmd_run() {
         echo "$enable_pushback" > "$peer_sync/pushback-mode"
     else
         pushback_mode="$(cat "$peer_sync/pushback-mode" 2>/dev/null)" || pushback_mode="false"
+    fi
+
+    # Check if auto-finish mode is enabled (command line overrides session setting)
+    local auto_finish
+    if [ -n "$enable_auto_finish" ]; then
+        auto_finish="$enable_auto_finish"
+        echo "$enable_auto_finish" > "$peer_sync/auto-finish"
+    else
+        auto_finish="$(cat "$peer_sync/auto-finish" 2>/dev/null)" || auto_finish="false"
+    fi
+    if [ -z "$auto_finish_timeout" ]; then
+        auto_finish_timeout="$(cat "$peer_sync/auto-finish-timeout" 2>/dev/null)" || auto_finish_timeout="$DEFAULT_AUTO_FINISH_TIMEOUT"
+    else
+        echo "$auto_finish_timeout" > "$peer_sync/auto-finish-timeout"
     fi
 
     # Handle pushback stage if enabled and not already confirmed
@@ -2386,6 +2474,9 @@ cmd_run() {
                 get_pr_comment_hash "$pr_url" > "$peer_sync/coder.pr-hash" 2>/dev/null || true
             fi
 
+            # Auto-finish timeout tracking (resets on any activity)
+            local auto_finish_last_activity=$SECONDS
+
             while true; do
                 # Check if PR is closed/merged
                 if ! is_pr_open "$pr_url"; then
@@ -2447,6 +2538,8 @@ cmd_run() {
                         # Resume pr-comments phase
                         echo "pr-comments" > "$peer_sync/phase"
                         info "Integration complete, resuming PR comment watch"
+                        # Reset auto-finish timeout after integration activity
+                        auto_finish_last_activity=$SECONDS
                     fi
                 fi
 
@@ -2503,6 +2596,24 @@ cmd_run() {
                         sleep "$poll_interval"
                     done
                     echo ""
+                    # Reset auto-finish timeout after agent activity
+                    auto_finish_last_activity=$SECONDS
+                fi
+
+                # Auto-finish timeout check
+                if [ "$auto_finish" = "true" ]; then
+                    local inactivity_elapsed=$((SECONDS - auto_finish_last_activity))
+                    if [ "$inactivity_elapsed" -ge "$auto_finish_timeout" ]; then
+                        info "Auto-finish timeout reached (${auto_finish_timeout}s inactivity)"
+                        info "Triggering final merge..."
+                        trigger_solo_final_merge "$coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
+                        # Check if merge succeeded
+                        if is_pr_merged "$pr_url"; then
+                            success "PR merged successfully!"
+                            echo "accepted" > "$peer_sync/session"
+                        fi
+                        break
+                    fi
                 fi
 
                 # Poll interval before next check
