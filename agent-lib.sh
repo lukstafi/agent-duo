@@ -739,19 +739,29 @@ has_pr() {
         branch="${feature}-${agent}"  # Duo uses agent-specific branches
     fi
 
-    # Check if there's an open PR for this branch
-    local pr_url
-    pr_url="$(gh pr view "$branch" --json url -q '.url' 2>/dev/null)" || return 1
+    # Check if there's a PR for this branch
+    # Note: gh pr view returns closed/merged PRs too, so we verify the PR
+    # belongs to our current branch by checking if its head commit is in our history
+    local pr_info pr_url pr_commit
+    pr_info="$(gh pr view "$branch" --json url,headRefOid -q '.url + " " + .headRefOid' 2>/dev/null)" || return 1
+    pr_url="${pr_info% *}"
+    pr_commit="${pr_info##* }"
 
-    if [ -n "$pr_url" ]; then
-        # Cache the result in the .pr file
-        echo "$pr_url" > "$peer_sync/${agent}.pr"
-        # Send notification (low priority since GitHub email is primary)
-        send_pr_notification "$agent" "$feature" "$pr_url" "$mode"
-        return 0
+    if [ -z "$pr_url" ]; then
+        return 1
     fi
 
-    return 1
+    # Check if PR's head commit is reachable from current branch HEAD
+    # If not, this is a stale PR from a previous (deleted) branch with same name
+    if ! git merge-base --is-ancestor "$pr_commit" HEAD 2>/dev/null; then
+        return 1
+    fi
+
+    # Cache the result in the .pr file
+    echo "$pr_url" > "$peer_sync/${agent}.pr"
+    # Send notification (low priority since GitHub email is primary)
+    send_pr_notification "$agent" "$feature" "$pr_url" "$mode"
+    return 0
 }
 
 # Send interrupt to agent via tmux
