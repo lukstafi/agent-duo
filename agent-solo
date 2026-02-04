@@ -2659,7 +2659,8 @@ cmd_pr() {
 
     lib_create_pr "$pr_name" "coder" "$worktree" "$root" "$peer_sync" "$feature" "solo" "Solution for $feature" || return 1
 
-    # Mark session complete
+    # Persist workflow feedback and mark session complete
+    persist_workflow_feedback "$peer_sync" "$feature" "solo"
     echo "complete" > "$peer_sync/session"
     success "Session complete!"
 }
@@ -2744,6 +2745,9 @@ cleanup_single_solo_session() {
     if [ -d "$peer_sync" ]; then
         stop_single_solo_session "$feature" "$worktree" "$peer_sync"
     fi
+
+    # Accumulate workflow feedback before cleanup
+    persist_workflow_feedback "$peer_sync" "$feature" "solo"
 
     # Remove session from registry
     if [ -L "$sessions_dir/${feature}.session" ]; then

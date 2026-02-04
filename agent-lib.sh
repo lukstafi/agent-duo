@@ -2395,6 +2395,59 @@ $pr_url"
 }
 
 #------------------------------------------------------------------------------
+# Workflow Feedback (shared between duo and solo modes)
+#------------------------------------------------------------------------------
+
+workflow_feedback_dir() {
+    echo "$HOME/.agent-duo/workflow-feedback"
+}
+
+# Persist workflow feedback files to shared location
+# Args: peer_sync feature mode
+persist_workflow_feedback() {
+    local peer_sync="$1"
+    local feature="$2"
+    local mode="${3:-duo}"
+
+    [ -f "$peer_sync/workflow-feedback-copied" ] && return 0
+
+    local dest_dir
+    dest_dir="$(workflow_feedback_dir)"
+    mkdir -p "$dest_dir"
+
+    local date_stamp
+    date_stamp="$(date +%F)"
+
+    local agents=()
+    if [ "$mode" = "solo" ]; then
+        agents=("coder" "reviewer")
+    else
+        agents=("claude" "codex")
+    fi
+
+    local copied_any=false
+    for agent in "${agents[@]}"; do
+        local src="$peer_sync/workflow-feedback-${agent}.md"
+        if [ -f "$src" ]; then
+            local dest="$dest_dir/${date_stamp}-${feature}-${agent}.md"
+            if [ -f "$dest" ]; then
+                local i=2
+                while [ -f "$dest_dir/${date_stamp}-${feature}-${agent}-${i}.md" ]; do
+                    i=$((i + 1))
+                done
+                dest="$dest_dir/${date_stamp}-${feature}-${agent}-${i}.md"
+            fi
+            cp "$src" "$dest"
+            copied_any=true
+        fi
+    done
+
+    if [ "$copied_any" = true ]; then
+        touch "$peer_sync/workflow-feedback-copied"
+    fi
+}
+
+#------------------------------------------------------------------------------
 # PR Creation (shared between duo and solo modes)
 #------------------------------------------------------------------------------
 
