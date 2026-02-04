@@ -2808,7 +2808,8 @@ cleanup_single_solo_session() {
         fi
 
         git worktree prune
-        git branch -D "${feature}" 2>/dev/null && info "Deleted branch: ${feature}" || true
+        git branch -D "${feature}" 2>/dev/null && info "Deleted local branch: ${feature}" || true
+        git push origin --delete "${feature}" 2>/dev/null && info "Deleted remote branch: origin/${feature}" || true
     fi
 
     success "Cleanup complete for $feature"

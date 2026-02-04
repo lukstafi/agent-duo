@@ -2317,10 +2317,15 @@ cleanup_single_session() {
         # Prune worktree references
         git worktree prune
 
-        # Delete branches
-        git branch -D "${feature}" 2>/dev/null && info "Deleted branch: ${feature}" || true
-        git branch -D "${feature}-claude" 2>/dev/null && info "Deleted branch: ${feature}-claude" || true
-        git branch -D "${feature}-codex" 2>/dev/null && info "Deleted branch: ${feature}-codex" || true
+        # Delete local branches
+        git branch -D "${feature}" 2>/dev/null && info "Deleted local branch: ${feature}" || true
+        git branch -D "${feature}-claude" 2>/dev/null && info "Deleted local branch: ${feature}-claude" || true
+        git branch -D "${feature}-codex" 2>/dev/null && info "Deleted local branch: ${feature}-codex" || true
+
+        # Delete remote branches
+        git push origin --delete "${feature}" 2>/dev/null && info "Deleted remote branch: origin/${feature}" || true
+        git push origin --delete "${feature}-claude" 2>/dev/null && info "Deleted remote branch: origin/${feature}-claude" || true
+        git push origin --delete "${feature}-codex" 2>/dev/null && info "Deleted remote branch: origin/${feature}-codex" || true
     fi
 
     success "Cleanup complete for $feature"
