@@ -2623,99 +2623,41 @@ cmd_run() {
 #------------------------------------------------------------------------------
 
 cmd_pr() {
-    local root
-    root="$(get_project_root)"
-    local peer_sync="$root/.peer-sync"
-    local feature
-    feature="$(get_feature)"
+    local feature_arg=""
 
-    # Determine worktree
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --feature) feature_arg="$2"; shift 2 ;;
+            -*) die "Unknown option: $1" ;;
+            *) shift ;;
+        esac
+    done
+
+    # Resolve session
+    if [ -n "$feature_arg" ]; then
+        resolve_session --feature "$feature_arg"
+    else
+        if ! resolve_session 2>/dev/null; then
+            die "No active session found. Use --feature <name> or cd to a session worktree."
+        fi
+    fi
+
+    local root="$RESOLVED_ROOT"
+    local peer_sync="$RESOLVED_PEER_SYNC"
+    local feature="$RESOLVED_FEATURE"
+
+    # Determine worktree - get main project root for path calculation
+    local main_root
+    main_root="$(get_main_project_root)"
     local project_name
-    project_name="$(basename "$root")"
+    project_name="$(basename "$main_root")"
     local parent_dir
-    parent_dir="$(dirname "$root")"
+    parent_dir="$(dirname "$main_root")"
     local worktree="$parent_dir/${project_name}-${feature}"
+    local pr_name="${feature}"
 
-    [ -d "$worktree" ] || die "Worktree not found: $worktree"
-
-    info "Creating PR for coder's solution..."
-
-    cd "$worktree"
-
-    # Check if feature file exists and was NOT modified (should be deleted)
-    local feature_file="$worktree/${feature}.md"
-    if [ -f "$feature_file" ]; then
-        local main_branch
-        main_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')" || true
-        if [ -z "$main_branch" ]; then
-            for candidate in main master; do
-                if git rev-parse --verify "$candidate" >/dev/null 2>&1; then
-                    main_branch="$candidate"
-                    break
-                fi
-            done
-        fi
-        if [ -z "$main_branch" ]; then
-            main_branch="HEAD~1"
-        fi
-
-        local file_modified=false
-        if git show "${main_branch}:${feature}.md" >/dev/null 2>&1; then
-            if ! git diff --quiet "${main_branch}" -- "${feature}.md" 2>/dev/null; then
-                file_modified=true
-            fi
-        else
-            local original_task_file
-            if original_task_file="$(find_task_file "$root" "$feature")"; then
-                if ! diff -q "$feature_file" "$original_task_file" >/dev/null 2>&1; then
-                    file_modified=true
-                fi
-            fi
-        fi
-
-        if [ "$file_modified" = "false" ]; then
-            info "Feature file ${feature}.md was not modified - removing it"
-            git rm "${feature}.md"
-            git commit -m "Remove unmodified feature file ${feature}.md"
-        fi
-    fi
-
-    # Check for changes
-    if [ -z "$(git status --porcelain)" ]; then
-        warn "No changes to commit"
-    else
-        # Auto-commit changes
-        git add -A
-        git commit -m "Solution for $feature" || true
-    fi
-
-    # Push branch
-    local branch="${feature}"
-    git push -u origin "$branch" 2>/dev/null || git push origin "$branch"
-
-    # Look for PR body file
-    local pr_body=""
-    local pr_body_file="$root/${feature}-PR.md"
-    if [ -f "$pr_body_file" ]; then
-        pr_body="$(cat "$pr_body_file")"
-    else
-        pr_body="Solution for feature: $feature"
-    fi
-
-    # Create PR
-    local pr_url
-    pr_url="$(gh pr create --title "Solution for $feature" --body "$pr_body" --head "$branch" 2>/dev/null)" || \
-        pr_url="$(gh pr view --json url -q '.url' 2>/dev/null)" || \
-        die "Failed to create PR. Is gh installed and authenticated?"
-
-    # Record PR
-    echo "$pr_url" > "$peer_sync/coder.pr"
-    atomic_write "$peer_sync/coder.status" "pr-created|$(date +%s)|$pr_url"
-
-    success "PR created: $pr_url"
-
-    # Send notification
-    send_pr_notification "coder" "$feature" "$pr_url" "solo"
+    lib_create_pr "$pr_name" "coder" "$worktree" "$root" "$peer_sync" "$feature" "solo" "Solution for $feature" || return 1
 
     # Mark session complete
     echo "complete" > "$peer_sync/session"

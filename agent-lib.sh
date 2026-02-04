@@ -2393,3 +2393,206 @@ $pr_url"
 
     send_ntfy "$title" "$message" "default" "speech_balloon,link" 2>/dev/null || true
 }
+
+#------------------------------------------------------------------------------
+# PR Creation (shared between duo and solo modes)
+#------------------------------------------------------------------------------
+
+# Ensure docs update is complete before PR creation
+# Args: agent peer_sync feature mode
+# mode: "duo" or "solo"
+lib_ensure_docs_update() {
+    local agent="$1"
+    local peer_sync="$2"
+    local feature="$3"
+    local mode="${4:-duo}"
+
+    if [ ! -f "$peer_sync/docs-update-mode" ]; then
+        return 0
+    fi
+
+    local docs_update_mode
+    docs_update_mode="$(cat "$peer_sync/docs-update-mode" 2>/dev/null)" || docs_update_mode="true"
+    if [ "$docs_update_mode" != "true" ]; then
+        return 0
+    fi
+
+    local current_status
+    current_status="$(get_agent_status "$agent" "$peer_sync")"
+    if [ -f "$peer_sync/docs-update-${agent}.done" ] || [ "$current_status" = "docs-update-done" ]; then
+        return 0
+    fi
+
+    info "Docs update required before PR creation."
+    local previous_phase
+    previous_phase="$(cat "$peer_sync/phase" 2>/dev/null)"
+    echo "update-docs" > "$peer_sync/phase"
+    atomic_write "$peer_sync/${agent}.status" "updating-docs|$(date +%s)|capturing learnings"
+
+    local session_name="${mode}-${feature}"
+    local target=""
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+        target="${session_name}:${agent}"
+    elif tmux has-session -t "${session_name}-${agent}" 2>/dev/null; then
+        target="${session_name}-${agent}"
+    fi
+
+    local in_agent_session=false
+    if [ -n "$TMUX" ]; then
+        local current_session current_window
+        current_session="$(tmux display-message -p '#S' 2>/dev/null)" || current_session=""
+        current_window="$(tmux display-message -p '#W' 2>/dev/null)" || current_window=""
+        if [ "$current_session" = "$session_name" ] && [ "$current_window" = "$agent" ]; then
+            in_agent_session=true
+        elif [ "$current_session" = "${session_name}-${agent}" ]; then
+            in_agent_session=true
+        fi
+    fi
+
+    if [ "$in_agent_session" = true ] || [ -z "$target" ]; then
+        warn "Run the ${mode}-update-docs skill, then re-run: agent-${mode} pr $agent"
+        [ -n "$previous_phase" ] && echo "$previous_phase" > "$peer_sync/phase"
+        return 1
+    fi
+
+    info "Triggering ${mode}-update-docs for $agent..."
+    send_to_agent "$agent" "$target" "$peer_sync" skill "${mode}-update-docs"
+
+    local timeout="${DEFAULT_DOCS_UPDATE_TIMEOUT:-600}"
+    local start=$SECONDS
+    while true; do
+        if [ -f "$peer_sync/docs-update-${agent}.done" ]; then
+            break
+        fi
+        local status
+        status="$(get_agent_status "$agent" "$peer_sync")"
+        [ "$status" = "docs-update-done" ] && break
+
+        # Check for API errors and retry if needed
+        check_and_retry_on_error "$agent" "$target" "$peer_sync"
+
+        local elapsed=$((SECONDS - start))
+        if [ "$elapsed" -ge "$timeout" ]; then
+            warn "Docs update timeout (${timeout}s)"
+            [ -n "$previous_phase" ] && echo "$previous_phase" > "$peer_sync/phase"
+            return 1
+        fi
+        printf "\r  Waiting for %s to finish update-docs... (%ds/%ds)  " "$agent" "$elapsed" "$timeout"
+        sleep 5
+    done
+    echo ""
+    success "Docs update completed for $agent"
+    [ -n "$previous_phase" ] && echo "$previous_phase" > "$peer_sync/phase"
+    return 0
+}
+
+# Create PR for an agent's solution
+# Args: pr_name agent worktree root peer_sync feature mode pr_title
+# pr_name: branch name and PR identifier (e.g., "feature-alpha" or "feature-beta")
+# agent: agent name (e.g., "alpha", "beta", "coder")
+# worktree: path to worktree
+# root: project root (for finding task files)
+# peer_sync: path to .peer-sync directory
+# feature: feature name
+# mode: "duo" or "solo"
+# pr_title: title for the PR (optional, defaults to "Solution for $feature")
+lib_create_pr() {
+    local pr_name="$1"
+    local agent="$2"
+    local worktree="$3"
+    local root="$4"
+    local peer_sync="$5"
+    local feature="$6"
+    local mode="${7:-duo}"
+    local pr_title="${8:-Solution for $feature}"
+
+    [ -d "$worktree" ] || die "Worktree not found: $worktree"
+
+    info "Creating PR for $agent..."
+
+    cd "$worktree"
+
+    if ! lib_ensure_docs_update "$agent" "$peer_sync" "$feature" "$mode"; then
+        return 1
+    fi
+
+    # Check if feature file exists and was NOT modified (should be deleted)
+    local feature_file="$worktree/${feature}.md"
+    if [ -f "$feature_file" ]; then
+        local main_branch
+        main_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')" || true
+        if [ -z "$main_branch" ]; then
+            for candidate in main master; do
+                if git rev-parse --verify "$candidate" >/dev/null 2>&1; then
+                    main_branch="$candidate"
+                    break
+                fi
+            done
+        fi
+        if [ -z "$main_branch" ]; then
+            main_branch="HEAD~1"
+        fi
+
+        local file_modified=false
+        if git show "${main_branch}:${feature}.md" >/dev/null 2>&1; then
+            if ! git diff --quiet "${main_branch}" -- "${feature}.md" 2>/dev/null; then
+                file_modified=true
+            fi
+        else
+            local original_task_file
+            if original_task_file="$(find_task_file "$root" "$feature")"; then
+                if ! diff -q "$feature_file" "$original_task_file" >/dev/null 2>&1; then
+                    file_modified=true
+                fi
+            fi
+        fi
+
+        if [ "$file_modified" = "false" ]; then
+            info "Feature file ${feature}.md was not modified - removing it"
+            if git ls-files --error-unmatch "${feature}.md" >/dev/null 2>&1; then
+                git rm "${feature}.md"
+                git commit -m "Remove unmodified feature file ${feature}.md"
+            else
+                rm -f "${feature}.md"
+            fi
+        fi
+    fi
+
+    # Check for changes
+    if [ -z "$(git status --porcelain)" ]; then
+        warn "No changes to commit in $agent's worktree"
+    else
+        git add -A
+        git commit -m "Solution from $agent for $feature" || true
+    fi
+
+    # Push branch
+    git push -u origin "$pr_name" 2>/dev/null || git push origin "$pr_name"
+
+    # Look for PR body file
+    local pr_body=""
+    local pr_body_file="$root/${pr_name}-PR.md"
+    if [ -f "$pr_body_file" ]; then
+        pr_body="$(cat "$pr_body_file")"
+    else
+        pr_body="Solution from $agent for feature: $feature"
+    fi
+
+    # Create PR
+    local pr_url
+    pr_url="$(gh pr create --title "$pr_title" --body "$pr_body" --head "$pr_name" 2>/dev/null)" || \
+        pr_url="$(gh pr view --json url -q '.url' 2>/dev/null)" || \
+        die "Failed to create PR. Is gh installed and authenticated?"
+
+    # Record PR
+    echo "$pr_url" > "$peer_sync/${agent}.pr"
+    atomic_write "$peer_sync/${agent}.status" "pr-created|$(date +%s)|$pr_url"
+
+    success "PR created: $pr_url"
+
+    # Send notification
+    send_pr_notification "$agent" "$feature" "$pr_url" "$mode"
+
+    # Return PR URL for caller
+    echo "$pr_url"
+}
