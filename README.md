@@ -26,9 +26,12 @@ Or with **agent-solo**, a single agent implements while another reviews, giving 
 │                      Agent Duo Session                          │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  ~/myapp/                    (main branch, orchestrator)        │
+│  ~/myapp/                    (main branch, task specs here)     │
 │      ├── auth.md             (task description)                 │
-│      └── .peer-sync/         (coordination state)               │
+│      └── .agent-sessions/    (registry of active sessions)      │
+│                                                                 │
+│  ~/myapp-auth/               (root worktree, orchestrator here) │
+│      └── .peer-sync/         (session state for "auth")         │
 │                                                                 │
 │  ~/myapp-auth-claude/        (branch: auth-claude)              │
 │  ~/myapp-auth-codex/         (branch: auth-codex)               │
@@ -36,7 +39,7 @@ Or with **agent-solo**, a single agent implements while another reviews, giving 
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Each agent works in its own git worktree. They can peek at each other's uncommitted changes via `$PEER_WORKTREE`. The orchestrator manages work/review cycles with automatic timeouts.
+Each agent works in its own git worktree. They can peek at each other's uncommitted changes via `$PEER_WORKTREE`. The orchestrator runs in a separate root worktree and manages work/review cycles with automatic timeouts.
 
 ## Installation
 
@@ -354,7 +357,10 @@ agent-duo cleanup --feature auth --full
 ├── auth.md                       # Task file (copied here)
 
 ~/myproject-auth-claude/          # Claude's worktree
+├── .peer-sync -> ../myproject-auth/.peer-sync
+
 ~/myproject-auth-codex/           # Codex's worktree
+├── .peer-sync -> ../myproject-auth/.peer-sync
 ```
 
 Commands auto-detect which session to operate on based on your current directory. Use `--feature <name>` to explicitly target a specific session.

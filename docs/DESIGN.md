@@ -576,12 +576,12 @@ Agent-solo is an alternative mode where one agent codes and another reviews in a
 │                      Agent Solo Session                         │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  ~/myapp/                    (main branch, orchestrator)        │
+│  ~/myapp/                    (main branch, task specs here)     │
 │      ├── myfeature.md        (task description)                 │
-│      └── .peer-sync/         (coordination state)               │
+│      └── .agent-sessions/    (registry of active sessions)      │
 │                                                                 │
-│  ~/myapp-myfeature/          (branch: myfeature, shared)        │
-│      └── .peer-sync -> ~/myapp/.peer-sync                       │
+│  ~/myapp-myfeature/          (root worktree, orchestrator here) │
+│      └── .peer-sync/         (session state for "myfeature")    │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
