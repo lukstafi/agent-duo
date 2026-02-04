@@ -784,6 +784,8 @@ cmd_restart() {
     local max_rounds=10
     local feature_arg=""
     local ttyd_mode_override=""  # Empty means use recorded setting
+    local auto_finish=""         # Empty means use session default
+    local auto_finish_timeout="" # Empty means use session default
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -796,6 +798,8 @@ cmd_restart() {
             --pushback-timeout) pushback_timeout="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --feature) feature_arg="$2"; shift 2 ;;
+            --auto-finish) auto_finish="true"; shift ;;
+            --auto-finish-timeout) auto_finish_timeout="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
             *) die "Unknown argument: $1" ;;
         esac
@@ -834,6 +838,8 @@ cmd_restart() {
                     cmd_args+=(--max-rounds "$max_rounds")
                     [ "$auto_run" = true ] && cmd_args+=(--auto-run)
                     [ "$ttyd_mode_override" = "false" ] && cmd_args+=(--no-ttyd)
+                    [ -n "$auto_finish" ] && cmd_args+=(--auto-finish)
+                    [ -n "$auto_finish_timeout" ] && cmd_args+=(--auto-finish-timeout "$auto_finish_timeout")
 
                     if ! "$0" restart "${cmd_args[@]}"; then
                         failed=$((failed + 1))
@@ -1090,6 +1096,8 @@ cmd_restart() {
             echo "active" > "$peer_sync/session"
             local run_cmd="agent-solo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
             run_cmd="$run_cmd --clarify-timeout $clarify_timeout --pushback-timeout $pushback_timeout"
+            [ -n "$auto_finish" ] && run_cmd+=" --auto-finish"
+            [ -n "$auto_finish_timeout" ] && run_cmd+=" --auto-finish-timeout $auto_finish_timeout"
             tmux send-keys -t "$orchestrator_target" "$run_cmd"
             tmux send-keys -t "$orchestrator_target" C-m
             success "Started PR comment monitoring"
@@ -1110,6 +1118,8 @@ cmd_restart() {
         if ! $orchestrator_running; then
             local run_cmd="agent-solo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
             run_cmd="$run_cmd --clarify-timeout $clarify_timeout --pushback-timeout $pushback_timeout"
+            [ -n "$auto_finish" ] && run_cmd+=" --auto-finish"
+            [ -n "$auto_finish_timeout" ] && run_cmd+=" --auto-finish-timeout $auto_finish_timeout"
             tmux send-keys -t "$orchestrator_target" "$run_cmd"
             tmux send-keys -t "$orchestrator_target" C-m
             success "Started orchestrator loop"
@@ -2591,7 +2601,13 @@ cmd_run() {
                 fi
 
                 # Poll interval before next check
-                printf "\r  Watching for PR comments... (Ctrl-C to stop)  "
+                if [ "$auto_finish" = "true" ]; then
+                    local inactivity_elapsed=$((SECONDS - auto_finish_last_activity))
+                    local remaining=$((auto_finish_timeout - inactivity_elapsed))
+                    printf "\r  Watching for PR comments... (auto-finish in %ds)  " "$remaining"
+                else
+                    printf "\r  Watching for PR comments... (Ctrl-C to stop)  "
+                fi
                 sleep "$poll_interval"
             done
         fi
