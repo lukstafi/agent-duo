@@ -110,18 +110,6 @@ EOF
 # Command: setup
 #------------------------------------------------------------------------------
 
-# Install a skill from template with agent-specific replacements
-install_skill() {
-    local template="$1"
-    local dest="$2"
-    local skill_cmd="$3"  # e.g., "/duo-work" for Claude, "$duo-work" for Codex
-
-    if [ -f "$template" ]; then
-        # Replace {{SKILL_CMD}} placeholder with agent-specific command prefix
-        sed "s|{{SKILL_CMD}}|${skill_cmd}|g" "$template" > "$dest"
-    fi
-}
-
 cmd_setup() {
     # Detect if user meant to run ./agent-duo setup from a repo checkout
     local install_dir="$HOME/.local/bin"
@@ -182,53 +170,9 @@ cmd_setup() {
         echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
     fi
 
-    # Install Claude skills (uses /command syntax)
-    local claude_skills="$HOME/.claude/commands"
-    mkdir -p "$claude_skills"
-
-    install_skill "$templates_dir/duo-work.md" "$claude_skills/duo-work.md" "/duo-work"
-    install_skill "$templates_dir/duo-review.md" "$claude_skills/duo-review.md" "/duo-review"
-    install_skill "$templates_dir/duo-clarify.md" "$claude_skills/duo-clarify.md" "/duo-clarify"
-    install_skill "$templates_dir/duo-pushback.md" "$claude_skills/duo-pushback.md" "/duo-pushback"
-    install_skill "$templates_dir/duo-plan.md" "$claude_skills/duo-plan.md" "/duo-plan"
-    install_skill "$templates_dir/duo-plan-review.md" "$claude_skills/duo-plan-review.md" "/duo-plan-review"
-    install_skill "$templates_dir/duo-amend.md" "$claude_skills/duo-amend.md" "/duo-amend"
-    install_skill "$templates_dir/duo-update-docs.md" "$claude_skills/duo-update-docs.md" "/duo-update-docs"
-    install_skill "$templates_dir/duo-pr-comment.md" "$claude_skills/duo-pr-comment.md" "/duo-pr-comment"
-    install_skill "$templates_dir/duo-merge-vote.md" "$claude_skills/duo-merge-vote.md" "/duo-merge-vote"
-    install_skill "$templates_dir/duo-merge-debate.md" "$claude_skills/duo-merge-debate.md" "/duo-merge-debate"
-    install_skill "$templates_dir/duo-merge-execute.md" "$claude_skills/duo-merge-execute.md" "/duo-merge-execute"
-    install_skill "$templates_dir/duo-merge-review.md" "$claude_skills/duo-merge-review.md" "/duo-merge-review"
-    install_skill "$templates_dir/duo-merge-amend.md" "$claude_skills/duo-merge-amend.md" "/duo-merge-amend"
-    install_skill "$templates_dir/duo-integrate.md" "$claude_skills/duo-integrate.md" "/duo-integrate"
-    install_skill "$templates_dir/duo-final-merge.md" "$claude_skills/duo-final-merge.md" "/duo-final-merge"
-    success "Installed Claude skills to $claude_skills"
-
-    # Install Codex skills (uses $command syntax)
-    # Codex expects skills as directories with SKILL.md inside
-    local codex_skills="$HOME/.codex/skills"
-    mkdir -p "$codex_skills/duo-work" "$codex_skills/duo-review" "$codex_skills/duo-clarify" "$codex_skills/duo-pushback" "$codex_skills/duo-plan" "$codex_skills/duo-plan-review" "$codex_skills/duo-amend" "$codex_skills/duo-pr-comment"
-    mkdir -p "$codex_skills/duo-work" "$codex_skills/duo-review" "$codex_skills/duo-clarify" "$codex_skills/duo-pushback" "$codex_skills/duo-amend" "$codex_skills/duo-update-docs" "$codex_skills/duo-pr-comment"
-    mkdir -p "$codex_skills/duo-merge-vote" "$codex_skills/duo-merge-debate" "$codex_skills/duo-merge-execute" "$codex_skills/duo-merge-review" "$codex_skills/duo-merge-amend"
-    mkdir -p "$codex_skills/duo-integrate" "$codex_skills/duo-final-merge"
-
-    install_skill "$templates_dir/duo-work.md" "$codex_skills/duo-work/SKILL.md" "\$duo-work"
-    install_skill "$templates_dir/duo-review.md" "$codex_skills/duo-review/SKILL.md" "\$duo-review"
-    install_skill "$templates_dir/duo-clarify.md" "$codex_skills/duo-clarify/SKILL.md" "\$duo-clarify"
-    install_skill "$templates_dir/duo-pushback.md" "$codex_skills/duo-pushback/SKILL.md" "\$duo-pushback"
-    install_skill "$templates_dir/duo-plan.md" "$codex_skills/duo-plan/SKILL.md" "\$duo-plan"
-    install_skill "$templates_dir/duo-plan-review.md" "$codex_skills/duo-plan-review/SKILL.md" "\$duo-plan-review"
-    install_skill "$templates_dir/duo-amend.md" "$codex_skills/duo-amend/SKILL.md" "\$duo-amend"
-    install_skill "$templates_dir/duo-update-docs.md" "$codex_skills/duo-update-docs/SKILL.md" "\$duo-update-docs"
-    install_skill "$templates_dir/duo-pr-comment.md" "$codex_skills/duo-pr-comment/SKILL.md" "\$duo-pr-comment"
-    install_skill "$templates_dir/duo-merge-vote.md" "$codex_skills/duo-merge-vote/SKILL.md" "\$duo-merge-vote"
-    install_skill "$templates_dir/duo-merge-debate.md" "$codex_skills/duo-merge-debate/SKILL.md" "\$duo-merge-debate"
-    install_skill "$templates_dir/duo-merge-execute.md" "$codex_skills/duo-merge-execute/SKILL.md" "\$duo-merge-execute"
-    install_skill "$templates_dir/duo-merge-review.md" "$codex_skills/duo-merge-review/SKILL.md" "\$duo-merge-review"
-    install_skill "$templates_dir/duo-merge-amend.md" "$codex_skills/duo-merge-amend/SKILL.md" "\$duo-merge-amend"
-    install_skill "$templates_dir/duo-integrate.md" "$codex_skills/duo-integrate/SKILL.md" "\$duo-integrate"
-    install_skill "$templates_dir/duo-final-merge.md" "$codex_skills/duo-final-merge/SKILL.md" "\$duo-final-merge"
-    success "Installed Codex skills to $codex_skills"
+    # Skills are now installed per-session into worktrees, not globally
+    # Check for and warn about legacy global skill installations
+    warn_legacy_global_skills DUO_SKILLS
 
     # Install unified notify hook script and configure agent hooks
     local notify_script
@@ -960,16 +904,24 @@ start_single_session() {
     mkdir -p "$sessions_dir"
     ln -sfn "$peer_sync" "$sessions_dir/${feature}.session"
 
-    # Ensure .peer-sync and .agent-sessions are excluded from git
+    # Ensure .peer-sync, .agent-sessions, .claude, and .agents are excluded from git
     local git_exclude="$main_project_root/.git/info/exclude"
     if [ -f "$git_exclude" ]; then
         grep -qxF ".peer-sync" "$git_exclude" || echo ".peer-sync" >> "$git_exclude"
         grep -qxF ".agent-sessions" "$git_exclude" || echo ".agent-sessions" >> "$git_exclude"
+        grep -qxF ".claude" "$git_exclude" || echo ".claude" >> "$git_exclude"
+        grep -qxF ".agents" "$git_exclude" || echo ".agents" >> "$git_exclude"
     else
         mkdir -p "$(dirname "$git_exclude")"
-        echo ".peer-sync" > "$git_exclude"
-        echo ".agent-sessions" >> "$git_exclude"
+        printf '%s\n' ".peer-sync" ".agent-sessions" ".claude" ".agents" > "$git_exclude"
     fi
+
+    # Install skills to agent worktrees (per-session, not global)
+    local templates_dir
+    templates_dir="$(get_templates_dir)"
+    install_duo_skills_to_worktree "$worktree_claude" "$templates_dir"
+    install_duo_skills_to_worktree "$worktree_codex" "$templates_dir"
+    success "Installed skills to agent worktrees"
 
     # Copy task file to all worktrees if it exists
     if [ -n "$task_file" ] && [ -f "$task_file" ]; then

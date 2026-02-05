@@ -155,42 +155,9 @@ cmd_setup() {
         echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
     fi
 
-    # Install Claude skills (uses /command syntax)
-    local claude_skills="$HOME/.claude/commands"
-    mkdir -p "$claude_skills"
-
-    install_skill "$templates_dir/solo-coder-work.md" "$claude_skills/solo-coder-work.md" "/solo-coder-work"
-    install_skill "$templates_dir/solo-coder-clarify.md" "$claude_skills/solo-coder-clarify.md" "/solo-coder-clarify"
-    install_skill "$templates_dir/solo-coder-plan.md" "$claude_skills/solo-coder-plan.md" "/solo-coder-plan"
-    install_skill "$templates_dir/solo-reviewer-work.md" "$claude_skills/solo-reviewer-work.md" "/solo-reviewer-work"
-    install_skill "$templates_dir/solo-reviewer-clarify.md" "$claude_skills/solo-reviewer-clarify.md" "/solo-reviewer-clarify"
-    install_skill "$templates_dir/solo-reviewer-gather.md" "$claude_skills/solo-reviewer-gather.md" "/solo-reviewer-gather"
-    install_skill "$templates_dir/solo-reviewer-pushback.md" "$claude_skills/solo-reviewer-pushback.md" "/solo-reviewer-pushback"
-    install_skill "$templates_dir/solo-reviewer-plan.md" "$claude_skills/solo-reviewer-plan.md" "/solo-reviewer-plan"
-    install_skill "$templates_dir/solo-pr-comment.md" "$claude_skills/solo-pr-comment.md" "/solo-pr-comment"
-    install_skill "$templates_dir/solo-integrate.md" "$claude_skills/solo-integrate.md" "/solo-integrate"
-    install_skill "$templates_dir/solo-final-merge.md" "$claude_skills/solo-final-merge.md" "/solo-final-merge"
-    success "Installed Claude solo skills to $claude_skills"
-
-    # Install Codex skills (uses $command syntax)
-    local codex_skills="$HOME/.codex/skills"
-    mkdir -p "$codex_skills/solo-coder-work" "$codex_skills/solo-coder-clarify" "$codex_skills/solo-coder-plan"
-    mkdir -p "$codex_skills/solo-reviewer-work" "$codex_skills/solo-reviewer-clarify" "$codex_skills/solo-reviewer-gather" "$codex_skills/solo-reviewer-pushback" "$codex_skills/solo-reviewer-plan"
-    mkdir -p "$codex_skills/solo-pr-comment"
-    mkdir -p "$codex_skills/solo-integrate" "$codex_skills/solo-final-merge"
-
-    install_skill "$templates_dir/solo-coder-work.md" "$codex_skills/solo-coder-work/SKILL.md" "\$solo-coder-work"
-    install_skill "$templates_dir/solo-coder-clarify.md" "$codex_skills/solo-coder-clarify/SKILL.md" "\$solo-coder-clarify"
-    install_skill "$templates_dir/solo-coder-plan.md" "$codex_skills/solo-coder-plan/SKILL.md" "\$solo-coder-plan"
-    install_skill "$templates_dir/solo-reviewer-work.md" "$codex_skills/solo-reviewer-work/SKILL.md" "\$solo-reviewer-work"
-    install_skill "$templates_dir/solo-reviewer-clarify.md" "$codex_skills/solo-reviewer-clarify/SKILL.md" "\$solo-reviewer-clarify"
-    install_skill "$templates_dir/solo-reviewer-gather.md" "$codex_skills/solo-reviewer-gather/SKILL.md" "\$solo-reviewer-gather"
-    install_skill "$templates_dir/solo-reviewer-pushback.md" "$codex_skills/solo-reviewer-pushback/SKILL.md" "\$solo-reviewer-pushback"
-    install_skill "$templates_dir/solo-reviewer-plan.md" "$codex_skills/solo-reviewer-plan/SKILL.md" "\$solo-reviewer-plan"
-    install_skill "$templates_dir/solo-pr-comment.md" "$codex_skills/solo-pr-comment/SKILL.md" "\$solo-pr-comment"
-    install_skill "$templates_dir/solo-integrate.md" "$codex_skills/solo-integrate/SKILL.md" "\$solo-integrate"
-    install_skill "$templates_dir/solo-final-merge.md" "$codex_skills/solo-final-merge/SKILL.md" "\$solo-final-merge"
-    success "Installed Codex solo skills to $codex_skills"
+    # Skills are now installed per-session into worktrees, not globally
+    # Check for and warn about legacy global skill installations
+    warn_legacy_global_skills SOLO_SKILLS
 
     # Install unified notify hook script and configure agent hooks
     local notify_script
@@ -443,16 +410,23 @@ start_single_solo_session() {
     mkdir -p "$sessions_dir"
     ln -sfn "$peer_sync" "$sessions_dir/${feature}.session"
 
-    # Ensure .peer-sync and .agent-sessions are excluded from git
+    # Ensure .peer-sync, .agent-sessions, .claude, and .agents are excluded from git
     local git_exclude="$main_project_root/.git/info/exclude"
     if [ -f "$git_exclude" ]; then
         grep -qxF ".peer-sync" "$git_exclude" || echo ".peer-sync" >> "$git_exclude"
         grep -qxF ".agent-sessions" "$git_exclude" || echo ".agent-sessions" >> "$git_exclude"
+        grep -qxF ".claude" "$git_exclude" || echo ".claude" >> "$git_exclude"
+        grep -qxF ".agents" "$git_exclude" || echo ".agents" >> "$git_exclude"
     else
         mkdir -p "$(dirname "$git_exclude")"
-        echo ".peer-sync" > "$git_exclude"
-        echo ".agent-sessions" >> "$git_exclude"
+        printf '%s\n' ".peer-sync" ".agent-sessions" ".claude" ".agents" > "$git_exclude"
     fi
+
+    # Install skills to worktree (per-session, not global)
+    local templates_dir
+    templates_dir="$(get_templates_dir)"
+    install_solo_skills_to_worktree "$worktree" "$templates_dir"
+    success "Installed skills to worktree"
 
     # Copy task file to worktree if it exists
     if [ -n "$task_file" ] && [ -f "$task_file" ]; then
