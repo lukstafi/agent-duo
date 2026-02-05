@@ -421,39 +421,41 @@ Sent: $(date)"
 
     echo ""
 
-    # --- Skills Installation ---
-    echo "=== Skills Installation ==="
+    # --- Skills Templates ---
+    echo "=== Skills Templates ==="
 
-    # Claude skills
-    local claude_skills="$HOME/.claude/commands"
-    local claude_skills_ok=true
-    for skill in duo-work duo-review duo-clarify duo-pushback duo-amend duo-update-docs; do
-        if [ -f "$claude_skills/$skill.md" ]; then
-            success "Claude skill: $skill"
+    # Skills are now installed per-session into worktrees, not globally
+    # Check that templates are installed (used during session start)
+    local templates_dir="$HOME/.local/bin/skills/templates"
+    if [ -d "$templates_dir" ]; then
+        local template_count
+        template_count=$(find "$templates_dir" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+        if [ "$template_count" -gt 0 ]; then
+            success "Skill templates: $template_count templates in $templates_dir"
         else
-            warn "Claude skill: $skill NOT FOUND"
-            claude_skills_ok=false
+            warn "Skill templates: directory exists but no templates found"
+            warn "  Run: agent-duo setup"
+            all_ok=false
         fi
-    done
-    if [ "$claude_skills_ok" = false ]; then
+    else
+        warn "Skill templates: NOT FOUND at $templates_dir"
         warn "  Run: agent-duo setup"
         all_ok=false
     fi
 
-    # Codex skills
-    local codex_skills="$HOME/.codex/skills"
-    local codex_skills_ok=true
+    # Check for legacy global skills and warn
+    local claude_global="$HOME/.claude/commands"
+    local codex_global="$HOME/.codex/skills"
+    local legacy_found=false
     for skill in duo-work duo-review duo-clarify duo-pushback duo-amend duo-update-docs; do
-        if [ -f "$codex_skills/$skill/SKILL.md" ]; then
-            success "Codex skill: $skill"
-        else
-            warn "Codex skill: $skill NOT FOUND"
-            codex_skills_ok=false
+        if [ -f "$claude_global/$skill.md" ] || [ -d "$codex_global/$skill" ]; then
+            legacy_found=true
+            break
         fi
     done
-    if [ "$codex_skills_ok" = false ]; then
-        warn "  Run: agent-duo setup"
-        all_ok=false
+    if [ "$legacy_found" = true ]; then
+        warn "Legacy global skills detected (now installed per-session)"
+        warn "  Run: agent-duo setup (for cleanup instructions)"
     fi
 
     echo ""
