@@ -1939,6 +1939,204 @@ install_skill() {
     fi
 }
 
+# Get the path to skill templates (installed or development)
+# Usage: get_templates_dir
+# Returns: path to templates directory
+get_templates_dir() {
+    local install_dir="$HOME/.local/bin"
+    local installed_templates="$install_dir/skills/templates"
+
+    # Prefer installed templates
+    if [ -d "$installed_templates" ]; then
+        echo "$installed_templates"
+    else
+        die "Skill templates not found. Run 'agent-duo setup' or 'agent-solo setup' first."
+    fi
+}
+
+# Install duo skills to a worktree for both Claude and Codex
+# Usage: install_duo_skills_to_worktree <worktree_path> <templates_dir>
+install_duo_skills_to_worktree() {
+    local worktree="$1"
+    local templates_dir="$2"
+
+    # Install Claude skills
+    local claude_skills="$worktree/.claude/commands"
+    mkdir -p "$claude_skills"
+
+    install_skill "$templates_dir/duo-work.md" "$claude_skills/duo-work.md" "/duo-work"
+    install_skill "$templates_dir/duo-review.md" "$claude_skills/duo-review.md" "/duo-review"
+    install_skill "$templates_dir/duo-clarify.md" "$claude_skills/duo-clarify.md" "/duo-clarify"
+    install_skill "$templates_dir/duo-pushback.md" "$claude_skills/duo-pushback.md" "/duo-pushback"
+    install_skill "$templates_dir/duo-plan.md" "$claude_skills/duo-plan.md" "/duo-plan"
+    install_skill "$templates_dir/duo-plan-review.md" "$claude_skills/duo-plan-review.md" "/duo-plan-review"
+    install_skill "$templates_dir/duo-amend.md" "$claude_skills/duo-amend.md" "/duo-amend"
+    install_skill "$templates_dir/duo-update-docs.md" "$claude_skills/duo-update-docs.md" "/duo-update-docs"
+    install_skill "$templates_dir/duo-pr-comment.md" "$claude_skills/duo-pr-comment.md" "/duo-pr-comment"
+    install_skill "$templates_dir/duo-merge-vote.md" "$claude_skills/duo-merge-vote.md" "/duo-merge-vote"
+    install_skill "$templates_dir/duo-merge-debate.md" "$claude_skills/duo-merge-debate.md" "/duo-merge-debate"
+    install_skill "$templates_dir/duo-merge-execute.md" "$claude_skills/duo-merge-execute.md" "/duo-merge-execute"
+    install_skill "$templates_dir/duo-merge-review.md" "$claude_skills/duo-merge-review.md" "/duo-merge-review"
+    install_skill "$templates_dir/duo-merge-amend.md" "$claude_skills/duo-merge-amend.md" "/duo-merge-amend"
+    install_skill "$templates_dir/duo-integrate.md" "$claude_skills/duo-integrate.md" "/duo-integrate"
+    install_skill "$templates_dir/duo-final-merge.md" "$claude_skills/duo-final-merge.md" "/duo-final-merge"
+
+    # Install Codex skills (project-scoped path is .agents/skills/)
+    local codex_skills="$worktree/.agents/skills"
+    mkdir -p "$codex_skills/duo-work" "$codex_skills/duo-review" "$codex_skills/duo-clarify"
+    mkdir -p "$codex_skills/duo-pushback" "$codex_skills/duo-plan" "$codex_skills/duo-plan-review"
+    mkdir -p "$codex_skills/duo-amend" "$codex_skills/duo-update-docs" "$codex_skills/duo-pr-comment"
+    mkdir -p "$codex_skills/duo-merge-vote" "$codex_skills/duo-merge-debate" "$codex_skills/duo-merge-execute"
+    mkdir -p "$codex_skills/duo-merge-review" "$codex_skills/duo-merge-amend"
+    mkdir -p "$codex_skills/duo-integrate" "$codex_skills/duo-final-merge"
+
+    install_skill "$templates_dir/duo-work.md" "$codex_skills/duo-work/SKILL.md" "\$duo-work"
+    install_skill "$templates_dir/duo-review.md" "$codex_skills/duo-review/SKILL.md" "\$duo-review"
+    install_skill "$templates_dir/duo-clarify.md" "$codex_skills/duo-clarify/SKILL.md" "\$duo-clarify"
+    install_skill "$templates_dir/duo-pushback.md" "$codex_skills/duo-pushback/SKILL.md" "\$duo-pushback"
+    install_skill "$templates_dir/duo-plan.md" "$codex_skills/duo-plan/SKILL.md" "\$duo-plan"
+    install_skill "$templates_dir/duo-plan-review.md" "$codex_skills/duo-plan-review/SKILL.md" "\$duo-plan-review"
+    install_skill "$templates_dir/duo-amend.md" "$codex_skills/duo-amend/SKILL.md" "\$duo-amend"
+    install_skill "$templates_dir/duo-update-docs.md" "$codex_skills/duo-update-docs/SKILL.md" "\$duo-update-docs"
+    install_skill "$templates_dir/duo-pr-comment.md" "$codex_skills/duo-pr-comment/SKILL.md" "\$duo-pr-comment"
+    install_skill "$templates_dir/duo-merge-vote.md" "$codex_skills/duo-merge-vote/SKILL.md" "\$duo-merge-vote"
+    install_skill "$templates_dir/duo-merge-debate.md" "$codex_skills/duo-merge-debate/SKILL.md" "\$duo-merge-debate"
+    install_skill "$templates_dir/duo-merge-execute.md" "$codex_skills/duo-merge-execute/SKILL.md" "\$duo-merge-execute"
+    install_skill "$templates_dir/duo-merge-review.md" "$codex_skills/duo-merge-review/SKILL.md" "\$duo-merge-review"
+    install_skill "$templates_dir/duo-merge-amend.md" "$codex_skills/duo-merge-amend/SKILL.md" "\$duo-merge-amend"
+    install_skill "$templates_dir/duo-integrate.md" "$codex_skills/duo-integrate/SKILL.md" "\$duo-integrate"
+    install_skill "$templates_dir/duo-final-merge.md" "$codex_skills/duo-final-merge/SKILL.md" "\$duo-final-merge"
+}
+
+# Install solo skills to a worktree for both Claude and Codex
+# Usage: install_solo_skills_to_worktree <worktree_path> <templates_dir>
+install_solo_skills_to_worktree() {
+    local worktree="$1"
+    local templates_dir="$2"
+
+    # Install Claude skills
+    local claude_skills="$worktree/.claude/commands"
+    mkdir -p "$claude_skills"
+
+    install_skill "$templates_dir/solo-coder-work.md" "$claude_skills/solo-coder-work.md" "/solo-coder-work"
+    install_skill "$templates_dir/solo-coder-clarify.md" "$claude_skills/solo-coder-clarify.md" "/solo-coder-clarify"
+    install_skill "$templates_dir/solo-coder-plan.md" "$claude_skills/solo-coder-plan.md" "/solo-coder-plan"
+    install_skill "$templates_dir/solo-reviewer-work.md" "$claude_skills/solo-reviewer-work.md" "/solo-reviewer-work"
+    install_skill "$templates_dir/solo-reviewer-clarify.md" "$claude_skills/solo-reviewer-clarify.md" "/solo-reviewer-clarify"
+    install_skill "$templates_dir/solo-reviewer-gather.md" "$claude_skills/solo-reviewer-gather.md" "/solo-reviewer-gather"
+    install_skill "$templates_dir/solo-reviewer-pushback.md" "$claude_skills/solo-reviewer-pushback.md" "/solo-reviewer-pushback"
+    install_skill "$templates_dir/solo-reviewer-plan.md" "$claude_skills/solo-reviewer-plan.md" "/solo-reviewer-plan"
+    install_skill "$templates_dir/solo-pr-comment.md" "$claude_skills/solo-pr-comment.md" "/solo-pr-comment"
+    install_skill "$templates_dir/solo-integrate.md" "$claude_skills/solo-integrate.md" "/solo-integrate"
+    install_skill "$templates_dir/solo-final-merge.md" "$claude_skills/solo-final-merge.md" "/solo-final-merge"
+
+    # Install Codex skills (project-scoped path is .agents/skills/)
+    local codex_skills="$worktree/.agents/skills"
+    mkdir -p "$codex_skills/solo-coder-work" "$codex_skills/solo-coder-clarify" "$codex_skills/solo-coder-plan"
+    mkdir -p "$codex_skills/solo-reviewer-work" "$codex_skills/solo-reviewer-clarify"
+    mkdir -p "$codex_skills/solo-reviewer-gather" "$codex_skills/solo-reviewer-pushback" "$codex_skills/solo-reviewer-plan"
+    mkdir -p "$codex_skills/solo-pr-comment" "$codex_skills/solo-integrate" "$codex_skills/solo-final-merge"
+
+    install_skill "$templates_dir/solo-coder-work.md" "$codex_skills/solo-coder-work/SKILL.md" "\$solo-coder-work"
+    install_skill "$templates_dir/solo-coder-clarify.md" "$codex_skills/solo-coder-clarify/SKILL.md" "\$solo-coder-clarify"
+    install_skill "$templates_dir/solo-coder-plan.md" "$codex_skills/solo-coder-plan/SKILL.md" "\$solo-coder-plan"
+    install_skill "$templates_dir/solo-reviewer-work.md" "$codex_skills/solo-reviewer-work/SKILL.md" "\$solo-reviewer-work"
+    install_skill "$templates_dir/solo-reviewer-clarify.md" "$codex_skills/solo-reviewer-clarify/SKILL.md" "\$solo-reviewer-clarify"
+    install_skill "$templates_dir/solo-reviewer-gather.md" "$codex_skills/solo-reviewer-gather/SKILL.md" "\$solo-reviewer-gather"
+    install_skill "$templates_dir/solo-reviewer-pushback.md" "$codex_skills/solo-reviewer-pushback/SKILL.md" "\$solo-reviewer-pushback"
+    install_skill "$templates_dir/solo-reviewer-plan.md" "$codex_skills/solo-reviewer-plan/SKILL.md" "\$solo-reviewer-plan"
+    install_skill "$templates_dir/solo-pr-comment.md" "$codex_skills/solo-pr-comment/SKILL.md" "\$solo-pr-comment"
+    install_skill "$templates_dir/solo-integrate.md" "$codex_skills/solo-integrate/SKILL.md" "\$solo-integrate"
+    install_skill "$templates_dir/solo-final-merge.md" "$codex_skills/solo-final-merge/SKILL.md" "\$solo-final-merge"
+}
+
+# List of all duo skill names (for cleanup of legacy global installs)
+DUO_SKILLS=(
+    "duo-work" "duo-review" "duo-clarify" "duo-pushback"
+    "duo-plan" "duo-plan-review" "duo-amend" "duo-update-docs" "duo-pr-comment"
+    "duo-merge-vote" "duo-merge-debate" "duo-merge-execute" "duo-merge-review" "duo-merge-amend"
+    "duo-integrate" "duo-final-merge"
+)
+
+# List of all solo skill names (for cleanup of legacy global installs)
+SOLO_SKILLS=(
+    "solo-coder-work" "solo-coder-clarify" "solo-coder-plan"
+    "solo-reviewer-work" "solo-reviewer-clarify" "solo-reviewer-gather" "solo-reviewer-pushback" "solo-reviewer-plan"
+    "solo-pr-comment" "solo-integrate" "solo-final-merge"
+)
+
+# Check and warn about legacy global skill installations
+# Usage: warn_legacy_global_skills <skill_list_name>
+# skill_list_name is either "DUO_SKILLS" or "SOLO_SKILLS"
+# Note: Uses case statement instead of nameref for Bash 3.2 compatibility (macOS default)
+warn_legacy_global_skills() {
+    local skill_list_name="$1"
+    local found_claude=()
+    local found_codex=()
+
+    local claude_global="$HOME/.claude/commands"
+    local codex_global="$HOME/.codex/skills"
+
+    # Select the appropriate skill list (Bash 3.2 compatible - no namerefs)
+    local skills=()
+    case "$skill_list_name" in
+        DUO_SKILLS)
+            skills=("${DUO_SKILLS[@]}")
+            ;;
+        SOLO_SKILLS)
+            skills=("${SOLO_SKILLS[@]}")
+            ;;
+        *)
+            warn "Unknown skill list: $skill_list_name"
+            return 1
+            ;;
+    esac
+
+    for skill in "${skills[@]}"; do
+        if [ -f "$claude_global/$skill.md" ]; then
+            found_claude+=("$skill")
+        fi
+        if [ -d "$codex_global/$skill" ]; then
+            found_codex+=("$skill")
+        fi
+    done
+
+    if [ ${#found_claude[@]} -gt 0 ] || [ ${#found_codex[@]} -gt 0 ]; then
+        echo ""
+        warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        warn "LEGACY GLOBAL SKILLS DETECTED"
+        warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        warn "Skills are now installed per-session into worktrees, not globally."
+        warn "Legacy global skills may appear in all Claude/Codex sessions."
+        echo ""
+        if [ ${#found_claude[@]} -gt 0 ]; then
+            warn "Claude global skills to remove from $claude_global:"
+            for skill in "${found_claude[@]}"; do
+                echo "  - $skill.md"
+            done
+        fi
+        if [ ${#found_codex[@]} -gt 0 ]; then
+            warn "Codex global skills to remove from $codex_global:"
+            for skill in "${found_codex[@]}"; do
+                echo "  - $skill/"
+            done
+        fi
+        echo ""
+        warn "To clean up legacy skills, run:"
+        if [ ${#found_claude[@]} -gt 0 ]; then
+            for skill in "${found_claude[@]}"; do
+                echo "  rm \"$claude_global/$skill.md\""
+            done
+        fi
+        if [ ${#found_codex[@]} -gt 0 ]; then
+            for skill in "${found_codex[@]}"; do
+                echo "  rm -rf \"$codex_global/$skill\""
+            done
+        fi
+        warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Setup helpers (shared between agent-duo and agent-solo setup commands)
 #------------------------------------------------------------------------------
