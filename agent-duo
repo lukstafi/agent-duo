@@ -2447,8 +2447,8 @@ cmd_run_merge() {
     echo ""
 
     # Timeouts
-    local vote_timeout="${VOTE_TIMEOUT:-600}"
-    local debate_timeout="${DEBATE_TIMEOUT:-300}"
+    local vote_timeout="${VOTE_TIMEOUT:-10800}"
+    local debate_timeout="${DEBATE_TIMEOUT:-2400}"
     local max_debate_rounds=2
     local poll_interval=5
 
@@ -2499,6 +2499,43 @@ cmd_run_merge() {
 
         if [ "$elapsed" -ge "$vote_timeout" ]; then
             warn "Vote phase timeout (${vote_timeout}s)"
+            # Interrupt agents that haven't voted and create synthetic vote files
+            local round
+            round="$(get_merge_round "$peer_sync")"
+            if ! $claude_voted; then
+                interrupt_agent "claude" "$claude_session" "$peer_sync"
+                local claude_vote_file
+                claude_vote_file="$(get_merge_vote_file "$peer_sync" "claude" "$round")"
+                if [ ! -f "$claude_vote_file" ]; then
+                    mkdir -p "$peer_sync/merge-votes"
+                    cat > "$claude_vote_file" << 'SYNTH_EOF'
+# Merge Vote from claude (INTERRUPTED)
+
+## My Vote: interrupted
+
+### Rationale
+Agent was interrupted by orchestrator due to vote phase timeout.
+SYNTH_EOF
+                    warn "Created synthetic interrupted vote for claude"
+                fi
+            fi
+            if ! $codex_voted; then
+                interrupt_agent "codex" "$codex_session" "$peer_sync"
+                local codex_vote_file
+                codex_vote_file="$(get_merge_vote_file "$peer_sync" "codex" "$round")"
+                if [ ! -f "$codex_vote_file" ]; then
+                    mkdir -p "$peer_sync/merge-votes"
+                    cat > "$codex_vote_file" << 'SYNTH_EOF'
+# Merge Vote from codex (INTERRUPTED)
+
+## My Vote: interrupted
+
+### Rationale
+Agent was interrupted by orchestrator due to vote phase timeout.
+SYNTH_EOF
+                    warn "Created synthetic interrupted vote for codex"
+                fi
+            fi
             break
         fi
 
@@ -2506,11 +2543,6 @@ cmd_run_merge() {
         sleep "$poll_interval"
     done
     echo ""
-
-    # Check if we have votes
-    if ! both_voted "$peer_sync"; then
-        die "Not all agents submitted votes. Check agent terminals."
-    fi
 
     # === CONSENSUS CHECK ===
     local current_round
@@ -2579,6 +2611,41 @@ cmd_run_merge() {
 
             if [ "$elapsed" -ge "$debate_timeout" ]; then
                 warn "Debate timeout (${debate_timeout}s)"
+                # Interrupt agents that haven't responded and create synthetic debate vote files
+                if ! $claude_debated; then
+                    interrupt_agent "claude" "$claude_session" "$peer_sync"
+                    local claude_debate_file
+                    claude_debate_file="$(get_merge_vote_file "$peer_sync" "claude" "$current_round")"
+                    if [ ! -f "$claude_debate_file" ]; then
+                        mkdir -p "$peer_sync/merge-votes"
+                        cat > "$claude_debate_file" << 'SYNTH_EOF'
+# Merge Vote from claude (Debate - INTERRUPTED)
+
+## My Vote: interrupted
+
+### Rationale
+Agent was interrupted by orchestrator due to debate phase timeout.
+SYNTH_EOF
+                        warn "Created synthetic interrupted debate vote for claude"
+                    fi
+                fi
+                if ! $codex_debated; then
+                    interrupt_agent "codex" "$codex_session" "$peer_sync"
+                    local codex_debate_file
+                    codex_debate_file="$(get_merge_vote_file "$peer_sync" "codex" "$current_round")"
+                    if [ ! -f "$codex_debate_file" ]; then
+                        mkdir -p "$peer_sync/merge-votes"
+                        cat > "$codex_debate_file" << 'SYNTH_EOF'
+# Merge Vote from codex (Debate - INTERRUPTED)
+
+## My Vote: interrupted
+
+### Rationale
+Agent was interrupted by orchestrator due to debate phase timeout.
+SYNTH_EOF
+                        warn "Created synthetic interrupted debate vote for codex"
+                    fi
+                fi
                 break
             fi
 

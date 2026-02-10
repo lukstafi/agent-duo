@@ -691,8 +691,8 @@ restart_agent_tui() {
 #------------------------------------------------------------------------------
 
 # Default timeouts in seconds
-DEFAULT_WORK_TIMEOUT=1200    # 20 minutes
-DEFAULT_REVIEW_TIMEOUT=600   # 10 minutes
+DEFAULT_WORK_TIMEOUT=3600    # 1 hour
+DEFAULT_REVIEW_TIMEOUT=1800  # 30 minutes
 DEFAULT_GATHER_TIMEOUT=600   # 10 minutes
 DEFAULT_CLARIFY_TIMEOUT=600  # 10 minutes
 DEFAULT_PUSHBACK_TIMEOUT=600 # 10 minutes
