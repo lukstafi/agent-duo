@@ -245,6 +245,10 @@ cmd_start() {
     # Ensure repo has at least one commit
     git rev-parse HEAD >/dev/null 2>&1 || die "Repository has no commits. Create an initial commit first."
 
+    # Push current branch to avoid PRs incorporating unpushed commits
+    info "Pushing current branch to remote..."
+    git push || die "Failed to push current branch. Push manually and retry."
+
     local main_project_root
     main_project_root="$(get_main_project_root)"
     local project_name
