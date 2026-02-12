@@ -132,16 +132,29 @@ list_active_sessions() {
 
     [ -d "$sessions_dir" ] || return 0
 
-    local glob_pattern
+    # Build list of session files to scan.
+    # When prefix is set, scan prefixed files first, then unprefixed for backward compat.
+    # Quote globs properly to handle paths with spaces.
+    local session_files=()
     if [ -n "$SESSION_REGISTRY_PREFIX" ]; then
-        glob_pattern="$sessions_dir/${SESSION_REGISTRY_PREFIX}-*.session"
+        for f in "$sessions_dir/${SESSION_REGISTRY_PREFIX}-"*.session; do
+            [ -L "$f" ] && session_files+=("$f")
+        done
+        # Backward compat: also pick up legacy unprefixed symlinks
+        for f in "$sessions_dir/"*.session; do
+            [ -L "$f" ] || continue
+            local base; base="$(basename "$f")"
+            # Skip if it has any known prefix (duo-/solo-/claude-/codex-)
+            case "$base" in duo-*|solo-*|claude-*|codex-*) continue ;; esac
+            session_files+=("$f")
+        done
     else
-        glob_pattern="$sessions_dir/*.session"
+        for f in "$sessions_dir/"*.session; do
+            [ -L "$f" ] && session_files+=("$f")
+        done
     fi
 
-    for session_link in $glob_pattern; do
-        [ -L "$session_link" ] || continue
-
+    for session_link in "${session_files[@]}"; do
         # Extract feature name from filename
         local filename
         filename="$(basename "$session_link")"
