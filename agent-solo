@@ -2386,7 +2386,7 @@ cmd_run() {
             if grep -qi "APPROVE" "$review_file" 2>/dev/null; then
                 success "Reviewer approved! Ready for PR."
                 info "Coder can now create PR with: agent-solo pr"
-                # Continue loop to let coder create PR
+                break
             else
                 info "Reviewer requested changes. Proceeding to next round."
             fi
