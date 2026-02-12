@@ -49,7 +49,9 @@ agent-duo start <feature>       # Start session, creates worktrees
 agent-duo start <f1> <f2> ...   # Start multiple features in parallel (each needs its own .md file)
 agent-duo start <f> --clarify   # Start with clarify phase before work
 agent-duo start <f> --pushback  # Start with pushback phase (task improvement)
+agent-duo start <f> --plan      # Start with plan phase (implementation planning)
 agent-duo start <f> --auto-run  # Start and run orchestrator immediately
+agent-duo start <f> --auto-finish # Auto-merge last remaining PR
 agent-duo run [options]         # Run orchestrator loop (from orchestrator worktree)
 agent-duo stop                  # Stop ttyd servers, keep worktrees
 agent-duo stop --feature <f>    # Stop specific session only
@@ -68,6 +70,7 @@ agent-duo config [key] [value]  # Get/set configuration (ntfy_topic, etc.)
 agent-duo nudge <agent> [msg]   # Send message to agent terminal
 agent-duo interrupt <agent>     # Interrupt agent (Esc)
 agent-duo escalate-resolve      # Review and resolve pending escalations
+agent-duo feedback              # View/manage accumulated workflow feedback
 ```
 
 ### Model Selection Options
@@ -76,7 +79,9 @@ agent-duo escalate-resolve      # Review and resolve pending escalations
 agent-duo start <feature> --auto-run \
   --claude-model opus \        # Claude model (opus, sonnet)
   --codex-model o3 \           # Codex/GPT model (o3, gpt-4.1)
-  --codex-thinking high        # Codex reasoning effort (low, medium, high)
+  --codex-thinking high \      # Codex reasoning effort (low, medium, high)
+  --plan-timeout 600 \         # Plan phase timeout in seconds (default: 600)
+  --auto-finish                # Auto-merge last remaining PR when other closes
 ```
 
 ### Agent Commands
@@ -86,6 +91,8 @@ agent-duo signal <agent> <status> [message]   # Signal status change
 agent-duo peer-status                         # Read peer's status
 agent-duo phase                               # Read current phase
 agent-duo escalate <reason> [message]         # Escalate issue to user
+agent-duo learn "<title>" [content]           # Record project learning to AGENTS_STAGING.md
+agent-duo workflow-feedback <category> [content] # Record workflow feedback
 ```
 
 ## Naming Conventions
@@ -107,8 +114,8 @@ Given project directory `myapp` and feature `auth`:
 
 | Concept | Who sets | Values | Purpose |
 |---------|----------|--------|---------|
-| **Phase** | Orchestrator | `gather`, `clarify`, `pushback`, `work`, `review`, `update-docs`, `pr-comments`, `merge` | Current stage of the round |
-| **Agent Status** | Agent | `gathering`, `gather-done`, `clarifying`, `clarify-done`, `pushing-back`, `pushback-done`, `working`, `done`, `reviewing`, `review-done`, `updating-docs`, `docs-update-done`, `interrupted`, `error`, `escalated`, `pr-created`, `voting`, `vote-done`, `debating`, `debate-done`, `merging`, `merge-done`, `merge-reviewing`, `merge-review-done` | What agent is doing |
+| **Phase** | Orchestrator | `gather`, `clarify`, `pushback`, `plan`, `plan-review`, `work`, `review`, `update-docs`, `pr-comments`, `merge`, `final-merge` | Current stage of the round |
+| **Agent Status** | Agent | `gathering`, `gather-done`, `clarifying`, `clarify-done`, `pushing-back`, `pushback-done`, `planning`, `plan-done`, `plan-reviewing`, `plan-review-done`, `needs-clarify`, `working`, `done`, `reviewing`, `review-done`, `updating-docs`, `docs-update-done`, `integrating`, `integrate-done`, `final-merging`, `final-merge-done`, `interrupted`, `error`, `escalated`, `pr-created`, `voting`, `vote-done`, `debating`, `debate-done`, `merging`, `merge-done`, `merge-reviewing`, `merge-review-done` | What agent is doing |
 | **Session State** | Orchestrator | `active`, `complete` | Overall progress |
 
 ### State Files (in `.peer-sync/`)
@@ -116,7 +123,7 @@ Given project directory `myapp` and feature `auth`:
 ```
 .peer-sync/
 ├── session           # "active" or "complete"
-├── phase             # "gather", "clarify", "pushback", "work", "review", "update-docs", "pr-comments", or "merge"
+├── phase             # "gather", "clarify", "pushback", "plan", "plan-review", "work", "review", "update-docs", "pr-comments", "merge", or "final-merge"
 ├── round             # Current round number (1, 2, 3...)
 ├── feature           # Feature name for this session
 ├── ports             # Port allocations (ORCHESTRATOR_PORT, CLAUDE_PORT, CODEX_PORT)
@@ -130,6 +137,18 @@ Given project directory `myapp` and feature `auth`:
 ├── task-context.md   # Reviewer's gathered context for the coder (solo mode gather phase)
 ├── clarify-claude.md # Claude's approach and questions (clarify phase)
 ├── clarify-codex.md  # Codex's approach and questions (clarify phase)
+├── plan-mode         # "true" or "false" - whether plan phase is enabled
+├── plan-claude.md    # Claude's implementation plan (duo mode)
+├── plan-codex.md     # Codex's implementation plan (duo mode)
+├── plan-coder.md     # Coder's implementation plan (solo mode)
+├── plan-review-claude.md # Claude's review of Codex's plan (duo mode)
+├── plan-review-codex.md  # Codex's review of Claude's plan (duo mode)
+├── plan-review.md    # Reviewer's plan feedback with verdict (solo mode)
+├── plan-round        # Current plan revision round (solo mode, 1-3)
+├── plan-confirmed    # Present when plan phase is complete
+├── mode              # Session mode: "duo" or "solo"
+├── auto-finish       # "true" or "false" - whether auto-finish mode is enabled
+├── auto-finish-timeout # Inactivity timeout for auto-finish (seconds)
 ├── codex-thinking    # Codex reasoning effort level
 ├── claude.status     # Agent status: "working|1705847123|implementing API"
 ├── codex.status      # Format: status|epoch|message
@@ -206,6 +225,49 @@ Given project directory `myapp` and feature `auth`:
 │  5. User reviews changes in terminals (can accept/reject/modify)│
 │  6. User runs 'agent-duo confirm' to proceed                    │
 │     - Original task restored from backup before work begins     │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ PLAN PHASE (optional, --plan flag)                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  DUO MODE                                                       │
+│  ────────                                                       │
+│  1. Orchestrator sets phase=plan                                │
+│  2. Both agents explore codebase and write plans (status:       │
+│     planning)                                                   │
+│     - Write to .peer-sync/plan-{agent}.md                       │
+│  3. Agents signal completion (status: plan-done)                │
+│  4. Orchestrator sets phase=plan-review                         │
+│  5. Both agents review peer's plan (status: plan-reviewing)     │
+│     - Write to .peer-sync/plan-review-{agent}.md                │
+│  6. Agents signal completion (status: plan-review-done)         │
+│  7. Orchestrator writes plan-confirmed, proceeds to work phase  │
+│                                                                 │
+│  Each agent produces an independent plan — two different        │
+│  strategic approaches to the same task. Plans include:          │
+│  approach, key decisions, file changes, implementation steps,   │
+│  risks/edge cases, and test strategy. Plan reviews are          │
+│  informational (no binding verdict in duo mode).                │
+│                                                                 │
+│  SOLO MODE                                                      │
+│  ─────────                                                      │
+│  1. Orchestrator sets phase=plan                                │
+│  2. Coder explores codebase and writes plan (status: planning)  │
+│     - Writes to .peer-sync/plan-coder.md                        │
+│     - Checks plan-review.md if revising from prior round        │
+│  3. Coder signals completion (status: plan-done)                │
+│  4. Orchestrator sets phase=plan-review                         │
+│  5. Reviewer evaluates plan (status: plan-reviewing)            │
+│     - Writes review with verdict to .peer-sync/plan-review.md   │
+│  6. Reviewer signals verdict (status: plan-review-done)         │
+│     - APPROVE → proceed to work phase                           │
+│     - REQUEST_CHANGES → coder revises (up to 3 rounds)          │
+│                                                                 │
+│  In either mode, agents can signal needs-clarify if they        │
+│  discover ambiguity during planning. The orchestrator pauses    │
+│  and notifies the user.                                         │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 
@@ -316,6 +378,29 @@ Given project directory `myapp` and feature `auth`:
 │  Both worktrees remain available for reference throughout.      │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ FINAL MERGE PHASE (auto-finish mode)                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Triggered automatically in auto-finish mode when only one PR   │
+│  remains open (the other was closed/merged) during the          │
+│  PR-comments watch phase.                                       │
+│                                                                 │
+│  1. Orchestrator sets phase=final-merge                         │
+│  2. Remaining agent rebases onto main (status: final-merging)   │
+│     - Runs tests to verify                                      │
+│     - Force-pushes rebased branch                               │
+│     - Waits for CI checks to pass                               │
+│     - Merges PR via squash merge                                │
+│     - Deletes remote branch                                     │
+│  3. Agent signals completion (status: final-merge-done)         │
+│  4. Session completes                                           │
+│                                                                 │
+│  If merge is blocked (CI failure, branch protection), agent     │
+│  posts a comment and signals completion with explanation.       │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Recoverable Interrupts
@@ -369,12 +454,21 @@ This differs from clarify/pushback phases which are enforced blocking points. Es
 | `clarify-done` | Finished clarify phase | Agent |
 | `pushing-back` | Proposing task improvements | Agent (start of pushback phase) |
 | `pushback-done` | Finished pushback phase | Agent |
+| `planning` | Writing implementation plan | Agent (start of plan phase) |
+| `plan-done` | Finished writing plan | Agent |
+| `plan-reviewing` | Reviewing peer's/coder's plan | Agent (start of plan-review phase) |
+| `plan-review-done` | Finished plan review | Agent |
+| `needs-clarify` | Discovered ambiguity during planning | Agent (pauses orchestrator) |
 | `working` | Actively implementing | Agent (start of work phase) |
 | `done` | Finished work phase | Agent |
 | `reviewing` | Reading peer's changes | Agent (start of review phase) |
 | `review-done` | Finished review phase | Agent |
 | `updating-docs` | Capturing project/workflow learnings | Agent (start of update-docs phase) |
 | `docs-update-done` | Finished update-docs phase | Agent |
+| `integrating` | Rebasing onto updated main | Agent (start of integrate phase) |
+| `integrate-done` | Finished integration/rebase | Agent |
+| `final-merging` | Performing final merge of PR to main | Agent (auto-finish mode) |
+| `final-merge-done` | Final merge complete | Agent |
 | `interrupted` | Timed out, yielding to review | Orchestrator |
 | `error` | Something failed | Agent or Orchestrator |
 | `escalated` | Issue needs user input | Agent (after `agent-duo escalate`) |
@@ -460,13 +554,15 @@ agent-duo start myfeature --port 8000
 ## Skills
 
 Skills provide phase-specific instructions to agents. Installed to:
-- Claude: `~/.claude/commands/duo-{work,review,clarify,pushback,amend,update-docs,pr-comment,integrate,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}.md`
-- Codex: `~/.codex/skills/duo-{work,review,clarify,pushback,amend,update-docs,pr-comment,integrate,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}/SKILL.md`
+- Claude: `~/.claude/commands/duo-{work,review,clarify,pushback,plan,plan-review,amend,update-docs,pr-comment,integrate,final-merge,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}.md`
+- Codex: `~/.codex/skills/duo-{work,review,clarify,pushback,plan,plan-review,amend,update-docs,pr-comment,integrate,final-merge,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}/SKILL.md`
 
 Key skill behaviors:
 - **Gather phase** (solo mode): Explore codebase, collect relevant file links and notes, write `task-context.md`, signal `gather-done`
 - **Clarify phase**: Propose high-level approach, ask clarifying questions, signal `clarify-done`
 - **Pushback phase**: Propose improvements to the task file, signal `pushback-done`
+- **Plan phase**: Explore codebase and write detailed implementation plan, signal `plan-done`; can signal `needs-clarify` if ambiguity discovered
+- **Plan-Review phase** (duo): Review peer's plan, write constructive feedback (informational, no verdict), signal `plan-review-done`
 - **Work phase**: Implement solution, signal `done` when ready
 - **Amend phase**: For agents with PRs — review peer feedback and amend PR if warranted
 - **Review phase**: Read peer's worktree via git, write review, signal `review-done`; agents with PRs still participate
@@ -478,6 +574,7 @@ Key skill behaviors:
 - **Merge Execute phase**: For losing agent — cd to winning worktree, cherry-pick from losing PR into winning branch, close losing PR, signal `merge-done`
 - **Merge Review phase**: For winning agent — review cherry-picks in own worktree, can reference losing worktree, signal `merge-review-done`
 - **Merge Amend phase**: For losing agent — address review feedback in winning worktree, signal `merge-done`
+- **Final Merge phase**: Rebase onto main, run tests, merge PR via squash, delete branch, signal `final-merge-done` (auto-finish mode)
 - **Divergence**: Maintain distinct approach from peer
 - **Interrupts**: If interrupted, gracefully yield and continue next round
 
@@ -492,7 +589,7 @@ Both hooks run `~/.local/bin/agent-duo-notify <agent-name>` which:
 1. Receives agent name as `$1` (required - hooks don't inherit shell environment variables)
 2. Discovers `PEER_SYNC` from `$PWD/.peer-sync` symlink (present in worktrees)
 3. Reads the current phase from `$PEER_SYNC/phase`
-4. Signals appropriate status: `gather-done` (gather), `done` (work), `review-done` (review), `clarify-done` (clarify), `pushback-done` (pushback), `docs-update-done` (update-docs)
+4. Signals appropriate status: `gather-done` (gather), `done` (work), `review-done` (review), `clarify-done` (clarify), `pushback-done` (pushback), `plan-done` (plan), `plan-review-done` (plan-review), `docs-update-done` (update-docs), `final-merge-done` (final-merge)
 5. Skips if already in a terminal state
 
 ## Notifications
@@ -590,17 +687,18 @@ Agent-solo is an alternative mode where one agent codes and another reviews in a
 1. **Gather phase** (optional, `--gather`): Reviewer explores codebase and collects task context
 2. **Clarify phase** (optional, `--clarify`): Coder proposes approach, reviewer comments
 3. **Pushback phase** (optional, `--pushback`): Reviewer proposes task improvements
-4. **Coder** implements the solution (work phase)
-5. **Reviewer** examines code and writes review with verdict (APPROVE/REQUEST_CHANGES)
-6. If approved: create PR. If changes requested: loop continues.
-7. After PR created: monitor for GitHub comments and address feedback
+4. **Plan phase** (optional, `--plan`): Coder writes plan, reviewer evaluates with verdict (APPROVE/REQUEST_CHANGES, up to 3 rounds)
+5. **Coder** implements the solution (work phase)
+6. **Reviewer** examines code and writes review with verdict (APPROVE/REQUEST_CHANGES)
+7. If approved: create PR. If changes requested: loop continues.
+8. After PR created: monitor for GitHub comments and address feedback
 
 **Key differences from duo mode:**
 - Single worktree (both agents work on same branch)
 - Sequential rather than parallel work
 - Clear coder/reviewer roles (swappable with `--coder` and `--reviewer`)
 - Gather phase available (reviewer collects context for coder)
-- Skills: `solo-coder-{work,clarify}.md`, `solo-reviewer-{work,clarify,gather,pushback}.md`, `solo-pr-comment.md`
+- Skills: `solo-coder-{work,clarify,plan}.md`, `solo-reviewer-{work,clarify,gather,pushback,plan}.md`, `solo-pr-comment.md`, `solo-integrate.md`, `solo-final-merge.md`
 
 ## Multi-Session Support (Parallel Task Execution)
 
@@ -805,3 +903,23 @@ The `restart` command is DWIM (Do What I Mean):
 - With `--no-ttyd`: forces tmux-only mode regardless of how session was started
 
 The session's ttyd mode is recorded in `.peer-sync/ttyd-mode` during start. When run from the main branch without `--feature`, it iterates through all active sessions and restarts each one. Use `--feature <name>` to restart a specific session.
+
+### February 2026 Iteration
+
+| Feature | Description |
+|---------|-------------|
+| **Plan phase** | New `--plan` flag with `planning`/`plan-done`/`plan-reviewing`/`plan-review-done`/`needs-clarify` statuses |
+| **Plan-review phase** (duo) | After planning, agents cross-review each other's plans with `duo-plan-review` skill |
+| **Plan phase** (solo) | Iterative plan → review → revise loop (up to 3 rounds) with binding reviewer verdict |
+| **Auto-finish mode** | `--auto-finish` flag: when one PR closes during PR-comments phase, remaining agent auto-merges via `final-merge` phase |
+| **Final merge phase** | `duo-final-merge`/`solo-final-merge` skills: rebase, test, squash-merge, delete branch |
+| **`learn` command** | Agents record project learnings to `AGENTS_STAGING.md` during sessions |
+| **`workflow-feedback` command** | Agents record feedback about the agent-duo workflow itself |
+| **`feedback` command** | User manages accumulated workflow feedback (list, view, delete, submit as GitHub issue) |
+| **TUI health checks** | Orchestrator monitors agent TUI processes, handles `--on-tui-exit=pause\|quit\|ignore` |
+
+The plan phase enables agents to write and review implementation plans before coding begins. In duo mode, both agents plan simultaneously and then cross-review each other's plans (informational feedback only). In solo mode, the coder writes a plan that the reviewer evaluates with a binding verdict (`APPROVE` or `REQUEST_CHANGES`), iterating up to 3 rounds.
+
+Auto-finish mode (`--auto-finish`) enables fully unattended sessions. During the PR-comments watch phase, if one PR is closed/merged and only one remains, the orchestrator triggers the `final-merge` phase where the remaining agent rebases onto main, runs tests, waits for CI, and squash-merges the PR.
+
+The `learn` and `workflow-feedback` commands let agents capture knowledge during sessions — project learnings go to `AGENTS_STAGING.md` in the worktree, while workflow feedback is accumulated to `~/.agent-duo/workflow-feedback/` for later review via `agent-duo feedback`.
