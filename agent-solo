@@ -53,6 +53,9 @@ fi
 DEFAULT_CODER="claude"
 DEFAULT_REVIEWER="codex"
 
+# Session registry prefix for .agent-sessions/ namespace isolation
+SESSION_REGISTRY_PREFIX="solo"
+
 # Allocate ports for a solo session (3 ports: orchestrator, coder, reviewer)
 # Args: peer_sync [base_port]
 # If base_port is provided, uses consecutive ports starting from it (fails if any occupied)
@@ -318,7 +321,7 @@ start_single_solo_session() {
 
     # Check for existing session for THIS feature
     local sessions_dir="$main_project_root/.agent-sessions"
-    if [ -L "$sessions_dir/${feature}.session" ]; then
+    if [ -L "$sessions_dir/solo-${feature}.session" ]; then
         warn "Session already exists for feature '$feature'."
         warn "To continue: agent-solo run --feature $feature"
         warn "To start fresh: agent-solo cleanup --feature $feature && agent-solo start $feature"
@@ -412,7 +415,7 @@ start_single_solo_session() {
 
     # Register session in main project's .agent-sessions directory
     mkdir -p "$sessions_dir"
-    ln -sfn "$peer_sync" "$sessions_dir/${feature}.session"
+    ln -sfn "$peer_sync" "$sessions_dir/solo-${feature}.session"
 
     # Ensure .peer-sync, .agent-sessions, .claude, and .agents are excluded from git
     local git_exclude="$main_project_root/.git/info/exclude"
@@ -2724,8 +2727,8 @@ cleanup_single_solo_session() {
     persist_workflow_feedback "$peer_sync" "$feature" "solo"
 
     # Remove session from registry
-    if [ -L "$sessions_dir/${feature}.session" ]; then
-        rm -f "$sessions_dir/${feature}.session"
+    if [ -L "$sessions_dir/solo-${feature}.session" ]; then
+        rm -f "$sessions_dir/solo-${feature}.session"
         info "Removed from registry"
     fi
 

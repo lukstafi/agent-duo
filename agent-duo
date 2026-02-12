@@ -57,6 +57,9 @@ fi
 DEFAULT_AGENT_A="claude"
 DEFAULT_AGENT_B="codex"
 
+# Session registry prefix for .agent-sessions/ namespace isolation
+SESSION_REGISTRY_PREFIX="duo"
+
 # Allocate ports for a session and store in .peer-sync/ports
 # Args: peer_sync [base_port]
 # If base_port is provided, uses consecutive ports starting from it (fails if any occupied)
@@ -144,6 +147,15 @@ cmd_setup() {
     if [ -f "$SCRIPT_DIR/agent-lib.sh" ]; then
         cp "$SCRIPT_DIR/agent-lib.sh" "$lib_path"
         success "Installed agent-lib.sh to $lib_path"
+    fi
+
+    # Install agent-launch (standalone agent launcher)
+    if [ -f "$SCRIPT_DIR/agent-launch" ]; then
+        cp "$SCRIPT_DIR/agent-launch" "$install_dir/agent-launch"
+        chmod +x "$install_dir/agent-launch"
+        ln -sf agent-launch "$install_dir/agent-claude"
+        ln -sf agent-launch "$install_dir/agent-codex"
+        success "Installed agent-claude and agent-codex to $install_dir"
     fi
 
     # Copy skills/templates to install dir so setup works from installed location
@@ -797,7 +809,7 @@ start_single_session() {
 
     # Check for existing session for THIS feature
     local sessions_dir="$main_project_root/.agent-sessions"
-    if [ -L "$sessions_dir/${feature}.session" ]; then
+    if [ -L "$sessions_dir/duo-${feature}.session" ]; then
         warn "Session already exists for feature '$feature'."
         warn "To continue: agent-duo run --feature $feature"
         warn "To start fresh: agent-duo cleanup --feature $feature && agent-duo start $feature"
@@ -908,7 +920,7 @@ start_single_session() {
 
     # Register session in main project's .agent-sessions directory
     mkdir -p "$sessions_dir"
-    ln -sfn "$peer_sync" "$sessions_dir/${feature}.session"
+    ln -sfn "$peer_sync" "$sessions_dir/duo-${feature}.session"
 
     # Ensure .peer-sync, .agent-sessions, .claude, and .agents are excluded from git
     local git_exclude="$main_project_root/.git/info/exclude"
@@ -1634,36 +1646,98 @@ cmd_status() {
         esac
     done
 
-    # Try to resolve session
     if [ -n "$feature_arg" ]; then
-        # Specific feature requested
+        # Specific feature requested - show only that session
         resolve_session --feature "$feature_arg"
         show_single_status "$RESOLVED_PEER_SYNC"
-    elif resolve_session 2>/dev/null; then
-        # Single session or in a worktree - show it
-        show_single_status "$RESOLVED_PEER_SYNC"
+    elif discover_feature_from_cwd >/dev/null 2>&1; then
+        # Inside a worktree - show current session detail
+        local root
+        root="$(get_project_root)"
+        show_single_status "$root/.peer-sync"
     else
-        # In main project with multiple sessions or no session
+        # At project root (or no .peer-sync found) - unified cross-type view
         local main_root
         main_root="$(get_main_project_root 2>/dev/null)" || die "Not in a git repository"
+        show_all_sessions "$main_root"
+    fi
+}
 
-        # Show all sessions from registry
-        local sessions
-        sessions="$(list_active_sessions "$main_root")"
+# Unified project-root status: shows ALL session types (duo, solo, claude, codex)
+show_all_sessions() {
+    local main_root="$1"
+    local sessions_dir="$main_root/.agent-sessions"
 
-        if [ -z "$sessions" ]; then
-            die "No active sessions found. Start one with: agent-duo start <feature>"
+    if [ ! -d "$sessions_dir" ]; then
+        die "No active sessions found. Start one with: agent-duo start <feature>"
+    fi
+
+    local has_any=false
+
+    # Show orchestrated sessions (duo-* and solo-* symlinks)
+    for session_link in "$sessions_dir"/duo-*.session "$sessions_dir"/solo-*.session; do
+        [ -L "$session_link" ] || continue
+
+        local filename
+        filename="$(basename "$session_link" .session)"
+        local entry_type="${filename%%-*}"   # "duo" or "solo"
+        local feature="${filename#*-}"       # strip first prefix
+
+        local peer_sync_path
+        peer_sync_path="$(readlink "$session_link" 2>/dev/null)" || continue
+        [ -d "$peer_sync_path" ] && [ -f "$peer_sync_path/session" ] || continue
+
+        local state
+        state="$(cat "$peer_sync_path/session" 2>/dev/null)"
+
+        if [ "$has_any" = false ]; then
+            has_any=true
+            echo ""
+            echo "=== All Sessions ==="
         fi
 
         echo ""
-        echo "=== All Agent Duo Sessions ==="
+        echo "━━━ [$entry_type] $feature ($state) ━━━"
+        show_single_status "$peer_sync_path"
+    done
 
-        while IFS=: read -r feat root state; do
-            [ -z "$feat" ] && continue
+    # Show standalone launcher sessions (claude-* and codex-* plain files)
+    for session_file in "$sessions_dir"/claude-*.session "$sessions_dir"/codex-*.session; do
+        [ -f "$session_file" ] && [ ! -L "$session_file" ] || continue
+
+        if [ "$has_any" = false ]; then
+            has_any=true
             echo ""
-            echo "━━━ Feature: $feat ($state) ━━━"
-            show_single_status "$root/.peer-sync"
-        done <<< "$sessions"
+            echo "=== All Sessions ==="
+        fi
+
+        local filename
+        filename="$(basename "$session_file" .session)"
+        local agent mode tmux_name workdir ttyd_port started
+        agent="$(grep '^agent=' "$session_file" 2>/dev/null | cut -d= -f2-)"
+        mode="$(grep '^mode=' "$session_file" 2>/dev/null | cut -d= -f2-)"
+        tmux_name="$(grep '^tmux=' "$session_file" 2>/dev/null | cut -d= -f2-)"
+        workdir="$(grep '^workdir=' "$session_file" 2>/dev/null | cut -d= -f2-)"
+        ttyd_port="$(grep '^ttyd_port=' "$session_file" 2>/dev/null | cut -d= -f2-)"
+        started="$(grep '^started=' "$session_file" 2>/dev/null | cut -d= -f2-)"
+
+        local tmux_status="dead"
+        if [ -n "$tmux_name" ] && tmux_session_exists "$tmux_name"; then
+            tmux_status="alive"
+        fi
+
+        echo ""
+        echo "━━━ $filename ━━━"
+        echo "  Agent:   $agent"
+        echo "  Mode:    $mode"
+        echo "  tmux:    $tmux_name ($tmux_status)"
+        echo "  Workdir: $workdir"
+        [ -n "$ttyd_port" ] && echo "  Web URL: http://localhost:${ttyd_port}"
+        [ -n "$started" ] && echo "  Started: $started"
+    done
+
+    if [ "$has_any" = false ]; then
+        die "No active sessions found. Start one with: agent-duo start <feature>"
     fi
 }
 
@@ -1671,8 +1745,16 @@ cmd_status() {
 show_single_status() {
     local peer_sync="$1"
 
+    local session_mode="Duo"
+    if [ -f "$peer_sync/mode" ]; then
+        case "$(cat "$peer_sync/mode")" in
+            solo) session_mode="Solo" ;;
+            duo)  session_mode="Duo" ;;
+        esac
+    fi
+
     echo ""
-    echo "=== Agent Duo Status ==="
+    echo "=== Agent $session_mode Status ==="
     echo ""
 
     if [ -f "$peer_sync/feature" ]; then
@@ -2020,8 +2102,8 @@ cleanup_single_session() {
     persist_workflow_feedback "$peer_sync" "$feature" "duo"
 
     # Remove session from registry
-    if [ -L "$sessions_dir/${feature}.session" ]; then
-        rm -f "$sessions_dir/${feature}.session"
+    if [ -L "$sessions_dir/duo-${feature}.session" ]; then
+        rm -f "$sessions_dir/duo-${feature}.session"
         info "Removed from registry"
     fi
 

@@ -116,22 +116,40 @@ get_main_project_root() {
     die "Not in a git repository"
 }
 
+# Registry prefix for session files. Set by each entry point:
+#   agent-duo sets SESSION_REGISTRY_PREFIX="duo"
+#   agent-solo sets SESSION_REGISTRY_PREFIX="solo"
+# When set, session files are named ${prefix}-${feature}.session
+SESSION_REGISTRY_PREFIX="${SESSION_REGISTRY_PREFIX:-}"
+
 # List all active sessions from .agent-sessions registry
 # Usage: list_active_sessions [main_project_root]
-# Output: feature_name:root_worktree_path (one per line)
+# Output: feature_name:root_worktree_path:state (one per line)
+# Respects SESSION_REGISTRY_PREFIX if set (scans only matching prefix)
 list_active_sessions() {
     local main_root="${1:-$(get_main_project_root)}"
     local sessions_dir="$main_root/.agent-sessions"
 
     [ -d "$sessions_dir" ] || return 0
 
-    for session_link in "$sessions_dir"/*.session; do
+    local glob_pattern
+    if [ -n "$SESSION_REGISTRY_PREFIX" ]; then
+        glob_pattern="$sessions_dir/${SESSION_REGISTRY_PREFIX}-*.session"
+    else
+        glob_pattern="$sessions_dir/*.session"
+    fi
+
+    for session_link in $glob_pattern; do
         [ -L "$session_link" ] || continue
 
-        # Extract feature name from filename (feat1.session -> feat1)
+        # Extract feature name from filename
         local filename
         filename="$(basename "$session_link")"
         local feature="${filename%.session}"
+        # Strip prefix if present
+        if [ -n "$SESSION_REGISTRY_PREFIX" ]; then
+            feature="${feature#${SESSION_REGISTRY_PREFIX}-}"
+        fi
 
         # Resolve symlink to get root worktree path
         local peer_sync_path
@@ -153,11 +171,28 @@ list_active_sessions() {
 # Get session root worktree path for a specific feature
 # Usage: get_session_root <feature> [main_project_root]
 # Returns: path to root worktree for this feature
+# Tries prefixed filename first if SESSION_REGISTRY_PREFIX is set,
+# then falls back to unprefixed for backward compatibility
 get_session_root() {
     local feature="$1"
     local main_root="${2:-$(get_main_project_root)}"
-    local session_link="$main_root/.agent-sessions/${feature}.session"
+    local sessions_dir="$main_root/.agent-sessions"
 
+    # Try prefixed filename first
+    if [ -n "$SESSION_REGISTRY_PREFIX" ]; then
+        local prefixed_link="$sessions_dir/${SESSION_REGISTRY_PREFIX}-${feature}.session"
+        if [ -L "$prefixed_link" ]; then
+            local peer_sync_path
+            peer_sync_path="$(readlink "$prefixed_link")"
+            if [ -d "$peer_sync_path" ]; then
+                dirname "$peer_sync_path"
+                return 0
+            fi
+        fi
+    fi
+
+    # Fall back to unprefixed (backward compat with existing sessions)
+    local session_link="$sessions_dir/${feature}.session"
     if [ -L "$session_link" ]; then
         local peer_sync_path
         peer_sync_path="$(readlink "$session_link")"
