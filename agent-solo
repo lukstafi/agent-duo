@@ -2529,6 +2529,20 @@ cmd_run() {
                     fi
                 fi
 
+                # Check for "Proceed to merge" trigger (consistent with duo mode)
+                if pr_has_merge_trigger "$pr_url"; then
+                    echo ""
+                    success "Merge trigger detected ('Proceed to merge' comment found)!"
+                    info "Triggering final merge..."
+                    trigger_solo_final_merge "$coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
+                    if is_pr_merged "$pr_url"; then
+                        success "PR merged successfully!"
+                        echo "accepted" > "$peer_sync/session"
+                        run_suggest_refactor_solo "$peer_sync" "$coder_session" "$feature"
+                    fi
+                    break
+                fi
+
                 # Check for new comments
                 # On first entry, trigger if PR has any reviews to process
                 local needs_attention=false
