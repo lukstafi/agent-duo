@@ -1100,13 +1100,13 @@ start_ttyd_mode() {
     local claude_port=$CLAUDE_PORT
     local codex_port=$CODEX_PORT
 
-    ttyd -p "$orchestrator_port" -W tmux attach -t "${session_name}-orchestrator" &
+    ttyd -p "$orchestrator_port" -t titleFixed="orchestrator: ${feature}" -W tmux attach -t "${session_name}-orchestrator" &
     echo $! > "$peer_sync/pids/ttyd-orchestrator.pid"
 
-    ttyd -p "$claude_port" -W tmux attach -t "${session_name}-claude" &
+    ttyd -p "$claude_port" -t titleFixed="claude: ${feature}" -W tmux attach -t "${session_name}-claude" &
     echo $! > "$peer_sync/pids/ttyd-claude.pid"
 
-    ttyd -p "$codex_port" -W tmux attach -t "${session_name}-codex" &
+    ttyd -p "$codex_port" -t titleFixed="codex: ${feature}" -W tmux attach -t "${session_name}-codex" &
     echo $! > "$peer_sync/pids/ttyd-codex.pid"
 
     success "Started ttyd servers"

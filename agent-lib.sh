@@ -668,7 +668,7 @@ restart_ttyd_for_session() {
 
     # Start ttyd
     info "Starting ttyd for $name on port $port..."
-    ttyd -p "$port" -W tmux attach -t "$tmux_session" &
+    ttyd -p "$port" -t titleFixed="$name ($tmux_session)" -W tmux attach -t "$tmux_session" &
     echo $! > "$pidfile"
     sleep 0.5
 

@@ -602,13 +602,13 @@ start_ttyd_mode_solo() {
     local coder_port=$CODER_PORT
     local reviewer_port=$REVIEWER_PORT
 
-    ttyd -p "$orchestrator_port" -W tmux attach -t "${session_name}-orchestrator" &
+    ttyd -p "$orchestrator_port" -t titleFixed="orchestrator: ${feature}" -W tmux attach -t "${session_name}-orchestrator" &
     echo $! > "$peer_sync/pids/ttyd-orchestrator.pid"
 
-    ttyd -p "$coder_port" -W tmux attach -t "${session_name}-coder" &
+    ttyd -p "$coder_port" -t titleFixed="${coder}: ${feature}" -W tmux attach -t "${session_name}-coder" &
     echo $! > "$peer_sync/pids/ttyd-coder.pid"
 
-    ttyd -p "$reviewer_port" -W tmux attach -t "${session_name}-reviewer" &
+    ttyd -p "$reviewer_port" -t titleFixed="${reviewer}: ${feature}" -W tmux attach -t "${session_name}-reviewer" &
     echo $! > "$peer_sync/pids/ttyd-reviewer.pid"
 
     success "Started ttyd servers"
