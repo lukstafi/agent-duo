@@ -1721,11 +1721,13 @@ cmd_run() {
     echo "Max rounds:     $max_rounds"
     echo ""
 
-    # Calculate worktree path
+    # Calculate worktree path (use main project root, not the orchestrator worktree)
+    local main_root
+    main_root="$(get_main_project_root)"
     local project_name
-    project_name="$(basename "$root")"
+    project_name="$(basename "$main_root")"
     local parent_dir
-    parent_dir="$(dirname "$root")"
+    parent_dir="$(dirname "$main_root")"
     local worktree="$parent_dir/${project_name}-${feature}"
 
     # Load codex thinking effort from session
@@ -2250,7 +2252,9 @@ cmd_run() {
     fi
 
     # Main loop: Sequential work/review
-    local round=1
+    # Resume from persisted round if restarting
+    local round
+    round="$(cat "$peer_sync/round" 2>/dev/null)" || round=1
 
     while [ "$round" -le "$max_rounds" ]; do
         # Check if session is complete
@@ -2265,6 +2269,20 @@ cmd_run() {
             success "PR created - session complete!"
             echo ""
             echo "PR: $(cat "$peer_sync/coder.pr")"
+            break
+        fi
+
+        # Check if review from a previous run was already approved
+        local prev_review="$peer_sync/reviews/round-${round}-review.md"
+        if [ -f "$prev_review" ] && grep -qi "APPROVE" "$prev_review" 2>/dev/null; then
+            success "Found approved review (round $round). Creating PR..."
+            if ( lib_create_pr "$feature" "coder" "$worktree" "$root" "$peer_sync" "$feature" "solo" "Solution for $feature" \
+                 && persist_workflow_feedback "$peer_sync" "$feature" "solo" \
+                 && echo "complete" > "$peer_sync/session" ); then
+                success "PR created!"
+            else
+                warn "PR creation failed — create manually with: agent-solo pr"
+            fi
             break
         fi
 
@@ -2384,8 +2402,14 @@ cmd_run() {
         local review_file="$peer_sync/reviews/round-${round}-review.md"
         if [ -f "$review_file" ]; then
             if grep -qi "APPROVE" "$review_file" 2>/dev/null; then
-                success "Reviewer approved! Ready for PR."
-                info "Coder can now create PR with: agent-solo pr"
+                success "Reviewer approved! Creating PR..."
+                if ( lib_create_pr "$feature" "coder" "$worktree" "$root" "$peer_sync" "$feature" "solo" "Solution for $feature" \
+                     && persist_workflow_feedback "$peer_sync" "$feature" "solo" \
+                     && echo "complete" > "$peer_sync/session" ); then
+                    success "PR created!"
+                else
+                    warn "PR creation failed — create manually with: agent-solo pr"
+                fi
                 break
             else
                 info "Reviewer requested changes. Proceeding to next round."
