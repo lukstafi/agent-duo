@@ -1274,8 +1274,8 @@ lib_cmd_signal() {
 
     # Validate status
     case "$status" in
-        gathering|gather-done|clarifying|clarify-done|pushing-back|pushback-done|planning|plan-done|plan-reviewing|plan-review-done|needs-clarify|working|done|reviewing|review-done|updating-docs|docs-update-done|integrating|integrate-done|final-merging|final-merge-done|interrupted|error|pr-created|escalated) ;;
-        *) die "Invalid status: $status (valid: gathering, gather-done, clarifying, clarify-done, pushing-back, pushback-done, planning, plan-done, plan-reviewing, plan-review-done, needs-clarify, working, done, reviewing, review-done, updating-docs, docs-update-done, integrating, integrate-done, final-merging, final-merge-done, interrupted, error, pr-created, escalated)" ;;
+        gathering|gather-done|clarifying|clarify-done|pushing-back|pushback-done|planning|plan-done|plan-reviewing|plan-review-done|needs-clarify|working|done|reviewing|review-done|updating-docs|docs-update-done|integrating|integrate-done|final-merging|final-merge-done|suggest-refactor-done|interrupted|error|pr-created|escalated) ;;
+        *) die "Invalid status: $status (valid: gathering, gather-done, clarifying, clarify-done, pushing-back, pushback-done, planning, plan-done, plan-reviewing, plan-review-done, needs-clarify, working, done, reviewing, review-done, updating-docs, docs-update-done, integrating, integrate-done, final-merging, final-merge-done, suggest-refactor-done, interrupted, error, pr-created, escalated)" ;;
     esac
 
     local content="${status}|$(date +%s)|${message}"
@@ -2028,6 +2028,7 @@ install_duo_skills_to_worktree() {
     install_skill "$templates_dir/duo-merge-amend.md" "$claude_skills/duo-merge-amend.md" "/duo-merge-amend"
     install_skill "$templates_dir/duo-integrate.md" "$claude_skills/duo-integrate.md" "/duo-integrate"
     install_skill "$templates_dir/duo-final-merge.md" "$claude_skills/duo-final-merge.md" "/duo-final-merge"
+    install_skill "$templates_dir/duo-suggest-refactor.md" "$claude_skills/duo-suggest-refactor.md" "/duo-suggest-refactor"
 
     # Install Codex skills (project-scoped path is .agents/skills/)
     local codex_skills="$worktree/.agents/skills"
@@ -2037,6 +2038,7 @@ install_duo_skills_to_worktree() {
     mkdir -p "$codex_skills/duo-merge-vote" "$codex_skills/duo-merge-debate" "$codex_skills/duo-merge-execute"
     mkdir -p "$codex_skills/duo-merge-review" "$codex_skills/duo-merge-amend"
     mkdir -p "$codex_skills/duo-integrate" "$codex_skills/duo-final-merge"
+    mkdir -p "$codex_skills/duo-suggest-refactor"
 
     install_skill "$templates_dir/duo-work.md" "$codex_skills/duo-work/SKILL.md" "\$duo-work"
     install_skill "$templates_dir/duo-review.md" "$codex_skills/duo-review/SKILL.md" "\$duo-review"
@@ -2054,6 +2056,7 @@ install_duo_skills_to_worktree() {
     install_skill "$templates_dir/duo-merge-amend.md" "$codex_skills/duo-merge-amend/SKILL.md" "\$duo-merge-amend"
     install_skill "$templates_dir/duo-integrate.md" "$codex_skills/duo-integrate/SKILL.md" "\$duo-integrate"
     install_skill "$templates_dir/duo-final-merge.md" "$codex_skills/duo-final-merge/SKILL.md" "\$duo-final-merge"
+    install_skill "$templates_dir/duo-suggest-refactor.md" "$codex_skills/duo-suggest-refactor/SKILL.md" "\$duo-suggest-refactor"
 }
 
 # Install solo skills to a worktree for both Claude and Codex
@@ -2077,6 +2080,7 @@ install_solo_skills_to_worktree() {
     install_skill "$templates_dir/solo-pr-comment.md" "$claude_skills/solo-pr-comment.md" "/solo-pr-comment"
     install_skill "$templates_dir/solo-integrate.md" "$claude_skills/solo-integrate.md" "/solo-integrate"
     install_skill "$templates_dir/solo-final-merge.md" "$claude_skills/solo-final-merge.md" "/solo-final-merge"
+    install_skill "$templates_dir/solo-suggest-refactor.md" "$claude_skills/solo-suggest-refactor.md" "/solo-suggest-refactor"
 
     # Install Codex skills (project-scoped path is .agents/skills/)
     local codex_skills="$worktree/.agents/skills"
@@ -2084,6 +2088,7 @@ install_solo_skills_to_worktree() {
     mkdir -p "$codex_skills/solo-reviewer-work" "$codex_skills/solo-reviewer-clarify"
     mkdir -p "$codex_skills/solo-reviewer-gather" "$codex_skills/solo-reviewer-pushback" "$codex_skills/solo-reviewer-plan"
     mkdir -p "$codex_skills/solo-pr-comment" "$codex_skills/solo-integrate" "$codex_skills/solo-final-merge"
+    mkdir -p "$codex_skills/solo-suggest-refactor"
 
     install_skill "$templates_dir/solo-coder-work.md" "$codex_skills/solo-coder-work/SKILL.md" "\$solo-coder-work"
     install_skill "$templates_dir/solo-coder-clarify.md" "$codex_skills/solo-coder-clarify/SKILL.md" "\$solo-coder-clarify"
@@ -2096,6 +2101,7 @@ install_solo_skills_to_worktree() {
     install_skill "$templates_dir/solo-pr-comment.md" "$codex_skills/solo-pr-comment/SKILL.md" "\$solo-pr-comment"
     install_skill "$templates_dir/solo-integrate.md" "$codex_skills/solo-integrate/SKILL.md" "\$solo-integrate"
     install_skill "$templates_dir/solo-final-merge.md" "$codex_skills/solo-final-merge/SKILL.md" "\$solo-final-merge"
+    install_skill "$templates_dir/solo-suggest-refactor.md" "$codex_skills/solo-suggest-refactor/SKILL.md" "\$solo-suggest-refactor"
 }
 
 # List of all duo skill names (for cleanup of legacy global installs)
@@ -2103,14 +2109,14 @@ DUO_SKILLS=(
     "duo-work" "duo-review" "duo-clarify" "duo-pushback"
     "duo-plan" "duo-plan-review" "duo-amend" "duo-update-docs" "duo-pr-comment"
     "duo-merge-vote" "duo-merge-debate" "duo-merge-execute" "duo-merge-review" "duo-merge-amend"
-    "duo-integrate" "duo-final-merge"
+    "duo-integrate" "duo-final-merge" "duo-suggest-refactor"
 )
 
 # List of all solo skill names (for cleanup of legacy global installs)
 SOLO_SKILLS=(
     "solo-coder-work" "solo-coder-clarify" "solo-coder-plan"
     "solo-reviewer-work" "solo-reviewer-clarify" "solo-reviewer-gather" "solo-reviewer-pushback" "solo-reviewer-plan"
-    "solo-pr-comment" "solo-integrate" "solo-final-merge"
+    "solo-pr-comment" "solo-integrate" "solo-final-merge" "solo-suggest-refactor"
 )
 
 # Check and warn about legacy global skill installations
@@ -2363,6 +2369,14 @@ case "$phase" in
         esac
         log_debug "signaling docs-update-done"
         $signal_cmd signal "$agent" docs-update-done "completed via hook"
+        ;;
+    suggest-refactor)
+        # Don't override if already suggest-refactor-done
+        case "$current_status" in
+            suggest-refactor-done) log_debug "skipping (already $current_status)"; exit 0 ;;
+        esac
+        log_debug "signaling suggest-refactor-done"
+        $signal_cmd signal "$agent" suggest-refactor-done "completed via hook"
         ;;
     *)
         log_debug "unknown phase: $phase"
@@ -2919,4 +2933,190 @@ lib_create_pr() {
 
     # Return PR URL for caller
     echo "$pr_url"
+}
+
+#------------------------------------------------------------------------------
+# Suggest-Refactor Phase (shared between duo and solo modes)
+#------------------------------------------------------------------------------
+
+# Run suggest-refactor phase for duo mode
+# Called after session transitions to "accepted" (PR merged)
+# Usage: run_suggest_refactor_duo <peer_sync> <claude_session> <codex_session> <feature>
+run_suggest_refactor_duo() {
+    local peer_sync="$1"
+    local claude_session="$2"
+    local codex_session="$3"
+    local feature="$4"
+
+    info "=== Suggest-Refactor Phase ==="
+    echo "suggest-refactor" > "$peer_sync/phase"
+
+    # Reset both agent statuses to working
+    atomic_write "$peer_sync/claude.status" "working|$(date +%s)|writing refactoring suggestions"
+    atomic_write "$peer_sync/codex.status" "working|$(date +%s)|writing refactoring suggestions"
+
+    # Send skill to both agents in parallel
+    info "Asking both agents for refactoring suggestions..."
+    send_to_agent "claude" "$claude_session" "$peer_sync" skill "duo-suggest-refactor"
+    send_to_agent "codex" "$codex_session" "$peer_sync" skill "duo-suggest-refactor"
+
+    # Wait for both to signal suggest-refactor-done (5 min timeout)
+    local sr_start=$SECONDS
+    local sr_timeout=300
+    local claude_done=false
+    local codex_done=false
+
+    while true; do
+        local elapsed=$((SECONDS - sr_start))
+        local claude_status codex_status
+        claude_status="$(get_agent_status "claude" "$peer_sync")"
+        codex_status="$(get_agent_status "codex" "$peer_sync")"
+
+        [[ "$claude_status" == "suggest-refactor-done" ]] && claude_done=true
+        [[ "$codex_status" == "suggest-refactor-done" ]] && codex_done=true
+
+        if $claude_done && $codex_done; then
+            success "Both agents completed suggest-refactor"
+            break
+        fi
+
+        if [ "$elapsed" -ge "$sr_timeout" ]; then
+            warn "Suggest-refactor timeout (${sr_timeout}s)"
+            break
+        fi
+
+        printf "\r  Waiting for suggest-refactor... claude=%s codex=%s (%ds)  " "$claude_status" "$codex_status" "$elapsed"
+        sleep 5
+    done
+    echo ""
+
+    # Collect and post suggestions
+    _post_suggest_refactor_comment "$peer_sync" "$feature" "duo" "claude" "codex"
+}
+
+# Run suggest-refactor phase for solo mode
+# Called after session transitions to "accepted" (PR merged)
+# Usage: run_suggest_refactor_solo <peer_sync> <coder_session> <feature>
+run_suggest_refactor_solo() {
+    local peer_sync="$1"
+    local coder_session="$2"
+    local feature="$3"
+
+    info "=== Suggest-Refactor Phase ==="
+    echo "suggest-refactor" > "$peer_sync/phase"
+
+    # Reset coder status to working
+    atomic_write "$peer_sync/coder.status" "working|$(date +%s)|writing refactoring suggestions"
+
+    # Send skill to coder
+    info "Asking coder for refactoring suggestions..."
+    send_to_agent "coder" "$coder_session" "$peer_sync" skill "solo-suggest-refactor"
+
+    # Wait for suggest-refactor-done (5 min timeout)
+    local sr_start=$SECONDS
+    local sr_timeout=300
+
+    while true; do
+        local elapsed=$((SECONDS - sr_start))
+        local status
+        status="$(get_agent_status "coder" "$peer_sync")"
+
+        if [[ "$status" == "suggest-refactor-done" ]]; then
+            success "Coder completed suggest-refactor"
+            break
+        fi
+
+        if [ "$elapsed" -ge "$sr_timeout" ]; then
+            warn "Suggest-refactor timeout (${sr_timeout}s)"
+            break
+        fi
+
+        printf "\r  Waiting for suggest-refactor... coder=%s (%ds)  " "$status" "$elapsed"
+        sleep 5
+    done
+    echo ""
+
+    # Collect and post suggestions
+    _post_suggest_refactor_comment "$peer_sync" "$feature" "solo" "coder"
+}
+
+# Internal helper: collect suggest-refactor files, post as PR comment, send ntfy
+# Usage: _post_suggest_refactor_comment <peer_sync> <feature> <mode> <agent1> [agent2]
+_post_suggest_refactor_comment() {
+    local peer_sync="$1"
+    local feature="$2"
+    local mode="$3"
+    shift 3
+    local agents=("$@")
+
+    # Combine suggestions from all agents
+    local combined=""
+    for agent in "${agents[@]}"; do
+        local file="$peer_sync/suggest-refactor-${agent}.md"
+        if [ -f "$file" ]; then
+            local content
+            content="$(cat "$file")"
+            if [ -n "$combined" ]; then
+                combined="${combined}
+
+---
+
+"
+            fi
+            combined="${combined}${content}"
+        else
+            if [ -n "$combined" ]; then
+                combined="${combined}
+
+---
+
+"
+            fi
+            combined="${combined}*${agent} did not produce refactoring suggestions.*"
+        fi
+    done
+
+    if [ -z "$combined" ]; then
+        warn "No refactoring suggestions were produced"
+        return 0
+    fi
+
+    # Save combined suggestions locally
+    echo "$combined" > "$peer_sync/suggest-refactor-combined.md"
+    info "Refactoring suggestions saved to $peer_sync/suggest-refactor-combined.md"
+
+    # Find the merged PR URL
+    local pr_url=""
+    for agent in "${agents[@]}"; do
+        local pr_file="$peer_sync/${agent}.pr"
+        if [ -f "$pr_file" ]; then
+            local candidate
+            candidate="$(cat "$pr_file")"
+            if is_pr_merged "$candidate" 2>/dev/null; then
+                pr_url="$candidate"
+                break
+            fi
+        fi
+    done
+
+    # Post as PR comment
+    if [ -n "$pr_url" ]; then
+        local comment_body="## Refactoring Suggestions
+
+*Post-merge retrospective: what would we do differently if starting from scratch?*
+
+${combined}"
+        if gh pr comment "$pr_url" --body "$comment_body" >/dev/null 2>&1; then
+            success "Posted refactoring suggestions as PR comment"
+        else
+            warn "Failed to post PR comment (suggestions saved locally)"
+        fi
+    else
+        warn "No merged PR found to post comment on (suggestions saved locally)"
+    fi
+
+    # Send ntfy notification
+    local summary
+    summary="$(echo "$combined" | head -c 500)"
+    send_ntfy "[agent-${mode}] Refactor Suggestions: ${feature}" "$summary" "low" "bulb,memo" 2>/dev/null || true
 }

@@ -2445,6 +2445,7 @@ cmd_run() {
                     if is_pr_merged "$pr_url"; then
                         success "PR accepted and merged to main. Session complete!"
                         echo "accepted" > "$peer_sync/session"
+                        run_suggest_refactor_solo "$peer_sync" "$coder_session" "$feature"
                     else
                         info "PR closed without merging. Session complete."
                         echo "closed" > "$peer_sync/session"
@@ -2572,6 +2573,7 @@ cmd_run() {
                         if is_pr_merged "$pr_url"; then
                             success "PR merged successfully!"
                             echo "accepted" > "$peer_sync/session"
+                            run_suggest_refactor_solo "$peer_sync" "$coder_session" "$feature"
                         fi
                         break
                     fi

@@ -3088,8 +3088,8 @@ cmd_signal() {
 
     # Validate status
     case "$status" in
-        clarifying|clarify-done|pushing-back|pushback-done|planning|plan-done|plan-reviewing|plan-review-done|needs-clarify|working|done|reviewing|review-done|updating-docs|docs-update-done|integrating|integrate-done|final-merging|final-merge-done|interrupted|error|pr-created|escalated|voting|vote-done|debating|debate-done|merging|merge-done|merge-reviewing|merge-review-done) ;;
-        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, planning, plan-done, plan-reviewing, plan-review-done, needs-clarify, working, done, reviewing, review-done, updating-docs, docs-update-done, integrating, integrate-done, final-merging, final-merge-done, interrupted, error, pr-created, escalated, voting, vote-done, debating, debate-done, merging, merge-done, merge-reviewing, merge-review-done)" ;;
+        clarifying|clarify-done|pushing-back|pushback-done|planning|plan-done|plan-reviewing|plan-review-done|needs-clarify|working|done|reviewing|review-done|updating-docs|docs-update-done|integrating|integrate-done|final-merging|final-merge-done|suggest-refactor-done|interrupted|error|pr-created|escalated|voting|vote-done|debating|debate-done|merging|merge-done|merge-reviewing|merge-review-done) ;;
+        *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, planning, plan-done, plan-reviewing, plan-review-done, needs-clarify, working, done, reviewing, review-done, updating-docs, docs-update-done, integrating, integrate-done, final-merging, final-merge-done, suggest-refactor-done, interrupted, error, pr-created, escalated, voting, vote-done, debating, debate-done, merging, merge-done, merge-reviewing, merge-review-done)" ;;
     esac
 
     local content="${status}|$(date +%s)|${message}"
@@ -4527,6 +4527,7 @@ cmd_run() {
                     if is_pr_merged "$claude_pr" || is_pr_merged "$codex_pr"; then
                         success "PR accepted and merged to main. Session complete!"
                         echo "accepted" > "$peer_sync/session"
+                        run_suggest_refactor_duo "$peer_sync" "$claude_session" "$codex_session" "$feature"
                     else
                         info "PRs closed without merging. Session complete."
                         echo "closed" > "$peer_sync/session"
@@ -4805,6 +4806,7 @@ cmd_run() {
                             if is_pr_merged "$remaining_pr"; then
                                 success "PR merged successfully!"
                                 echo "accepted" > "$peer_sync/session"
+                                run_suggest_refactor_duo "$peer_sync" "$claude_session" "$codex_session" "$feature"
                             fi
                             break
                         fi
