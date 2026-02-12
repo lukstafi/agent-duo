@@ -1,0 +1,645 @@
+#!/usr/bin/env bash
+# agent-launch - Shared launcher for agent-claude and agent-codex
+#
+# Invoked via symlinks: agent-claude or agent-codex
+# Provides managed tmux sessions for individual agent use without orchestration.
+#
+# Requires Bash 4.0+ (for associative arrays, regex matching, etc.)
+# macOS users: install modern bash via Homebrew: brew install bash
+#
+# Usage: agent-claude <command> [options]
+#        agent-codex  <command> [options]
+#
+# Commands:
+#   <task> --ide [--branch]    Launch with VS Code IDE integration
+#   <task> --ttyd [--branch]   Launch with web terminal (ttyd)
+#   <task> --bare [--branch]   Launch with tmux only
+#   status                     List active sessions
+#   stop <task>                Stop ttyd, keep tmux session
+#   cleanup <task>             Kill tmux session, remove worktree if any
+#   restart <task>             DWIM recovery (reattach tmux, restart ttyd)
+#   attach <task>              Attach to existing tmux session
+#   help                       Show this help
+
+set -e
+
+# Determine script location (resolves symlinks)
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [ -L "$SCRIPT_PATH" ]; do
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    [[ $SCRIPT_PATH != /* ]] && SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+
+# Source shared library
+if [ -f "$SCRIPT_DIR/agent-lib.sh" ]; then
+    # shellcheck source=agent-lib.sh
+    source "$SCRIPT_DIR/agent-lib.sh"
+elif [ -f "$HOME/.local/bin/agent-lib.sh" ]; then
+    # shellcheck source=agent-lib.sh
+    source "$HOME/.local/bin/agent-lib.sh"
+else
+    echo "Error: agent-lib.sh not found" >&2
+    exit 1
+fi
+
+#------------------------------------------------------------------------------
+# Determine agent type from invocation name
+#------------------------------------------------------------------------------
+
+INVOKED_AS="$(basename "$0")"
+
+case "$INVOKED_AS" in
+    agent-claude) AGENT_TYPE="claude"; SESSION_PREFIX="claude" ;;
+    agent-codex)  AGENT_TYPE="codex";  SESSION_PREFIX="codex" ;;
+    agent-launch)
+        die "agent-launch should not be invoked directly. Use agent-claude or agent-codex."
+        ;;
+    *)
+        die "Unknown invocation: $INVOKED_AS. Use agent-claude or agent-codex."
+        ;;
+esac
+
+#------------------------------------------------------------------------------
+# Helpers
+#------------------------------------------------------------------------------
+
+# Get the .agent-sessions directory path (creates if needed)
+get_sessions_dir() {
+    local main_root
+    main_root="$(get_main_project_root)"
+    echo "$main_root/.agent-sessions"
+}
+
+# Get session file path for a task
+session_file_path() {
+    local task="$1"
+    local sessions_dir
+    sessions_dir="$(get_sessions_dir)"
+    echo "$sessions_dir/${SESSION_PREFIX}-${task}.session"
+}
+
+# Build tmux session name: <prefix>-<project>-<task>
+tmux_session_name() {
+    local task="$1"
+    local main_root
+    main_root="$(get_main_project_root)"
+    local project_name
+    project_name="$(basename "$main_root")"
+    echo "${SESSION_PREFIX}-${project_name}-${task}"
+}
+
+# Read a field from a session file
+# Usage: read_session_field <file> <key>
+read_session_field() {
+    local file="$1" key="$2"
+    grep "^${key}=" "$file" 2>/dev/null | cut -d'=' -f2-
+}
+
+# Acquire lock on .agent-sessions/.lock, with trap-based cleanup
+# Sets _LOCK_DIR to the acquired lock path for use by unlock helper
+_LOCK_DIR=""
+_acquire_session_lock() {
+    local sessions_dir="$1"
+    _LOCK_DIR="$sessions_dir/.lock"
+    local max_wait=50
+    local i=0
+    while ! mkdir "$_LOCK_DIR" 2>/dev/null; do
+        sleep 0.05
+        i=$((i + 1))
+        [ "$i" -ge "$max_wait" ] && die "Failed to acquire session lock"
+    done
+    trap '_release_session_lock' EXIT
+}
+
+_release_session_lock() {
+    [ -n "$_LOCK_DIR" ] && rmdir "$_LOCK_DIR" 2>/dev/null || true
+    _LOCK_DIR=""
+    trap - EXIT
+}
+
+# Locked write to session file
+locked_session_write() {
+    local file="$1" content="$2"
+    local sessions_dir
+    sessions_dir="$(dirname "$file")"
+    _acquire_session_lock "$sessions_dir"
+    echo "$content" > "$file"
+    _release_session_lock
+}
+
+# Locked remove of session file
+locked_session_remove() {
+    local file="$1"
+    local sessions_dir
+    sessions_dir="$(dirname "$file")"
+    _acquire_session_lock "$sessions_dir"
+    rm -f "$file"
+    _release_session_lock
+}
+
+# Ensure .agent-sessions is in .git/info/exclude
+ensure_git_exclude() {
+    local main_root
+    main_root="$(get_main_project_root)"
+    local git_exclude="$main_root/.git/info/exclude"
+    if [ -f "$git_exclude" ]; then
+        grep -qxF ".agent-sessions" "$git_exclude" || echo ".agent-sessions" >> "$git_exclude"
+    else
+        mkdir -p "$(dirname "$git_exclude")"
+        echo ".agent-sessions" > "$git_exclude"
+    fi
+}
+
+# Check if ttyd PID is still valid (alive + port in use)
+ttyd_pid_is_valid() {
+    local pid="$1" port="$2"
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ -n "$port" ] && is_port_in_use "$port"
+}
+
+# Wait for agent TUI readiness with timeout
+wait_for_tui() {
+    local session="$1" agent="$2" timeout="${3:-30}"
+    local elapsed=0
+    while [ "$elapsed" -lt "$timeout" ]; do
+        if agent_tui_is_running "$session" "$agent"; then
+            return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    warn "Agent TUI may still be initializing (waited ${timeout}s)"
+    return 0
+}
+
+#------------------------------------------------------------------------------
+# Command: help
+#------------------------------------------------------------------------------
+
+cmd_help() {
+    echo "Usage: $INVOKED_AS <command> [options]"
+    echo ""
+    echo "Launch Commands:"
+    echo "  <task> --ide [--branch]    Launch $AGENT_TYPE with VS Code IDE integration"
+    echo "  <task> --ttyd [--branch]   Launch $AGENT_TYPE with web terminal (ttyd)"
+    echo "  <task> --bare [--branch]   Launch $AGENT_TYPE in tmux only"
+    echo ""
+    echo "Management Commands:"
+    echo "  status                     List active $INVOKED_AS sessions"
+    echo "  stop <task>                Stop ttyd server, keep tmux session"
+    echo "  cleanup <task>             Kill tmux session, remove worktree if any"
+    echo "  restart <task>             DWIM recovery (reattach tmux, restart ttyd)"
+    echo "  attach <task>              Attach to existing tmux session"
+    echo "  help                       Show this help"
+    echo ""
+    echo "Options:"
+    echo "  --branch    Create a git worktree on a new branch named <task>"
+    echo ""
+    echo "Session naming: ${SESSION_PREFIX}-<project>-<task>"
+}
+
+#------------------------------------------------------------------------------
+# Command: start (default when <task> is given with mode flag)
+#------------------------------------------------------------------------------
+
+cmd_start() {
+    local task=""
+    local mode=""
+    local use_branch=false
+
+    # Parse arguments
+    local mode_count=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --ide)    mode="ide"; mode_count=$((mode_count + 1)); shift ;;
+            --ttyd)   mode="ttyd"; mode_count=$((mode_count + 1)); shift ;;
+            --bare)   mode="bare"; mode_count=$((mode_count + 1)); shift ;;
+            --branch) use_branch=true; shift ;;
+            --help|-h) cmd_help; return 0 ;;
+            -*)       die "Unknown option: $1 (try '$INVOKED_AS help')" ;;
+            *)
+                [ -n "$task" ] && die "Unexpected argument: $1"
+                task="$1"; shift
+                ;;
+        esac
+    done
+
+    # Validate arguments
+    [ -z "$task" ] && die "Task name required. Usage: $INVOKED_AS <task> --ide|--ttyd|--bare [--branch]"
+    [ -z "$mode" ] && die "Access mode required: --ide, --ttyd, or --bare"
+    [ "$mode_count" -gt 1 ] && die "Only one access mode allowed. Choose one of: --ide, --ttyd, --bare"
+
+    # Require git repo
+    local main_root
+    main_root="$(get_main_project_root 2>/dev/null)" || die "Not in a git repository"
+    local project_name
+    project_name="$(basename "$main_root")"
+    local parent_dir
+    parent_dir="$(dirname "$main_root")"
+
+    # Session directory
+    local sessions_dir="$main_root/.agent-sessions"
+    mkdir -p "$sessions_dir"
+
+    # Fail fast: session file already exists
+    local session_file
+    session_file="$(session_file_path "$task")"
+    if [ -f "$session_file" ]; then
+        die "Session '${SESSION_PREFIX}-${task}' already exists.
+  To recover: $INVOKED_AS restart $task
+  To remove:  $INVOKED_AS cleanup $task"
+    fi
+
+    local tmux_name
+    tmux_name="$(tmux_session_name "$task")"
+    local workdir="$main_root"
+    local worktree_path=""
+
+    # Handle --branch
+    if [ "$use_branch" = true ]; then
+        # Fail fast: branch already exists
+        if git -C "$main_root" rev-parse --verify "$task" >/dev/null 2>&1; then
+            die "Branch '$task' already exists.
+  To remove: $INVOKED_AS cleanup $task"
+        fi
+
+        # Fail fast: worktree directory already exists
+        worktree_path="$parent_dir/${project_name}-${task}"
+        if [ -d "$worktree_path" ]; then
+            die "Worktree directory already exists: $worktree_path
+  To remove: $INVOKED_AS cleanup $task"
+        fi
+
+        info "Creating worktree and branch '$task' from current HEAD..."
+        git -C "$main_root" worktree add -b "$task" "$worktree_path" HEAD
+        workdir="$worktree_path"
+    fi
+
+    # Kill any existing tmux session with this name (stale leftover)
+    tmux kill-session -t "$tmux_name" 2>/dev/null || true
+
+    # Create tmux session
+    info "Creating tmux session: $tmux_name"
+    tmux new-session -d -s "$tmux_name" -c "$workdir"
+
+    # Launch agent TUI
+    restart_agent_tui "$AGENT_TYPE" "$tmux_name"
+
+    # Mode-specific setup
+    local ttyd_port="" ttyd_pid=""
+
+    case "$mode" in
+        ide)
+            info "Waiting for $AGENT_TYPE TUI to be ready..."
+            wait_for_tui "$tmux_name" "$AGENT_TYPE" 30
+            info "Sending /ide command..."
+            tmux send-keys -t "$tmux_name" -l "/ide"
+            tmux send-keys -t "$tmux_name" Enter
+            sleep 1
+            ;;
+        ttyd)
+            ttyd_port="$(find_available_port "$DEFAULT_BASE_PORT")" || \
+                die "Could not find available port for ttyd"
+
+            # Create a temporary pidfile
+            local pidfile
+            pidfile="$(mktemp)"
+
+            info "Starting ttyd on port $ttyd_port..."
+            ttyd -p "$ttyd_port" -W tmux attach -t "$tmux_name" &
+            ttyd_pid=$!
+            echo "$ttyd_pid" > "$pidfile"
+            sleep 0.5
+
+            # Verify ttyd started
+            if ! kill -0 "$ttyd_pid" 2>/dev/null; then
+                rm -f "$pidfile"
+                die "Failed to start ttyd"
+            fi
+            rm -f "$pidfile"
+            ;;
+        bare)
+            # Nothing extra needed
+            ;;
+    esac
+
+    # Build session file content
+    local content="agent=$AGENT_TYPE
+task=$task
+tmux=$tmux_name
+mode=$mode
+workdir=$workdir"
+
+    [ -n "$worktree_path" ] && content="$content
+worktree=$worktree_path"
+    [ -n "$ttyd_port" ] && content="$content
+ttyd_port=$ttyd_port"
+    [ -n "$ttyd_pid" ] && content="$content
+ttyd_pid=$ttyd_pid"
+    content="$content
+started=$(date +%Y-%m-%dT%H:%M:%S%z)"
+
+    # Write session file
+    locked_session_write "$session_file" "$content"
+    ensure_git_exclude
+
+    success "Session '${SESSION_PREFIX}-${task}' started (mode=$mode)"
+
+    # Final action
+    case "$mode" in
+        ide|bare)
+            exec tmux attach -t "$tmux_name"
+            ;;
+        ttyd)
+            echo ""
+            success "Web terminal: http://localhost:${ttyd_port}"
+            echo "  tmux session: $tmux_name"
+            echo "  To attach:    $INVOKED_AS attach $task"
+            echo "  To stop ttyd: $INVOKED_AS stop $task"
+            echo "  To cleanup:   $INVOKED_AS cleanup $task"
+            ;;
+    esac
+}
+
+#------------------------------------------------------------------------------
+# Command: status
+#------------------------------------------------------------------------------
+
+cmd_status() {
+    local main_root
+    main_root="$(get_main_project_root 2>/dev/null)" || die "Not in a git repository"
+    local sessions_dir="$main_root/.agent-sessions"
+
+    if [ ! -d "$sessions_dir" ]; then
+        info "No sessions found."
+        return 0
+    fi
+
+    local found=false
+
+    for session_file in "$sessions_dir/${SESSION_PREFIX}"-*.session; do
+        [ -f "$session_file" ] && [ ! -L "$session_file" ] || continue
+        found=true
+
+        local task mode tmux_name workdir ttyd_port started worktree
+        task="$(read_session_field "$session_file" task)"
+        mode="$(read_session_field "$session_file" mode)"
+        tmux_name="$(read_session_field "$session_file" tmux)"
+        workdir="$(read_session_field "$session_file" workdir)"
+        ttyd_port="$(read_session_field "$session_file" ttyd_port)"
+        started="$(read_session_field "$session_file" started)"
+        worktree="$(read_session_field "$session_file" worktree)"
+
+        local tmux_status="dead"
+        if tmux_session_exists "$tmux_name"; then
+            tmux_status="alive"
+        fi
+
+        echo ""
+        echo "━━━ ${SESSION_PREFIX}-${task} ━━━"
+        echo "  Agent:    $AGENT_TYPE"
+        echo "  Mode:     $mode"
+        echo "  tmux:     $tmux_name ($tmux_status)"
+        echo "  Workdir:  $workdir"
+        [ -n "$worktree" ] && echo "  Worktree: $worktree"
+        [ -n "$ttyd_port" ] && echo "  Web URL:  http://localhost:${ttyd_port}"
+        [ -n "$started" ] && echo "  Started:  $started"
+    done
+
+    if [ "$found" = false ]; then
+        info "No active $INVOKED_AS sessions."
+    fi
+}
+
+#------------------------------------------------------------------------------
+# Command: stop
+#------------------------------------------------------------------------------
+
+cmd_stop() {
+    local task="$1"
+    [ -z "$task" ] && die "Task name required. Usage: $INVOKED_AS stop <task>"
+
+    local session_file
+    session_file="$(session_file_path "$task")"
+    [ -f "$session_file" ] || die "No session found for '$task'"
+
+    local ttyd_pid ttyd_port
+    ttyd_pid="$(read_session_field "$session_file" ttyd_pid)"
+    ttyd_port="$(read_session_field "$session_file" ttyd_port)"
+
+    if [ -n "$ttyd_pid" ]; then
+        if ttyd_pid_is_valid "$ttyd_pid" "$ttyd_port"; then
+            kill "$ttyd_pid" 2>/dev/null || true
+            success "Stopped ttyd (pid $ttyd_pid, port $ttyd_port)"
+        else
+            warn "ttyd process already gone (stale pid $ttyd_pid)"
+        fi
+    else
+        info "No ttyd running for this session"
+    fi
+
+    # Rewrite session file without ttyd_pid
+    local content
+    content="$(grep -v '^ttyd_pid=' "$session_file")"
+    locked_session_write "$session_file" "$content"
+}
+
+#------------------------------------------------------------------------------
+# Command: cleanup
+#------------------------------------------------------------------------------
+
+cmd_cleanup() {
+    local task="$1"
+    [ -z "$task" ] && die "Task name required. Usage: $INVOKED_AS cleanup <task>"
+
+    local session_file
+    session_file="$(session_file_path "$task")"
+    [ -f "$session_file" ] || die "No session found for '$task'"
+
+    local tmux_name ttyd_pid ttyd_port worktree
+    tmux_name="$(read_session_field "$session_file" tmux)"
+    ttyd_pid="$(read_session_field "$session_file" ttyd_pid)"
+    ttyd_port="$(read_session_field "$session_file" ttyd_port)"
+    worktree="$(read_session_field "$session_file" worktree)"
+
+    # Stop ttyd
+    if [ -n "$ttyd_pid" ] && ttyd_pid_is_valid "$ttyd_pid" "$ttyd_port"; then
+        kill "$ttyd_pid" 2>/dev/null || true
+        info "Stopped ttyd"
+    fi
+
+    # Kill tmux session
+    if tmux_session_exists "$tmux_name"; then
+        tmux kill-session -t "$tmux_name" 2>/dev/null || true
+        info "Killed tmux session: $tmux_name"
+    fi
+
+    # Remove worktree and branch
+    if [ -n "$worktree" ] && [ -d "$worktree" ]; then
+        local main_root
+        main_root="$(get_main_project_root)"
+        cd "$main_root"
+        git worktree remove --force "$worktree" 2>/dev/null || {
+            warn "Could not remove worktree cleanly, forcing removal..."
+            rm -rf "$worktree"
+            git worktree prune
+        }
+        info "Removed worktree: $worktree"
+
+        # Remove branch if it exists
+        local branch_task
+        branch_task="$(read_session_field "$session_file" task)"
+        if git rev-parse --verify "$branch_task" >/dev/null 2>&1; then
+            git branch -D "$branch_task" 2>/dev/null || true
+            info "Removed branch: $branch_task"
+        fi
+    fi
+
+    # Remove session file
+    locked_session_remove "$session_file"
+    success "Cleaned up session: ${SESSION_PREFIX}-${task}"
+}
+
+#------------------------------------------------------------------------------
+# Command: restart
+#------------------------------------------------------------------------------
+
+cmd_restart() {
+    local task="$1"
+    [ -z "$task" ] && die "Task name required. Usage: $INVOKED_AS restart <task>"
+
+    local session_file
+    session_file="$(session_file_path "$task")"
+    [ -f "$session_file" ] || die "No session found for '$task'. Use '$INVOKED_AS $task --ide|--ttyd|--bare' to start."
+
+    local tmux_name mode workdir ttyd_port ttyd_pid
+    tmux_name="$(read_session_field "$session_file" tmux)"
+    mode="$(read_session_field "$session_file" mode)"
+    workdir="$(read_session_field "$session_file" workdir)"
+    ttyd_port="$(read_session_field "$session_file" ttyd_port)"
+    ttyd_pid="$(read_session_field "$session_file" ttyd_pid)"
+
+    # Recreate tmux session if gone
+    if ! tmux_session_exists "$tmux_name"; then
+        info "Recreating tmux session: $tmux_name"
+        tmux new-session -d -s "$tmux_name" -c "$workdir"
+        restart_agent_tui "$AGENT_TYPE" "$tmux_name"
+    fi
+
+    # Mode-specific recovery
+    case "$mode" in
+        ide)
+            if ! agent_tui_is_running "$tmux_name" "$AGENT_TYPE"; then
+                restart_agent_tui "$AGENT_TYPE" "$tmux_name"
+            fi
+            wait_for_tui "$tmux_name" "$AGENT_TYPE" 30
+            info "Sending /ide command..."
+            tmux send-keys -t "$tmux_name" -l "/ide"
+            tmux send-keys -t "$tmux_name" Enter
+            sleep 1
+            exec tmux attach -t "$tmux_name"
+            ;;
+        ttyd)
+            if ! agent_tui_is_running "$tmux_name" "$AGENT_TYPE"; then
+                restart_agent_tui "$AGENT_TYPE" "$tmux_name"
+            fi
+
+            # Restart ttyd if not running
+            if [ -n "$ttyd_pid" ] && ttyd_pid_is_valid "$ttyd_pid" "$ttyd_port"; then
+                info "ttyd already running on port $ttyd_port"
+            else
+                # Allocate new port if old one is taken by something else
+                if [ -n "$ttyd_port" ] && is_port_available "$ttyd_port"; then
+                    # Reuse old port
+                    true
+                else
+                    ttyd_port="$(find_available_port "$DEFAULT_BASE_PORT")" || \
+                        die "Could not find available port for ttyd"
+                fi
+
+                info "Starting ttyd on port $ttyd_port..."
+                ttyd -p "$ttyd_port" -W tmux attach -t "$tmux_name" &
+                ttyd_pid=$!
+                sleep 0.5
+
+                if ! kill -0 "$ttyd_pid" 2>/dev/null; then
+                    die "Failed to start ttyd"
+                fi
+
+                # Update session file with new port/pid
+                local content
+                content="$(grep -v -e '^ttyd_port=' -e '^ttyd_pid=' "$session_file")"
+                content="$content
+ttyd_port=$ttyd_port
+ttyd_pid=$ttyd_pid"
+                locked_session_write "$session_file" "$content"
+            fi
+
+            echo ""
+            success "Web terminal: http://localhost:${ttyd_port}"
+            echo "  To attach: $INVOKED_AS attach $task"
+            ;;
+        bare)
+            if ! agent_tui_is_running "$tmux_name" "$AGENT_TYPE"; then
+                restart_agent_tui "$AGENT_TYPE" "$tmux_name"
+            fi
+            exec tmux attach -t "$tmux_name"
+            ;;
+    esac
+}
+
+#------------------------------------------------------------------------------
+# Command: attach
+#------------------------------------------------------------------------------
+
+cmd_attach() {
+    local task="$1"
+    [ -z "$task" ] && die "Task name required. Usage: $INVOKED_AS attach <task>"
+
+    local session_file
+    session_file="$(session_file_path "$task")"
+    [ -f "$session_file" ] || die "No session found for '$task'"
+
+    local tmux_name
+    tmux_name="$(read_session_field "$session_file" tmux)"
+
+    if ! tmux_session_exists "$tmux_name"; then
+        die "tmux session '$tmux_name' no longer exists. Use '$INVOKED_AS restart $task' to recover."
+    fi
+
+    exec tmux attach -t "$tmux_name"
+}
+
+#------------------------------------------------------------------------------
+# Main dispatch
+#------------------------------------------------------------------------------
+
+main() {
+    if [ $# -eq 0 ]; then
+        cmd_help
+        exit 0
+    fi
+
+    local cmd="$1"
+    shift
+
+    case "$cmd" in
+        status)      cmd_status "$@" ;;
+        stop)        cmd_stop "$@" ;;
+        cleanup)     cmd_cleanup "$@" ;;
+        restart)     cmd_restart "$@" ;;
+        attach)      cmd_attach "$@" ;;
+        help|--help|-h) cmd_help ;;
+        --ide|--ttyd|--bare|--branch)
+            die "Task name must come before flags. Usage: $INVOKED_AS <task> --ide|--ttyd|--bare [--branch]"
+            ;;
+        -*)          die "Unknown option: $cmd (try '$INVOKED_AS help')" ;;
+        *)
+            # Default: treat first arg as task name, pass rest to cmd_start
+            cmd_start "$cmd" "$@"
+            ;;
+    esac
+}
+
+main "$@"
