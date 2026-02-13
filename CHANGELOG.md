@@ -4,6 +4,37 @@ All notable changes to agent-duo will be documented in this file.
 
 ## [Unreleased]
 
+## [v0.4] - 2026-02-13
+
+### Added
+- **Standalone agent launchers**: `agent-claude` and `agent-codex` commands for managed tmux sessions without orchestration
+  - Shared `agent-launch` script with `--ide`/`--ttyd`/`--bare` access modes
+  - Optional `--branch` flag for automatic git worktree creation
+  - Prefix-isolated session state (`claude-*`/`codex-*`) in `.agent-sessions/`
+- **Suggest-refactor post-merge phase**: After a PR is merged, agents reflect on what they'd do differently
+  - Suggestions saved locally, posted as PR comment, and sent via ntfy
+- **"Proceed to merge" PR comment trigger** in solo mode (consistent with duo mode)
+- **Local skills**: Skills installed per-project instead of globally (#7)
+  - `doctor` command updated to check templates instead of global skills
+- **Descriptive terminal/browser titles** for all agent sessions
+  - Titles show "agent: task" in VS Code terminal tabs and ttyd browser tabs
+- **Multi-agent enhancement proposal** for Claude sub-agents and teams
+
+### Changed
+- Increased phase timeouts: work 20m→1h, review 10m→30m, vote 10m→3h, debate 5m→40m
+- Vote/debate timeouts now gracefully interrupt agents and create synthetic votes instead of killing the session
+- Namespace duo/solo registry entries (`duo-*`/`solo-*`) with unified cross-type status display
+- Push current branch at start to avoid PRs with unpushed commits
+
+### Fixed
+- Fix orchestrator premature exit after reviewer approval and broken resume
+  - Auto-create PR after approval instead of just exiting
+  - Resume from persisted round number instead of hardcoding round=1
+  - Detect already-approved reviews on restart to create PR immediately
+- Fix agent-solo infinite approve loop: break after reviewer approval
+- Fix glob quoting for paths with spaces and include legacy unprefixed sessions
+- Fix tmux terminal titles for VS Code and standard terminals
+
 ## [v0.3] - 2026-02-04
 
 ### Added
