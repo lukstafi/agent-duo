@@ -664,6 +664,28 @@ Currently: `claude`, `codex`
 
 Future: `gemini`, `grok`, etc. (naming follows same pattern)
 
+## Standalone Agent Launchers
+
+`agent-claude` and `agent-codex` are symlinks to `agent-launch`, installed by `agent-duo setup`. They provide managed tmux sessions for running a single agent without orchestration.
+
+```bash
+agent-claude <task> --ide [--branch]    # VS Code IDE integration
+agent-claude <task> --ttyd [--branch]   # Web terminal (ttyd)
+agent-claude <task> --bare [--branch]   # Plain tmux
+agent-claude status                     # List active sessions
+agent-claude stop <task>                # Stop ttyd, keep tmux
+agent-claude cleanup <task>             # Kill session, remove worktree
+agent-claude restart <task>             # DWIM recovery
+agent-claude attach <task>              # Attach to tmux session
+```
+
+**Key behaviors:**
+- Session naming: `<agent>-<project>-<task>` (e.g., `claude-myapp-refactor`)
+- `--branch` creates a git worktree on a new branch named after the task
+- Session state tracked in `.agent-sessions/<agent>-<task>.session` (same registry as duo/solo)
+- `--ide` mode auto-sends `/ide` command after agent TUI is ready
+- `--ttyd` mode auto-allocates a port and launches a web terminal
+
 ## Agent Solo Mode
 
 Agent-solo is an alternative mode where one agent codes and another reviews in a single worktree:

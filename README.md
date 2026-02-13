@@ -52,6 +52,7 @@ cd agent-duo
 
 This installs:
 - `agent-duo` and/or `agent-solo` CLI to `~/.local/bin/`
+- `agent-claude` and `agent-codex` standalone launchers to `~/.local/bin/`
 - Skills to `~/.claude/commands/` and `~/.codex/skills/`
 - Completion hooks for automatic phase signaling
 
@@ -384,6 +385,36 @@ agent-solo start <feature> --auto-run
 - Clear coder/reviewer roles (swappable with `--coder` and `--reviewer`)
 
 See `agent-solo help` for full command reference.
+
+## Standalone Agent Launchers
+
+`agent-claude` and `agent-codex` provide managed tmux sessions for running a single agent without the full duo/solo orchestration. Useful for ad-hoc tasks, exploration, or when you only need one agent.
+
+```bash
+# Launch Claude in VS Code IDE mode on a task
+agent-claude my-task --ide
+
+# Launch Codex with a web terminal
+agent-codex my-task --ttyd
+
+# Launch in plain tmux (attach directly)
+agent-claude my-task --bare
+
+# Create a git worktree on a new branch for the task
+agent-claude my-task --ide --branch
+```
+
+### Launcher Management
+
+```bash
+agent-claude status              # List active agent-claude sessions
+agent-claude stop <task>         # Stop ttyd, keep tmux session
+agent-claude cleanup <task>      # Kill session, remove worktree if any
+agent-claude restart <task>      # DWIM recovery
+agent-claude attach <task>       # Attach to existing tmux session
+```
+
+Installed automatically by `agent-duo setup` (symlinks to `agent-launch`).
 
 ## Documentation
 
