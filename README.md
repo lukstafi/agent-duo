@@ -85,6 +85,9 @@ agent-duo start add-auth --auto-run
 agent-duo start add-auth --auto-run --clarify    # Agents propose approaches first
 agent-duo start add-auth --auto-run --pushback   # Agents suggest task improvements first
 
+# Follow up on PR feedback (generates task from PR comments):
+agent-duo start --followup 42 --auto-run
+
 # Fully unattended (auto-merge after 30 min inactivity):
 agent-duo start add-auth --auto-run --auto-finish
 
@@ -108,6 +111,9 @@ agent-solo start add-auth --auto-run --coder codex --reviewer claude
 
 # With gather phase (reviewer collects context for coder first)
 agent-solo start add-auth --auto-run --gather
+
+# Follow up on PR feedback
+agent-solo start --followup 42 --auto-run
 ```
 
 ## Example Session
@@ -165,6 +171,7 @@ Codex PR:  https://github.com/user/myproject/pull/43
 agent-duo start <feature>              # Start with ttyd web terminals (auto-allocates 3 consecutive ports)
 agent-duo start <feature> --port 8000  # Use fixed ports 8000, 8001, 8002 (fails if occupied)
 agent-duo start <feature> --auto-run   # Start and run orchestrator immediately
+agent-duo start --followup <PR#>       # Generate task from PR comments and start session
 agent-duo start <feature> --clarify    # Enable clarify stage (agents propose approaches)
 agent-duo start <feature> --pushback   # Enable pushback stage (agents improve task)
 agent-duo start <feature> --plan       # Enable plan/review stage (agents write plans)

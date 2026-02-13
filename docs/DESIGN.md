@@ -51,6 +51,7 @@ agent-duo start <f> --clarify   # Start with clarify phase before work
 agent-duo start <f> --pushback  # Start with pushback phase (task improvement)
 agent-duo start <f> --plan      # Start with plan phase (implementation planning)
 agent-duo start <f> --auto-run  # Start and run orchestrator immediately
+agent-duo start --followup <PR#> # Generate task from PR comments and start session
 agent-duo start <f> --auto-finish # Auto-merge last remaining PR
 agent-duo run [options]         # Run orchestrator loop (from orchestrator worktree)
 agent-duo stop                  # Stop ttyd servers, keep worktrees
@@ -126,6 +127,7 @@ Given project directory `myapp` and feature `auth`:
 ├── phase             # "gather", "clarify", "pushback", "plan", "plan-review", "work", "review", "update-docs", "pr-comments", "merge", or "final-merge"
 ├── round             # Current round number (1, 2, 3...)
 ├── feature           # Feature name for this session
+├── followup-pr       # PR number this session follows up on (if started with --followup)
 ├── ports             # Port allocations (ORCHESTRATOR_PORT, CLAUDE_PORT, CODEX_PORT)
 ├── gather-mode       # "true" or "false" - whether gather phase is enabled (solo mode)
 ├── clarify-mode      # "true" or "false" - whether clarify phase is enabled
