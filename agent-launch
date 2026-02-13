@@ -139,13 +139,6 @@ locked_session_remove() {
     _release_session_lock
 }
 
-# Attach to tmux session, setting terminal title for VS Code / ttyd
-tmux_attach_with_title() {
-    local session="$1" title="$2"
-    printf '\033]0;%s\007' "$title"
-    exec tmux attach -t "$session"
-}
-
 # Ensure .agent-sessions is in .git/info/exclude
 ensure_git_exclude() {
     local main_root
@@ -289,6 +282,7 @@ cmd_start() {
     # Create tmux session
     info "Creating tmux session: $tmux_name"
     tmux new-session -d -s "$tmux_name" -c "$workdir"
+    tmux_set_title "$tmux_name" "${AGENT_TYPE}: ${task}"
 
     # Launch agent TUI
     restart_agent_tui "$AGENT_TYPE" "$tmux_name"
@@ -356,7 +350,8 @@ started=$(date +%Y-%m-%dT%H:%M:%S%z)"
     # Final action
     case "$mode" in
         ide|bare)
-            tmux_attach_with_title "$tmux_name" "${AGENT_TYPE}: ${task}"
+            printf '\033]0;%s\007' "${AGENT_TYPE}: ${task}"
+            exec tmux attach -t "$tmux_name"
             ;;
         ttyd)
             echo ""
@@ -531,6 +526,7 @@ cmd_restart() {
     if ! tmux_session_exists "$tmux_name"; then
         info "Recreating tmux session: $tmux_name"
         tmux new-session -d -s "$tmux_name" -c "$workdir"
+        tmux_set_title "$tmux_name" "${AGENT_TYPE}: ${task}"
         restart_agent_tui "$AGENT_TYPE" "$tmux_name"
     fi
 
@@ -545,7 +541,8 @@ cmd_restart() {
             tmux send-keys -t "$tmux_name" -l "/ide"
             tmux send-keys -t "$tmux_name" Enter
             sleep 1
-            tmux_attach_with_title "$tmux_name" "${AGENT_TYPE}: ${task}"
+            printf '\033]0;%s\007' "${AGENT_TYPE}: ${task}"
+            exec tmux attach -t "$tmux_name"
             ;;
         ttyd)
             if ! agent_tui_is_running "$tmux_name" "$AGENT_TYPE"; then
@@ -591,7 +588,8 @@ ttyd_pid=$ttyd_pid"
             if ! agent_tui_is_running "$tmux_name" "$AGENT_TYPE"; then
                 restart_agent_tui "$AGENT_TYPE" "$tmux_name"
             fi
-            tmux_attach_with_title "$tmux_name" "${AGENT_TYPE}: ${task}"
+            printf '\033]0;%s\007' "${AGENT_TYPE}: ${task}"
+            exec tmux attach -t "$tmux_name"
             ;;
     esac
 }
@@ -615,7 +613,8 @@ cmd_attach() {
         die "tmux session '$tmux_name' no longer exists. Use '$INVOKED_AS restart $task' to recover."
     fi
 
-    tmux_attach_with_title "$tmux_name" "${AGENT_TYPE}: ${task}"
+    printf '\033]0;%s\007' "${AGENT_TYPE}: ${task}"
+    exec tmux attach -t "$tmux_name"
 }
 
 #------------------------------------------------------------------------------

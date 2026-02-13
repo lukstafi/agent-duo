@@ -196,6 +196,11 @@ cmd_setup() {
 
     success "Setup complete!"
 
+    # Hint about VS Code terminal title
+    echo ""
+    info "VS Code tip: To show agent names in terminal tabs, add to VS Code settings:"
+    echo '  "terminal.integrated.tabs.title": "${sequence}"'
+
     # Prominent message about agent-solo
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -979,6 +984,7 @@ start_tmux_mode() {
 
     # Create new tmux session with orchestrator window
     tmux new-session -d -s "$session_name" -n "orchestrator" -c "$project_root"
+    tmux_set_title "$session_name" "duo: ${feature}"
 
     # Create claude window
     tmux new-window -t "$session_name" -n "claude" -c "$worktree_claude"
@@ -1073,8 +1079,11 @@ start_ttyd_mode() {
 
     # Create tmux sessions for orchestrator and each agent
     tmux new-session -d -s "${session_name}-orchestrator" -c "$project_root"
+    tmux_set_title "${session_name}-orchestrator" "orchestrator: ${feature}"
     tmux new-session -d -s "${session_name}-claude" -c "$worktree_claude"
+    tmux_set_title "${session_name}-claude" "claude: ${feature}"
     tmux new-session -d -s "${session_name}-codex" -c "$worktree_codex"
+    tmux_set_title "${session_name}-codex" "codex: ${feature}"
 
     # Set environment variables for orchestrator
     for var in "PEER_SYNC='$peer_sync'" "FEATURE='$feature'"; do
@@ -1402,6 +1411,7 @@ cmd_restart() {
         if ! tmux_session_exists "$orchestrator_target"; then
             info "Creating tmux session: $orchestrator_target"
             tmux new-session -d -s "$orchestrator_target" -c "$root"
+            tmux_set_title "$orchestrator_target" "orchestrator: ${feature}"
             for var in "PEER_SYNC='$peer_sync'" "FEATURE='$feature'"; do
                 tmux send-keys -t "$orchestrator_target" "export $var"
                 tmux send-keys -t "$orchestrator_target" C-m
@@ -1419,6 +1429,7 @@ cmd_restart() {
             else
                 info "Creating tmux session: $claude_target"
                 tmux new-session -d -s "$claude_target" -c "$worktree_claude"
+                tmux_set_title "$claude_target" "claude: ${feature}"
                 for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "MY_WORKTREE='$worktree_claude'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
                     tmux send-keys -t "$claude_target" "export $var"
                     tmux send-keys -t "$claude_target" C-m
@@ -1437,6 +1448,7 @@ cmd_restart() {
             else
                 info "Creating tmux session: $codex_target"
                 tmux new-session -d -s "$codex_target" -c "$worktree_codex"
+                tmux_set_title "$codex_target" "codex: ${feature}"
                 for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "MY_WORKTREE='$worktree_codex'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'"; do
                     tmux send-keys -t "$codex_target" "export $var"
                     tmux send-keys -t "$codex_target" C-m
@@ -1456,6 +1468,7 @@ cmd_restart() {
             info "Creating tmux session: $session_name"
             # Create session with orchestrator window
             tmux new-session -d -s "$session_name" -n "orchestrator" -c "$root"
+            tmux_set_title "$session_name" "duo: ${feature}"
 
             # Create claude window
             if [ -d "$worktree_claude" ]; then

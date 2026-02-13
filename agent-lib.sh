@@ -562,6 +562,16 @@ tmux_session_exists() {
     tmux has-session -t "$session" 2>/dev/null
 }
 
+# Set the terminal title for a tmux session (visible in terminal emulators and VS Code)
+# Uses set-titles for standard terminals; also sets pane title so the title is
+# available via #{pane_title} for status lines and similar.
+tmux_set_title() {
+    local session="$1" title="$2"
+    tmux set-option -t "$session" set-titles on 2>/dev/null || true
+    tmux set-option -t "$session" set-titles-string "$title" 2>/dev/null || true
+    tmux select-pane -t "$session" -T "$title" 2>/dev/null || true
+}
+
 # Check if a ttyd process is running and serving a specific tmux session
 ttyd_is_running() {
     local pidfile="$1"
