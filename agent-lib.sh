@@ -2434,6 +2434,12 @@ case "$phase" in
         case "$current_status" in
             suggest-refactor-done) log_debug "skipping (already $current_status)"; exit 0 ;;
         esac
+        # Only signal if the agent has actually written the suggestion file
+        suggest_file="$PEER_SYNC/suggest-refactor-${agent}.md"
+        if [ ! -f "$suggest_file" ]; then
+            log_debug "suggest-refactor file not found yet ($suggest_file), not signaling"
+            exit 0
+        fi
         log_debug "signaling suggest-refactor-done"
         $signal_cmd signal "$agent" suggest-refactor-done "completed via hook"
         ;;
@@ -3049,6 +3055,21 @@ run_suggest_refactor_duo() {
     done
     echo ""
 
+    # Wait for actual files to appear (hook may signal done before files are written)
+    local file_wait=0
+    local all_files_found=false
+    while [ "$file_wait" -lt 120 ]; do
+        all_files_found=true
+        for _agent in claude codex; do
+            [ ! -f "$peer_sync/suggest-refactor-${_agent}.md" ] && all_files_found=false
+        done
+        $all_files_found && break
+        sleep 3
+        file_wait=$((file_wait + 3))
+        printf "\r  Waiting for suggest-refactor files... (%ds)  " "$file_wait"
+    done
+    [ "$file_wait" -gt 0 ] && echo ""
+
     # Collect and post suggestions
     _post_suggest_refactor_comment "$peer_sync" "$feature" "duo" "claude" "codex"
 }
@@ -3094,6 +3115,16 @@ run_suggest_refactor_solo() {
         sleep 5
     done
     echo ""
+
+    # Wait for the actual file to appear (hook may signal done before file is written)
+    local file_wait=0
+    local suggest_file="$peer_sync/suggest-refactor-coder.md"
+    while [ ! -f "$suggest_file" ] && [ "$file_wait" -lt 120 ]; do
+        sleep 3
+        file_wait=$((file_wait + 3))
+        printf "\r  Waiting for suggest-refactor file... (%ds)  " "$file_wait"
+    done
+    [ "$file_wait" -gt 0 ] && echo ""
 
     # Collect and post suggestions
     _post_suggest_refactor_comment "$peer_sync" "$feature" "solo" "coder"
