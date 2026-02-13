@@ -2345,6 +2345,11 @@ case "$phase" in
             log_debug "skipping (not reviewer in gather phase)"
             exit 0
         fi
+        # Guard: require output file before signaling (cross-phase race protection)
+        if [ ! -f "$PEER_SYNC/task-context.md" ]; then
+            log_debug "task-context.md not found yet, not signaling"
+            exit 0
+        fi
         log_debug "signaling gather-done"
         $signal_cmd signal "$agent" gather-done "completed via hook"
         ;;
@@ -2353,6 +2358,11 @@ case "$phase" in
         case "$current_status" in
             clarify-done|pushback-done|done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
         esac
+        # Guard: require output file before signaling (cross-phase race protection)
+        if [ ! -f "$PEER_SYNC/clarify-${agent}.md" ]; then
+            log_debug "clarify-${agent}.md not found yet, not signaling"
+            exit 0
+        fi
         log_debug "signaling clarify-done"
         $signal_cmd signal "$agent" clarify-done "completed via hook"
         ;;
@@ -2364,6 +2374,11 @@ case "$phase" in
         # In solo mode, only reviewer pushes back
         if [ "$mode" = "solo" ] && [ "$agent" != "reviewer" ]; then
             log_debug "skipping (not reviewer in pushback phase)"
+            exit 0
+        fi
+        # Guard: require output file before signaling (cross-phase race protection)
+        if [ ! -f "$PEER_SYNC/pushback-${agent}.md" ]; then
+            log_debug "pushback-${agent}.md not found yet, not signaling"
             exit 0
         fi
         log_debug "signaling pushback-done"
@@ -2392,6 +2407,19 @@ case "$phase" in
             log_debug "skipping (not reviewer in review phase)"
             exit 0
         fi
+        # Guard: require review file before signaling (cross-phase race protection)
+        review_round="$(cat "$PEER_SYNC/round" 2>/dev/null)" || review_round="1"
+        if [ "$mode" = "solo" ]; then
+            review_file="$PEER_SYNC/reviews/round-${review_round}-review.md"
+        else
+            # Duo: determine peer name for review file
+            if [ "$agent" = "claude" ]; then review_peer="codex"; else review_peer="claude"; fi
+            review_file="$PEER_SYNC/reviews/round-${review_round}-${agent}-reviews-${review_peer}.md"
+        fi
+        if [ ! -f "$review_file" ]; then
+            log_debug "review file not found yet ($review_file), not signaling"
+            exit 0
+        fi
         log_debug "signaling review-done"
         $signal_cmd signal "$agent" review-done "completed via hook"
         ;;
@@ -2403,6 +2431,11 @@ case "$phase" in
         # In solo mode, only coder plans
         if [ "$mode" = "solo" ] && [ "$agent" != "coder" ]; then
             log_debug "skipping (not coder in plan phase)"
+            exit 0
+        fi
+        # Guard: require output file before signaling (cross-phase race protection)
+        if [ ! -f "$PEER_SYNC/plan-${agent}.md" ]; then
+            log_debug "plan-${agent}.md not found yet, not signaling"
             exit 0
         fi
         log_debug "signaling plan-done"
@@ -2418,6 +2451,16 @@ case "$phase" in
             log_debug "skipping (not reviewer in plan-review phase)"
             exit 0
         fi
+        # Guard: require output file before signaling (cross-phase race protection)
+        if [ "$mode" = "solo" ]; then
+            plan_review_file="$PEER_SYNC/plan-review.md"
+        else
+            plan_review_file="$PEER_SYNC/plan-review-${agent}.md"
+        fi
+        if [ ! -f "$plan_review_file" ]; then
+            log_debug "plan-review file not found yet ($plan_review_file), not signaling"
+            exit 0
+        fi
         log_debug "signaling plan-review-done"
         $signal_cmd signal "$agent" plan-review-done "completed via hook"
         ;;
@@ -2426,6 +2469,11 @@ case "$phase" in
         case "$current_status" in
             docs-update-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
         esac
+        # Guard: require output file before signaling (cross-phase race protection)
+        if [ ! -f "$PEER_SYNC/workflow-feedback-${agent}.md" ]; then
+            log_debug "workflow-feedback-${agent}.md not found yet, not signaling"
+            exit 0
+        fi
         log_debug "signaling docs-update-done"
         $signal_cmd signal "$agent" docs-update-done "completed via hook"
         ;;
