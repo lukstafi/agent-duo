@@ -205,6 +205,7 @@ cmd_start() {
     local codex_model=""
     local claude_model=""
     local base_port=""
+    local followup_pr=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -230,6 +231,7 @@ cmd_start() {
             --coder) coder="$2"; shift 2 ;;
             --reviewer) reviewer="$2"; shift 2 ;;
             --port) base_port="$2"; shift 2 ;;
+            --followup) followup_pr="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
             *) features+=("$1"); shift ;;
         esac
@@ -239,7 +241,18 @@ cmd_start() {
     [ -n "$codex_model" ] && export AGENT_DUO_CODEX_MODEL="$codex_model"
     [ -n "$claude_model" ] && export AGENT_DUO_CLAUDE_MODEL="$claude_model"
 
-    [ ${#features[@]} -eq 0 ] && die "Usage: agent-solo start <feature> [feature2 ...] [--no-ttyd] [--auto-run] [--clarify] [--pushback] [--plan] [--coder <agent>] [--reviewer <agent>]"
+    # Generate task from PR if --followup was specified
+    if [ -n "$followup_pr" ]; then
+        git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not a git repository"
+        local main_root
+        main_root="$(get_main_project_root)"
+        local followup_feature
+        followup_feature="$(generate_followup_task "$main_root" "$followup_pr")"
+        info "Generated follow-up task: ${followup_feature}.md"
+        features+=("$followup_feature")
+    fi
+
+    [ ${#features[@]} -eq 0 ] && die "Usage: agent-solo start <feature> [feature2 ...] [--followup <PR-number>] [--no-ttyd] [--auto-run] [--clarify] [--pushback] [--plan] [--coder <agent>] [--reviewer <agent>]"
 
     # Validate codex thinking effort
     case "$codex_thinking" in
@@ -273,7 +286,7 @@ cmd_start() {
                 "$ttyd_mode" "$auto_run" "$gather_mode" "$clarify_mode" "$pushback_mode" "$plan_mode" \
                 "$auto_finish" "$auto_finish_timeout" \
                 "$work_timeout" "$review_timeout" "$gather_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
-                "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port"; then
+                "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port" "$followup_pr"; then
                 started=$((started + 1))
             else
                 failed=$((failed + 1))
@@ -296,7 +309,7 @@ cmd_start() {
         "$ttyd_mode" "$auto_run" "$gather_mode" "$clarify_mode" "$pushback_mode" "$plan_mode" \
         "$auto_finish" "$auto_finish_timeout" \
         "$work_timeout" "$review_timeout" "$gather_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
-        "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port"
+        "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port" "$followup_pr"
 }
 
 # Start a single solo session for one feature
@@ -323,6 +336,7 @@ start_single_solo_session() {
     local coder="${20}"
     local reviewer="${21}"
     local base_port="${22}"
+    local followup_pr="${23}"
 
     # Check for existing session for THIS feature
     local sessions_dir="$main_project_root/.agent-sessions"
@@ -416,6 +430,7 @@ start_single_solo_session() {
     echo "$auto_finish_timeout" > "$peer_sync/auto-finish-timeout"
     echo "1" > "$peer_sync/round"
     echo "$feature" > "$peer_sync/feature"
+    [ -n "$followup_pr" ] && echo "$followup_pr" > "$peer_sync/followup-pr"
     echo "$codex_thinking" > "$peer_sync/codex-thinking"
 
     # Register session in main project's .agent-sessions directory

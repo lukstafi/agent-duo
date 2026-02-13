@@ -360,6 +360,55 @@ find_task_file() {
     return 1
 }
 
+# Generate a task file from a PR's metadata and comments
+# Usage: feature_name=$(generate_followup_task "$project_root" "$pr_number")
+generate_followup_task() {
+    local project_root="$1"
+    local pr_number="$2"
+
+    # Fetch PR metadata via gh
+    local pr_json
+    pr_json="$(gh pr view "$pr_number" --json title,body,url,headRefName,comments,reviews)" \
+        || die "Failed to fetch PR #$pr_number. Is gh installed and authenticated?"
+
+    # Extract fields
+    local pr_title pr_url pr_branch pr_body
+    pr_title="$(echo "$pr_json" | jq -r '.title')"
+    pr_url="$(echo "$pr_json" | jq -r '.url')"
+    pr_branch="$(echo "$pr_json" | jq -r '.headRefName')"
+    pr_body="$(echo "$pr_json" | jq -r '.body // ""')"
+
+    # Derive feature name: strip agent suffix from branch if present, add -followup
+    local feature
+    feature="$(echo "$pr_branch" | sed -E 's/-(claude|codex|coder|reviewer)$//')-followup"
+
+    # Build task file content
+    local task_file="$project_root/${feature}.md"
+    {
+        echo "# Follow-up: ${pr_title}"
+        echo ""
+        echo "This is a follow-up task based on feedback from PR #${pr_number}."
+        echo "PR: ${pr_url}"
+        echo ""
+        echo "## Original PR Description"
+        echo ""
+        echo "$pr_body"
+        echo ""
+        echo "## PR Comments and Reviews"
+        echo ""
+        echo "The comments below (most recent last) describe what needs to be done."
+        echo "Focus especially on the last comment(s) for the actionable task."
+        echo ""
+        # Extract comments chronologically
+        echo "$pr_json" | jq -r '.comments[] | "### Comment by \(.author.login) (\(.createdAt))\n\n\(.body)\n"'
+        # Extract review comments
+        echo "$pr_json" | jq -r '.reviews[] | select(.body != "") | "### Review by \(.author.login) (\(.state), \(.createdAt))\n\n\(.body)\n"'
+    } > "$task_file"
+
+    # Return feature name (caller uses it)
+    echo "$feature"
+}
+
 #------------------------------------------------------------------------------
 # Atomic file operations
 #------------------------------------------------------------------------------
