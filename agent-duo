@@ -959,12 +959,14 @@ start_single_session() {
         printf '%s\n' ".peer-sync" ".agent-sessions" ".claude" ".agents" > "$git_exclude"
     fi
 
-    # Install skills to agent worktrees (per-session, not global)
+    # Install skills to all worktrees (per-session, not global)
+    # Root worktree needs skills too: merge phase restarts agents there
     local templates_dir
     templates_dir="$(get_templates_dir)"
+    install_duo_skills_to_worktree "$root_worktree" "$templates_dir"
     install_duo_skills_to_worktree "$worktree_claude" "$templates_dir"
     install_duo_skills_to_worktree "$worktree_codex" "$templates_dir"
-    success "Installed skills to agent worktrees"
+    success "Installed skills to all worktrees"
 
     # Copy task file to all worktrees if it exists
     if [ -n "$task_file" ] && [ -f "$task_file" ]; then
@@ -2595,15 +2597,24 @@ cmd_run_merge() {
         tmux send-keys -t "$session" C-m
     done
 
-    # Set environment variables for both agents
-    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "FEATURE='$feature'"; do
+    # Derive agent worktree paths from root
+    local worktree_claude="${root}-claude"
+    local worktree_codex="${root}-codex"
+
+    # Set environment variables for both agents (including worktree paths for merge-execute)
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "MY_WORKTREE='$worktree_claude'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
         tmux send-keys -t "$claude_session" "export $var"
         tmux send-keys -t "$claude_session" C-m
     done
-    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "FEATURE='$feature'"; do
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "MY_WORKTREE='$worktree_codex'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'"; do
         tmux send-keys -t "$codex_session" "export $var"
         tmux send-keys -t "$codex_session" C-m
     done
+
+    # Ensure skills are installed in root worktree (agents run here during merge)
+    local templates_dir
+    templates_dir="$(get_templates_dir)"
+    install_duo_skills_to_worktree "$root" "$templates_dir"
 
     # Start fresh agent CLIs
     info "Starting fresh agent CLIs..."
