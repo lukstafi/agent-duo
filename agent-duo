@@ -2840,6 +2840,7 @@ SYNTH_EOF
     # === ESCALATE TO USER IF NO CONSENSUS ===
     if [ -z "$decision" ]; then
         warn "No consensus after $max_debate_rounds debate rounds."
+        send_ntfy "Merge: no consensus" "Agents couldn't agree after $max_debate_rounds debate rounds for '$feature'. Your decision is needed." "high" "warning,scales" 2>/dev/null || true
         echo ""
         local final_round
         final_round="$(get_merge_round "$peer_sync")"
