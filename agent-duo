@@ -2353,7 +2353,7 @@ You are **$agent** in a fresh merge session. This is NOT the agent who created e
 ### Steps
 
 1. Read the original task: \`cat "$feature.md"\`
-2. View both PRs: \`gh pr view <url>\` and \`gh pr diff <url>\`
+2. View both PRs: \`gh pr view <url> --json title,body,state,commits,files,reviews,comments\` and \`gh pr diff <url>\`
 3. Read previous reviews: \`ls "$peer_sync/reviews/" 2>/dev/null && cat "$peer_sync/reviews/"*.md\`
 
 ### Write Your Vote

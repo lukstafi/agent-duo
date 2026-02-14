@@ -44,8 +44,8 @@ For each PR, examine:
 
 ```bash
 # View PR details and discussion
-gh pr view "$CLAUDE_PR"
-gh pr view "$CODEX_PR"
+gh pr view "$CLAUDE_PR" --json title,body,state,commits,files,reviews,comments
+gh pr view "$CODEX_PR" --json title,body,state,commits,files,reviews,comments
 
 # Compare code changes
 gh pr diff "$CLAUDE_PR"
