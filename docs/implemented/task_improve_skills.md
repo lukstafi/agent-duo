@@ -106,15 +106,15 @@ If blocked by ambiguity/inconsistency, use: `agent-duo escalate <type> "<message
 
 ### New Design: Per-Round Commits
 
-The orchestrator commits after each work phase, using the agent's signal message as the commit message:
+The orchestrator commits after each work phase, prefixing the agent's signal message with the round number:
 
 1. Agent signals `done "implemented feature X with approach Y"`
-2. Orchestrator runs `git add -A && git commit -m "<signal message>"` in the agent's worktree
+2. Orchestrator runs `git add -A && git commit -m "Round 1: implemented feature X with approach Y"` in the agent's worktree
 3. Review phase proceeds — reviewer sees committed changes
 4. Agent signals `done "addressed review: fixed edge case, added tests"`
-5. Orchestrator commits again
+5. Orchestrator commits as `"Round 2: addressed review: fixed edge case, added tests"`
 
-This produces natural multi-commit history: an implementation commit followed by amendment commits.
+This produces natural multi-commit history with clear round progression. If the signal message is empty, the commit message defaults to `"Round N changes"`.
 
 ### Loop Stopping: Work Quiescence
 
@@ -133,9 +133,11 @@ In solo mode, reviewer APPROVE also triggers PR creation (the coder may still ha
 
 **Default** (`--early-pr` not set): Create PR on APPROVE (solo) or on work quiescence (duo). Cleaner PR — no intermediate states visible externally.
 
-**`--early-pr` flag**: Create PR after the first work-round commit. Subsequent commits are pushed to the same branch. Enables early external feedback via GitHub reviews.
+**`--early-pr` flag**: Create PR after the first work-round commit. Each subsequent `lib_commit_round()` that returns "committed" is followed by a `git push` to update the open PR. Enables early external feedback via GitHub reviews.
 
 In both cases, `agent-duo pr <agent>` becomes an orchestrator-internal operation (push + `gh pr create`), not an agent-facing command.
+
+**Race condition note:** The agent explicitly signals `done` when it considers its work saved, so the orchestrator can safely diff immediately. In the unlikely event of a file-save race, the uncommitted changes would simply be picked up in the next round's commit — no special timing guard needed.
 
 ### Interaction with Review Skills and `git diff`
 
@@ -161,7 +163,8 @@ The docs-update phase (`duo-update-docs.md`) fits naturally as a step between "f
 
 1. Check `git diff HEAD` in agent's worktree
 2. If no changes: return "quiescent" (caller decides whether to create PR or skip review)
-3. If changes: `git add -A && git commit -m "<signal message>"`, return "committed"
+3. If changes: `git add -A && git commit -m "Round N: <signal message>"` (or `"Round N changes"` if message is empty), return "committed"
+4. If `--early-pr` and PR already exists: `git push`
 
 **Simplified `lib_create_pr()`** — called by orchestrator on quiescence/APPROVE:
 
@@ -195,7 +198,7 @@ Review skills updated to use `git diff main...HEAD` (full feature diff) and `git
 
 ### Remaining Orchestrator Work
 
-- **`lib_commit_round()`**: New function after each `done` signal — checks for changes, commits with signal message, returns quiescent/committed
+- **`lib_commit_round()`**: New function after each `done` signal — checks for changes, commits with `"Round N: <message>"` prefix, pushes if `--early-pr` and PR exists, returns quiescent/committed
 - **Quiescence-based loop stopping**: Replace "detect both PRs exist" with "no diff after done signal" as convergence criterion
 - **PR creation on convergence**: Orchestrator calls `lib_create_pr()` on quiescence (duo) or APPROVE (solo), with `--early-pr` flag for first-commit PR creation
 - **Docs-update integration**: Trigger as part of PR-creation flow, not as agent-facing blocker
