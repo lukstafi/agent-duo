@@ -2329,9 +2329,23 @@ log_debug "resolved agent=$agent, signal_cmd=$signal_cmd"
 # Read current phase
 phase="$(cat "$PEER_SYNC/phase" 2>/dev/null)" || { log_debug "no phase file"; exit 0; }
 
-# Read current status
+# Read current status and its epoch
 current_status="$(cut -d'|' -f1 < "$PEER_SYNC/${agent}.status" 2>/dev/null)"
-log_debug "phase=$phase status=$current_status"
+status_epoch="$(cut -d'|' -f2 < "$PEER_SYNC/${agent}.status" 2>/dev/null)"
+log_debug "phase=$phase status=$current_status epoch=$status_epoch"
+
+# Guard against cross-phase race: if the phase changed since the last hook
+# firing, this is likely a stale hook from the previous phase's idle transition
+# executing after the orchestrator already advanced to the next phase.
+# A stale hook "acknowledges" the new phase (stores it), so the subsequent
+# legitimate hook (same phase) can proceed.
+last_hook_file="$PEER_SYNC/${agent}.last-hook-phase"
+last_hook_phase="$(cat "$last_hook_file" 2>/dev/null)" || last_hook_phase=""
+echo "$phase" > "$last_hook_file"
+if [ -n "$last_hook_phase" ] && [ "$phase" != "$last_hook_phase" ]; then
+    log_debug "phase changed since last hook ($last_hook_phase -> $phase), likely cross-phase race"
+    exit 0
+fi
 
 # Determine what status to signal based on phase
 case "$phase" in
