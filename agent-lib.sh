@@ -2990,6 +2990,55 @@ lib_ensure_docs_update() {
     return 0
 }
 
+# Commit changes for a round, returning "committed" or "quiescent" via stdout
+# Args: worktree round peer_sync agent
+lib_commit_round() {
+    local worktree="$1" round="$2" peer_sync="$3" agent="$4"
+
+    [ -d "$worktree" ] || { echo "quiescent"; return 0; }
+
+    # Verify it's a git repository
+    if ! git -C "$worktree" rev-parse --git-dir >/dev/null 2>&1; then
+        warn "lib_commit_round: $worktree is not a git repository"
+        echo "quiescent"
+        return 0
+    fi
+
+    # Check for changes
+    if [ -z "$(git -C "$worktree" status --porcelain)" ]; then
+        echo "quiescent"
+        return 0
+    fi
+
+    # Extract signal message from agent status (field 3+)
+    local signal_msg=""
+    if [ -f "$peer_sync/${agent}.status" ]; then
+        signal_msg="$(cut -d'|' -f3- < "$peer_sync/${agent}.status" 2>/dev/null)" || true
+    fi
+
+    # Build commit message: filter out orchestrator-set default messages
+    local commit_msg=""
+    if [ -n "$signal_msg" ] && ! [[ "$signal_msg" =~ ^round\ [0-9]+\ (work|review)\ phase$ ]] && [ "$signal_msg" != "starting" ]; then
+        commit_msg="Round $round: $signal_msg"
+    else
+        commit_msg="Round $round changes"
+    fi
+
+    # Commit
+    git -C "$worktree" add -A
+    git -C "$worktree" commit -m "$commit_msg" || true
+
+    # If early-pr mode and PR exists, push
+    local early_pr=""
+    early_pr="$(cat "$peer_sync/early-pr" 2>/dev/null)" || true
+    if [ "$early_pr" = "true" ] && [ -f "$peer_sync/${agent}.pr" ]; then
+        git -C "$worktree" push || true
+    fi
+
+    echo "committed"
+    return 0
+}
+
 # Create PR for an agent's solution
 # Args: pr_name agent worktree root peer_sync feature mode pr_title
 # pr_name: branch name and PR identifier (e.g., "feature-alpha" or "feature-beta")
@@ -3011,6 +3060,11 @@ lib_create_pr() {
     local pr_title="${8:-Solution for $feature}"
 
     [ -d "$worktree" ] || die "Worktree not found: $worktree"
+
+    # Verify it's a git repository
+    if ! git -C "$worktree" rev-parse --git-dir >/dev/null 2>&1; then
+        die "Worktree is not a git repository: $worktree"
+    fi
 
     info "Creating PR for $agent..."
 
@@ -3062,12 +3116,10 @@ lib_create_pr() {
         fi
     fi
 
-    # Check for changes
-    if [ -z "$(git status --porcelain)" ]; then
-        warn "No changes to commit in $agent's worktree"
-    else
+    # Commit only leftover changes (docs-update, feature-file cleanup)
+    if [ -n "$(git status --porcelain)" ]; then
         git add -A
-        git commit -m "Solution from $agent for $feature" || true
+        git commit -m "Pre-PR cleanup for $feature" || true
     fi
 
     # Push branch
