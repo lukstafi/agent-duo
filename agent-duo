@@ -2576,15 +2576,17 @@ cmd_run_merge() {
     # We keep the tmux sessions (for ttyd) but restart the agent CLIs
     info "Restarting agents with fresh context for unbiased merge vote..."
 
-    # Stop existing agents: Ctrl-C to interrupt, then exit
+    # Stop existing agents: exit copy mode, Ctrl-C to interrupt, then exit
+    # All tmux commands guarded with || true to survive set -e if pane is in copy mode
     for session in "$claude_session" "$codex_session"; do
-        tmux send-keys -t "$session" C-c
+        tmux send-keys -t "$session" -X cancel 2>/dev/null || true
+        tmux send-keys -t "$session" C-c || true
         sleep 0.3
-        tmux send-keys -t "$session" C-c
+        tmux send-keys -t "$session" C-c || true
         sleep 0.3
         # Send /exit for Claude Code, or just exit for shell
-        tmux send-keys -t "$session" "/exit"
-        tmux send-keys -t "$session" C-m
+        tmux send-keys -t "$session" "/exit" || true
+        tmux send-keys -t "$session" C-m || true
         sleep 0.5
     done
 
@@ -2593,8 +2595,8 @@ cmd_run_merge() {
 
     # Change to project root (main branch) and set up fresh environment
     for session in "$claude_session" "$codex_session"; do
-        tmux send-keys -t "$session" "cd '$root'"
-        tmux send-keys -t "$session" C-m
+        tmux send-keys -t "$session" "cd '$root'" || true
+        tmux send-keys -t "$session" C-m || true
     done
 
     # Derive agent worktree paths from root
@@ -2603,12 +2605,12 @@ cmd_run_merge() {
 
     # Set environment variables for both agents (including worktree paths for merge-execute)
     for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "MY_WORKTREE='$worktree_claude'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
-        tmux send-keys -t "$claude_session" "export $var"
-        tmux send-keys -t "$claude_session" C-m
+        tmux send-keys -t "$claude_session" "export $var" || true
+        tmux send-keys -t "$claude_session" C-m || true
     done
     for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "MY_WORKTREE='$worktree_codex'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'"; do
-        tmux send-keys -t "$codex_session" "export $var"
-        tmux send-keys -t "$codex_session" C-m
+        tmux send-keys -t "$codex_session" "export $var" || true
+        tmux send-keys -t "$codex_session" C-m || true
     done
 
     # Ensure skills are installed in root worktree (agents run here during merge)
@@ -2618,10 +2620,10 @@ cmd_run_merge() {
 
     # Start fresh agent CLIs
     info "Starting fresh agent CLIs..."
-    tmux send-keys -t "$claude_session" "$(get_agent_cmd claude)"
-    tmux send-keys -t "$claude_session" C-m
-    tmux send-keys -t "$codex_session" "$(get_agent_cmd codex "$codex_thinking")"
-    tmux send-keys -t "$codex_session" C-m
+    tmux send-keys -t "$claude_session" "$(get_agent_cmd claude)" || true
+    tmux send-keys -t "$claude_session" C-m || true
+    tmux send-keys -t "$codex_session" "$(get_agent_cmd codex "$codex_thinking")" || true
+    tmux send-keys -t "$codex_session" C-m || true
 
     # Wait for agents to initialize
     sleep 3
@@ -3152,12 +3154,13 @@ cmd_merge() {
     info "Sending merge command to orchestrator terminal..."
 
     # Send Ctrl-C to ensure the terminal is ready (cancel any running command)
-    tmux send-keys -t "$orchestrator_session" C-c
+    tmux send-keys -t "$orchestrator_session" -X cancel 2>/dev/null || true
+    tmux send-keys -t "$orchestrator_session" C-c || true
     sleep 0.5
 
     # Send the run-merge command
-    tmux send-keys -t "$orchestrator_session" "agent-duo run-merge"
-    tmux send-keys -t "$orchestrator_session" C-m
+    tmux send-keys -t "$orchestrator_session" "agent-duo run-merge" || true
+    tmux send-keys -t "$orchestrator_session" C-m || true
 
     success "Merge command sent to orchestrator."
     echo ""

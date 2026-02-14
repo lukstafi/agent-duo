@@ -1012,24 +1012,30 @@ nudge_agent() {
 # Trigger a skill for an agent
 # Claude: /skill invocation
 # Codex: $skill invocation (with double Enter workaround)
+# Note: tmux send-keys can fail if pane is in copy mode (user scrolled).
+# We exit copy mode first via send-keys -X cancel, then send normally.
+# All tmux commands are guarded with || true to avoid set -e crashes.
 trigger_skill() {
     local agent="$1"
     local session="$2"
     local skill="$3"
 
+    # Exit copy mode if active (ignore error if not in a mode)
+    tmux send-keys -t "$session" -X cancel 2>/dev/null || true
+
     case "$agent" in
         claude)
-            tmux send-keys -t "$session" -l "/$skill"
+            tmux send-keys -t "$session" -l "/$skill" || true
             sleep 0.5
-            tmux send-keys -t "$session" Enter
+            tmux send-keys -t "$session" Enter || true
             ;;
         codex)
             # Use $skill invocation with double Enter (workaround for input buffering)
-            tmux send-keys -t "$session" -l "\$$skill"
+            tmux send-keys -t "$session" -l "\$$skill" || true
             sleep 0.5
-            tmux send-keys -t "$session" Enter
+            tmux send-keys -t "$session" Enter || true
             sleep 0.3
-            tmux send-keys -t "$session" Enter
+            tmux send-keys -t "$session" Enter || true
             ;;
     esac
 }
@@ -1094,10 +1100,11 @@ send_to_agent() {
             trigger_skill "$agent_type" "$session" "$content"
             ;;
         message)
-            # Send message content
-            tmux send-keys -t "$session" "$content"
+            # Send message content (exit copy mode first, guard against set -e)
+            tmux send-keys -t "$session" -X cancel 2>/dev/null || true
+            tmux send-keys -t "$session" "$content" || true
             sleep 0.5
-            tmux send-keys -t "$session" C-m
+            tmux send-keys -t "$session" C-m || true
             ;;
         *)
             warn "Unknown send_type: $send_type"
@@ -1142,9 +1149,10 @@ retry_last_send() {
                 info "Retrying message for $agent..."
                 local content
                 content="$(cat "$last_msg_file")"
-                tmux send-keys -t "$session" "$content"
+                tmux send-keys -t "$session" -X cancel 2>/dev/null || true
+                tmux send-keys -t "$session" "$content" || true
                 sleep 0.5
-                tmux send-keys -t "$session" C-m
+                tmux send-keys -t "$session" C-m || true
             else
                 warn "No saved message to retry for $agent"
                 return 1
