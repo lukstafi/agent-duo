@@ -2839,6 +2839,13 @@ SYNTH_EOF
         echo ""
     done
 
+    # Final consensus check after last debate round
+    # (The while loop exits before checking votes from the final round)
+    if [ -z "$decision" ] && votes_agree "$peer_sync"; then
+        decision="$(get_agreed_vote "$peer_sync")"
+        success "Consensus reached after debate: merge $decision's PR"
+    fi
+
     # === ESCALATE TO USER IF NO CONSENSUS ===
     if [ -z "$decision" ]; then
         warn "No consensus after $max_debate_rounds debate rounds."
