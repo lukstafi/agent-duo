@@ -36,18 +36,28 @@ agent-solo signal reviewer reviewing "examining coder's work"
 1. **Examine the coder's changes**:
 
    ```bash
-   # See what files changed
-   git status
+   # See commits on the feature branch
+   git log --oneline main..HEAD
 
-   # See uncommitted changes
-   git diff
-
-   # See committed changes on the branch
-   git log --oneline -5
+   # See the full feature diff (all rounds combined)
    git diff main...HEAD
+
+   # See just the latest round's changes
+   git diff HEAD~1
    ```
 
-2. **Write your review**: Create a review file with your analysis
+2. **Read your previous review** (if round 2+, to avoid repeating feedback):
+
+   ```bash
+   ROUND=$(cat "$PEER_SYNC/round")
+   PREV_ROUND=$((ROUND - 1))
+   PREV_REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-review.md"
+   [ -f "$PREV_REVIEW" ] && cat "$PREV_REVIEW"
+   ```
+
+   Focus on what changed since your last review. Only re-raise prior issues if still unaddressed.
+
+3. **Write your review**: Create a review file with your analysis
 
    ```bash
    ROUND=$(cat "$PEER_SYNC/round")
@@ -75,14 +85,7 @@ agent-solo signal reviewer reviewing "examining coder's work"
 
    Edit the file to fill in actual observations (don't leave placeholders).
 
-3. **Check previous rounds** (if applicable):
-
-   ```bash
-   ROUND=$(cat "$PEER_SYNC/round")
-   PREV_ROUND=$((ROUND - 1))
-   PREV_REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-review.md"
-   [ -f "$PREV_REVIEW" ] && cat "$PREV_REVIEW"
-   ```
+4. **Check previous rounds** are addressed (verify your prior feedback was acted on)
 
 ### Review Philosophy
 
@@ -93,13 +96,7 @@ agent-solo signal reviewer reviewing "examining coder's work"
 
 ### If You Discover a Blocking Issue
 
-If you find ambiguity, inconsistency, or evidence the task is misguided — escalate:
-```bash
-agent-solo escalate ambiguity "requirements unclear: what should happen when X?"
-agent-solo escalate inconsistency "docs say X but code does Y"
-agent-solo escalate misguided "this feature already exists in module Z"
-```
-This notifies the user without interrupting your work. Continue with your review.
+If blocked by ambiguity or inconsistency, use: `agent-solo escalate <type> "<message>"` (types: ambiguity, inconsistency, misguided). Continue with your review.
 
 ### Verdict Guidelines
 

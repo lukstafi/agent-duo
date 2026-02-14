@@ -36,7 +36,7 @@ Understand the existing code structure relevant to your task:
 
 ```bash
 # Find relevant files
-rg -n "pattern|keyword|module"
+rg -n -- "pattern|keyword|module"
 
 # Read key files
 cat path/to/relevant-file

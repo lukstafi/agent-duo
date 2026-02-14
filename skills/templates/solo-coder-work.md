@@ -36,6 +36,14 @@ Implement the solution, addressing any feedback from the reviewer.
 - **Follow best practices**: Write clean, tested code
 - **Stay focused**: Implement the requested feature
 
+## If Your Context Was Compacted
+
+If you notice your context was compacted mid-work, re-orient:
+
+```bash
+git diff --stat
+```
+
 ## If You Discover a Blocking Issue
 
 If you find ambiguity, inconsistency, or evidence the task is misguided — escalate:
@@ -54,10 +62,3 @@ agent-solo signal coder done "brief summary of what you did"
 ```
 
 The reviewer will examine your work next.
-
-## When Ready for Final PR
-
-When the reviewer approves your solution:
-```bash
-agent-solo pr   # handles commit, push, and PR creation
-```

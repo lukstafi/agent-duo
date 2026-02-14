@@ -96,9 +96,9 @@ cat > "$PEER_SYNC/merge-votes/round-${ROUND}-${MY_NAME}-vote.md" << 'EOF'
 - Which has better test coverage?
 - Are there valuable features in the losing PR that should be cherry-picked?]
 
-### Features to Cherry-Pick from Losing PR
+### Features Worth Preserving from Other PR (Optional)
 
-[List specific commits, functions, or features from the non-chosen PR that should be incorporated after merge. Be specific about what and why.]
+[If applicable, note specific features from the non-chosen PR worth cherry-picking later.]
 
 EOF
 ```

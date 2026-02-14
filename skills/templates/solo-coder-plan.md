@@ -43,7 +43,7 @@ fi
 Understand the existing code structure relevant to your task:
 
 ```bash
-rg -n "pattern|keyword|module"
+rg -n -- "pattern|keyword|module"
 cat path/to/relevant-file
 ```
 

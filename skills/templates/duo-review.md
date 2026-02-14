@@ -39,22 +39,31 @@ agent-duo signal "$MY_NAME" reviewing "examining peer's work"
 1. **Examine peer's worktree**: Look at `$PEER_WORKTREE` to see their changes
 
    ```bash
-   # See what files changed
-   git -C "$PEER_WORKTREE" status
+   # See commits on the feature branch
+   git -C "$PEER_WORKTREE" log --oneline main..HEAD
 
-   # See the actual changes (uncommitted)
-   git -C "$PEER_WORKTREE" diff
-
-   # See committed changes on their branch
-   git -C "$PEER_WORKTREE" log --oneline -5
+   # See the full feature diff (all rounds combined)
    git -C "$PEER_WORKTREE" diff main...HEAD
 
-   # Or just explore the files directly
-   ls -la "$PEER_WORKTREE"
+   # See just the latest round's changes
+   git -C "$PEER_WORKTREE" diff HEAD~1
+
+   # Explore specific files
    cat "$PEER_WORKTREE/path/to/interesting/file"
    ```
 
-2. **Write your review**: Create a review file analyzing their approach
+2. **Read your previous review** (if round 2+, to avoid repeating feedback):
+
+   ```bash
+   ROUND=$(cat "$PEER_SYNC/round")
+   PREV_ROUND=$((ROUND - 1))
+   MY_PREV_REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-${MY_NAME}-reviews-${PEER_NAME}.md"
+   [ -f "$MY_PREV_REVIEW" ] && cat "$MY_PREV_REVIEW"
+   ```
+
+   Focus on what changed since your last review. Only re-raise prior issues if still unaddressed.
+
+3. **Write your review**: Create a review file analyzing their approach
 
    ```bash
    ROUND=$(cat "$PEER_SYNC/round")
@@ -82,7 +91,7 @@ agent-duo signal "$MY_NAME" reviewing "examining peer's work"
 
    Edit the file to fill in actual observations (don't leave placeholders).
 
-3. **Read their review of you** (if available from previous round):
+4. **Read their review of you** (if available from previous round):
 
    ```bash
    ROUND=$(cat "$PEER_SYNC/round")
@@ -100,39 +109,12 @@ agent-duo signal "$MY_NAME" reviewing "examining peer's work"
 
 ### If You Discover a Blocking Issue
 
-If you find ambiguity, inconsistency, or evidence the task is misguided — escalate:
-```bash
-agent-duo escalate ambiguity "requirements unclear: what should happen when X?"
-agent-duo escalate inconsistency "docs say X but code does Y"
-agent-duo escalate misguided "this feature already exists in module Z"
-```
-This notifies the user without interrupting your work. Continue with your best interpretation.
+If blocked by ambiguity or inconsistency, use: `agent-duo escalate <type> "<message>"` (types: ambiguity, inconsistency, misguided). Continue with your best interpretation.
 
-### Capture Learnings
+### When Done
 
-Before finishing, record any valuable discoveries:
+Signal completion and **STOP**:
 
-```bash
-# Project-specific learnings (conventions, gotchas, patterns you noticed)
-agent-duo learn "Title" "Details about what you learned"
-
-# Feedback about agent-duo workflow (if something was confusing or could be improved)
-agent-duo workflow-feedback <category> "Description"
-# Categories: skill-unclear, coordination, tooling, friction, other
-```
-
-### Before You Stop
-
-Do one of the following:
-
-**If you already have a PR, or more work/review rounds needed**:
 ```bash
 agent-duo signal "$MY_NAME" review-done "review written"
 ```
-
-**If your solution is complete** — capture learnings and create the PR now:
-```bash
-agent-duo pr "$MY_NAME"   # will prompt for update-docs if needed
-```
-
-The orchestrator waits for your signal or PR before proceeding.

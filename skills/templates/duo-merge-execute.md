@@ -158,12 +158,6 @@ agent-duo signal "$MY_NAME" merge-done "cherry-picked into $DECISION's PR, close
 
 Then **STOP and wait**. Your peer will review the cherry-pick work.
 
-### After Review
-
-Your peer's review will be written to: `$PEER_SYNC/merge-review-${PEER_NAME}.md`
-
-If they request changes, you'll be triggered again with the `duo-merge-amend` skill to address their feedback. You'll continue working in `$PEER_WORKTREE`.
-
 ## Guidelines
 
 - **Work in `$PEER_WORKTREE`**: All commits go to the winning branch
