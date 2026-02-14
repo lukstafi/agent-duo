@@ -583,6 +583,8 @@ cmd_config() {
         echo "  ntfy_topic   - ntfy.sh topic for push notifications"
         echo "  ntfy_token   - ntfy.sh access token (for reserved topics)"
         echo "  ntfy_server  - ntfy server URL (default: https://ntfy.sh)"
+        echo "  feedback_repo - GitHub repo for feedback issues (e.g., owner/repo)"
+        echo "  auto_digest  - Auto-run feedback digest on session end (true/false)"
         echo ""
         info "Usage: agent-duo config <key> [value]"
         return 0
@@ -593,10 +595,10 @@ cmd_config() {
 
     # Validate key
     case "$key" in
-        codex_model|claude_model|ntfy_topic|ntfy_token|ntfy_server)
+        codex_model|claude_model|ntfy_topic|ntfy_token|ntfy_server|feedback_repo|auto_digest)
             ;;
         *)
-            die "Unknown config key: $key (valid: codex_model, claude_model, ntfy_topic, ntfy_token, ntfy_server)"
+            die "Unknown config key: $key (valid: codex_model, claude_model, ntfy_topic, ntfy_token, ntfy_server, feedback_repo, auto_digest)"
             ;;
     esac
 
@@ -2034,8 +2036,44 @@ cmd_feedback() {
                 info "Submission cancelled. You can copy the feedback manually."
             fi
             ;;
+        digest)
+            # Check ludics is available
+            if ! command -v ludics >/dev/null 2>&1; then
+                die "ludics CLI not found on PATH. Install ludics first."
+            fi
+
+            # Check feedback files exist (excluding processed/)
+            local has_files=false
+            if [ -d "$feedback_dir" ]; then
+                for f in "$feedback_dir"/*.md; do
+                    [ -f "$f" ] && { has_files=true; break; }
+                done
+            fi
+            if [ "$has_files" = false ]; then
+                die "No feedback files to digest"
+            fi
+
+            # Get configured repo or prompt
+            local repo
+            repo="$(get_config_value "feedback_repo" 2>/dev/null)" || repo=""
+            if [ -z "$repo" ]; then
+                echo "Enter GitHub repo for feedback issues (e.g., owner/repo): "
+                read -r repo
+                [ -z "$repo" ] && die "No repo specified"
+                echo "Save this repo for future digests? [y/N] "
+                read -r save_repo
+                if [ "$save_repo" = "y" ] || [ "$save_repo" = "Y" ]; then
+                    set_config_value "feedback_repo" "$repo"
+                    success "Saved feedback_repo=$repo"
+                fi
+            fi
+
+            info "Queuing feedback digest via ludics mag..."
+            ludics mag feedback-digest "$repo"
+            success "Feedback digest queued. Run 'ludics mag queue' to check status."
+            ;;
         *)
-            die "Unknown feedback action: $action (valid: list, view, delete, submit)"
+            die "Unknown feedback action: $action (valid: list, view, delete, submit, digest)"
             ;;
     esac
 }
@@ -5023,7 +5061,7 @@ SESSION COMMANDS
         Auto-commits uncommitted changes and pushes.
         Runs update-docs phase before PR creation (unless skipped).
 
-    feedback [list|view|delete|submit]
+    feedback [list|view|delete|submit|digest]
         Manage accumulated workflow feedback from agent sessions.
 
         Subcommands:
@@ -5032,6 +5070,8 @@ SESSION COMMANDS
           delete <file>      Delete a feedback file (or --all for all)
           submit             Interactively submit feedback as GitHub issue
                              (uses feedback_repo config, or prompts for repo)
+          digest             Send feedback to ludics mag for LLM-powered
+                             deduplication and structured GitHub issue filing
 
         Workflow feedback is automatically accumulated from .peer-sync/ to
         ~/.agent-duo/workflow-feedback/ when both PRs are created or during cleanup.

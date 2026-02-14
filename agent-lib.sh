@@ -2814,6 +2814,34 @@ workflow_feedback_dir() {
     echo "$HOME/.agent-duo/workflow-feedback"
 }
 
+# Get a config value by key
+# Args: key
+get_config_value() {
+    local key="$1"
+    local config_file="$HOME/.config/agent-duo/config"
+    [ -f "$config_file" ] || return 1
+    local val
+    val="$(grep -E "^${key}=" "$config_file" 2>/dev/null | cut -d= -f2-)"
+    [ -n "$val" ] || return 1
+    echo "$val"
+}
+
+# Set a config value by key
+# Args: key value
+set_config_value() {
+    local key="$1"
+    local value="$2"
+    local config_dir="$HOME/.config/agent-duo"
+    local config_file="$config_dir/config"
+    mkdir -p "$config_dir"
+    if [ -f "$config_file" ] && grep -qE "^${key}=" "$config_file" 2>/dev/null; then
+        local tmp="$config_file.tmp"
+        sed "s|^${key}=.*|${key}=${value}|" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+    else
+        echo "${key}=${value}" >> "$config_file"
+    fi
+}
+
 # Persist workflow feedback files to shared location
 # Args: peer_sync feature mode
 persist_workflow_feedback() {
@@ -2856,6 +2884,17 @@ persist_workflow_feedback() {
 
     if [ "$copied_any" = true ]; then
         touch "$peer_sync/workflow-feedback-copied"
+
+        # Auto-digest if configured
+        local auto_digest
+        auto_digest="$(get_config_value "auto_digest" 2>/dev/null)" || auto_digest=""
+        if [ "$auto_digest" = "true" ] && command -v ludics >/dev/null 2>&1; then
+            local repo
+            repo="$(get_config_value "feedback_repo" 2>/dev/null)" || repo=""
+            if [ -n "$repo" ]; then
+                ludics mag feedback-digest "$repo" &>/dev/null & disown
+            fi
+        fi
     fi
 }
 
