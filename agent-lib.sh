@@ -2351,7 +2351,8 @@ last_hook_file="$PEER_SYNC/${agent}.last-hook-phase"
 last_hook_phase="$(cat "$last_hook_file" 2>/dev/null)" || last_hook_phase=""
 echo "$phase" > "$last_hook_file"
 if [ -n "$last_hook_phase" ] && [ "$phase" != "$last_hook_phase" ]; then
-    log_debug "phase changed since last hook ($last_hook_phase -> $phase), likely cross-phase race"
+    # Expected: hook fired after orchestrator already advanced the phase.
+    # The hook acknowledges the new phase and exits silently.
     exit 0
 fi
 
@@ -2512,6 +2513,9 @@ case "$phase" in
         fi
         log_debug "signaling suggest-refactor-done"
         $signal_cmd signal "$agent" suggest-refactor-done "completed via hook"
+        ;;
+    pr-comments|merge|merge-review)
+        # Phases where the hook has no role — exit silently
         ;;
     *)
         log_debug "unknown phase: $phase"
