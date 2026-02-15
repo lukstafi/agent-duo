@@ -2674,6 +2674,9 @@ cmd_run() {
                         sleep "$poll_interval"
                     done
                     echo ""
+                    # Re-snapshot PR comment hash after agent response to avoid
+                    # triggering on the agent's own comments (feedback loop prevention)
+                    get_pr_comment_hash "$pr_url" > "$peer_sync/coder.pr-hash" 2>/dev/null || true
                     # Reset auto-finish timeout after agent activity
                     auto_finish_last_activity=$SECONDS
                 fi

@@ -4932,6 +4932,14 @@ cmd_run() {
                         sleep "$poll_interval"
                     done
                     echo ""
+                    # Re-snapshot PR comment hash after agent response to avoid
+                    # triggering on the agent's own comments (feedback loop prevention)
+                    if $claude_needs_attention; then
+                        get_pr_comment_hash "$claude_pr" > "$peer_sync/claude.pr-hash" 2>/dev/null || true
+                    fi
+                    if $codex_needs_attention; then
+                        get_pr_comment_hash "$codex_pr" > "$peer_sync/codex.pr-hash" 2>/dev/null || true
+                    fi
                     # Reset auto-finish timeout after agent activity
                     auto_finish_last_activity=$SECONDS
                 fi

@@ -3109,7 +3109,9 @@ lib_create_pr() {
         return 1
     fi
 
-    # Check if feature file exists and was NOT modified (should be deleted)
+    # Check if feature file should be removed from the PR
+    # Only remove if: (1) it was copied into the worktree by the session (not on main),
+    # and (2) the agent didn't modify it. Files already in the repo stay regardless.
     local feature_file="$worktree/${feature}.md"
     if [ -f "$feature_file" ]; then
         local main_branch
@@ -3126,27 +3128,27 @@ lib_create_pr() {
             main_branch="HEAD~1"
         fi
 
-        local file_modified=false
+        # If the file exists on main, leave it alone — it's part of the repo
         if git show "${main_branch}:${feature}.md" >/dev/null 2>&1; then
-            if ! git diff --quiet "${main_branch}" -- "${feature}.md" 2>/dev/null; then
-                file_modified=true
-            fi
+            : # File exists on main, keep it (even if unmodified)
         else
+            # File was added by session setup — remove if agent didn't modify it
+            local file_modified=false
             local original_task_file
             if original_task_file="$(find_task_file "$root" "$feature")"; then
                 if ! diff -q "$feature_file" "$original_task_file" >/dev/null 2>&1; then
                     file_modified=true
                 fi
             fi
-        fi
 
-        if [ "$file_modified" = "false" ]; then
-            info "Feature file ${feature}.md was not modified - removing it"
-            if git ls-files --error-unmatch "${feature}.md" >/dev/null 2>&1; then
-                git rm "${feature}.md"
-                git commit -m "Remove unmodified feature file ${feature}.md"
-            else
-                rm -f "${feature}.md"
+            if [ "$file_modified" = "false" ]; then
+                info "Feature file ${feature}.md was not modified - removing it"
+                if git ls-files --error-unmatch "${feature}.md" >/dev/null 2>&1; then
+                    git rm "${feature}.md"
+                    git commit -m "Remove unmodified feature file ${feature}.md"
+                else
+                    rm -f "${feature}.md"
+                fi
             fi
         fi
     fi
