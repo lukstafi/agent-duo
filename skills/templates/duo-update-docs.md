@@ -71,8 +71,4 @@ Keep feedback actionable (avoid generic complaints). Include missing commands, u
 agent-duo signal "$MY_NAME" docs-update-done "learnings captured"
 ```
 
-If your solution is complete, you can now create the PR:
-
-```bash
-agent-duo pr "$MY_NAME"
-```
+The orchestrator will handle PR creation after docs are updated.
