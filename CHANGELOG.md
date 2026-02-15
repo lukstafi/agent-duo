@@ -4,6 +4,35 @@ All notable changes to agent-duo will be documented in this file.
 
 ## [Unreleased]
 
+## [v0.5] - 2026-02-15
+
+### Added
+- **`--followup` flag**: Convert observations from an existing PR into a new task with `agent-duo start --followup <PR-number>` and `agent-solo start --followup <PR-number>`
+- **Feedback-digest pipeline**: Automatically file structured GitHub issues from agent feedback via ludics
+- **High-priority ntfy notification** when merge vote reaches no consensus
+- **`update-docs` phase** for solo mode
+
+### Changed
+- **Orchestrator-driven commits and PR creation**: Quiescence detection triggers automatic commits and PR creation instead of relying on agents
+- **Diff-gated reviews**: Skip redundant reviews when peer had no changes
+- Reduced cognitive load in skill templates
+- Reorganized implemented feature spec docs into task-spec living design docs
+- Hardened quiescence detection for in-phase commits
+
+### Fixed
+- Fix race condition in suggest-refactor: Stop hook signals done before file is written
+- Guard all file-producing hook phases against cross-phase race condition
+- Replace 5-second sleep heuristic with phase-tracking guard in Stop hook
+- Fix merge-phase skill discovery: install skills to root worktree
+- Fix `gh pr view` calls to use `--json` and avoid deprecated `projectCards` query
+- Guard tmux `send-keys` against copy-mode crash under `set -e`
+- Fix merge consensus not detected after final debate round
+- Fix PR comment feedback loop and feature file deletion of repo files
+- Silence expected hook log noise for cross-phase race and pr-comments phase
+- Fix convergence detection: decouple from PR status, let converged agents review
+- Fix `lib_commit_round` stdout contamination breaking review and convergence detection
+- Fix round-1 fallbacks in skill templates and unquote heredoc delimiters
+
 ## [v0.4] - 2026-02-13
 
 ### Added
