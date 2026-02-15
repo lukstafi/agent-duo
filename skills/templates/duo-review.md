@@ -52,13 +52,15 @@ agent-duo signal "$MY_NAME" reviewing "examining peer's work"
    cat "$PEER_WORKTREE/path/to/interesting/file"
    ```
 
-2. **Read your previous review** (if round 2+, to avoid repeating feedback):
+2. **Read your previous review** (round 2+ only, to avoid repeating feedback):
 
    ```bash
    ROUND=$(cat "$PEER_SYNC/round")
-   PREV_ROUND=$((ROUND - 1))
-   MY_PREV_REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-${MY_NAME}-reviews-${PEER_NAME}.md"
-   [ -f "$MY_PREV_REVIEW" ] && cat "$MY_PREV_REVIEW"
+   if [ "$ROUND" -gt 1 ]; then
+       PREV_ROUND=$((ROUND - 1))
+       MY_PREV_REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-${MY_NAME}-reviews-${PEER_NAME}.md"
+       [ -f "$MY_PREV_REVIEW" ] && cat "$MY_PREV_REVIEW"
+   fi
    ```
 
    Focus on what changed since your last review. Only re-raise prior issues if still unaddressed.
@@ -91,13 +93,15 @@ agent-duo signal "$MY_NAME" reviewing "examining peer's work"
 
    Edit the file to fill in actual observations (don't leave placeholders).
 
-4. **Read their review of you** (if available from previous round):
+4. **Read their review of you** (round 2+ only):
 
    ```bash
    ROUND=$(cat "$PEER_SYNC/round")
-   PREV_ROUND=$((ROUND - 1))
-   THEIR_REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-${PEER_NAME}-reviews-${MY_NAME}.md"
-   [ -f "$THEIR_REVIEW" ] && cat "$THEIR_REVIEW"
+   if [ "$ROUND" -gt 1 ]; then
+       PREV_ROUND=$((ROUND - 1))
+       THEIR_REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-${PEER_NAME}-reviews-${MY_NAME}.md"
+       [ -f "$THEIR_REVIEW" ] && cat "$THEIR_REVIEW"
+   fi
    ```
 
 ### Review Philosophy

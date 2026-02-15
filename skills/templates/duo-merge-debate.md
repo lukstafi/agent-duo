@@ -32,11 +32,13 @@ You and your peer voted for different PRs. This debate phase allows you to:
 ROUND=$(cat "$PEER_SYNC/merge-round")
 PREV_ROUND=$((ROUND - 1))
 
-# Read your peer's vote from previous round
-cat "$PEER_SYNC/merge-votes/round-${PREV_ROUND}-${PEER_NAME}-vote.md"
+# Read your peer's vote from previous round (if exists)
+PEER_VOTE="$PEER_SYNC/merge-votes/round-${PREV_ROUND}-${PEER_NAME}-vote.md"
+[ -f "$PEER_VOTE" ] && cat "$PEER_VOTE" || echo "No previous peer vote found."
 
-# Read your previous vote
-cat "$PEER_SYNC/merge-votes/round-${PREV_ROUND}-${MY_NAME}-vote.md"
+# Read your previous vote (if exists)
+MY_VOTE="$PEER_SYNC/merge-votes/round-${PREV_ROUND}-${MY_NAME}-vote.md"
+[ -f "$MY_VOTE" ] && cat "$MY_VOTE" || echo "No previous vote from you found."
 ```
 
 ### 2. Consider the Arguments

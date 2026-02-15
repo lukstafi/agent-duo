@@ -13,12 +13,16 @@ You are the **CODER** in a solo workflow. A reviewer will examine your work.
 
 ## First Things First
 
-1. Check reviewer feedback from the previous round:
+1. Check reviewer feedback from the previous round (if any):
    ```bash
    ROUND=$(cat "$PEER_SYNC/round")
-   PREV_ROUND=$((ROUND - 1))
-   REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-review.md"
-   [ -f "$REVIEW" ] && cat "$REVIEW"
+   if [ "$ROUND" -gt 1 ]; then
+       PREV_ROUND=$((ROUND - 1))
+       REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-review.md"
+       [ -f "$REVIEW" ] && cat "$REVIEW"
+   else
+       echo "Round 1 — no previous review to read."
+   fi
    ```
 
 2. Check current phase:

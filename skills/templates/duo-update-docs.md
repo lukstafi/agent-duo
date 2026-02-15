@@ -27,7 +27,7 @@ STAGING="AGENTS_STAGING.md"
 
 # Create the staging file if it doesn't exist
 if [ ! -f "$STAGING" ]; then
-  cat > "$STAGING" << 'STAGING_EOF'
+  cat > "$STAGING" << STAGING_EOF
 # Agent Learnings (Staging)
 
 This file collects agent-discovered learnings for later curation into CLAUDE.md / AGENTS.md.

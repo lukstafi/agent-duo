@@ -46,13 +46,15 @@ agent-solo signal reviewer reviewing "examining coder's work"
    git diff HEAD~1
    ```
 
-2. **Read your previous review** (if round 2+, to avoid repeating feedback):
+2. **Read your previous review** (round 2+ only, to avoid repeating feedback):
 
    ```bash
    ROUND=$(cat "$PEER_SYNC/round")
-   PREV_ROUND=$((ROUND - 1))
-   PREV_REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-review.md"
-   [ -f "$PREV_REVIEW" ] && cat "$PREV_REVIEW"
+   if [ "$ROUND" -gt 1 ]; then
+       PREV_ROUND=$((ROUND - 1))
+       PREV_REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-review.md"
+       [ -f "$PREV_REVIEW" ] && cat "$PREV_REVIEW"
+   fi
    ```
 
    Focus on what changed since your last review. Only re-raise prior issues if still unaddressed.

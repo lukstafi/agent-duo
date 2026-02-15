@@ -23,9 +23,13 @@ Read your peer's most recent review of your work:
 
 ```bash
 ROUND=$(cat "$PEER_SYNC/round")
-PREV_ROUND=$((ROUND - 1))
-REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-${PEER_NAME}-reviews-${MY_NAME}.md"
-[ -f "$REVIEW" ] && cat "$REVIEW"
+if [ "$ROUND" -gt 1 ]; then
+    PREV_ROUND=$((ROUND - 1))
+    REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-${PEER_NAME}-reviews-${MY_NAME}.md"
+    [ -f "$REVIEW" ] && cat "$REVIEW"
+else
+    echo "Round 1 — no previous review to read."
+fi
 ```
 
 ## Your Task
