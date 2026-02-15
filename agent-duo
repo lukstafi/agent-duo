@@ -4493,17 +4493,21 @@ cmd_run() {
             done
             echo ""
 
-            # Commit + quiescence detection for each non-converged agent without PR
+            # Commit + quiescence detection for each non-converged agent
+            local claude_committed=false
+            local codex_committed=false
             for _agent in claude codex; do
                 local _converged_var="${_agent}_converged"
-                if ! ${!_converged_var} && ! has_pr "$_agent" "$peer_sync"; then
+                if ! ${!_converged_var}; then
                     local _wt_var="worktree_${_agent}"
                     local _commit_result
                     _commit_result="$(lib_commit_round "${!_wt_var}" "$round" "$peer_sync" "$_agent")"
-                    if [ "$_commit_result" = "quiescent" ]; then
+                    if [ "$_commit_result" = "quiescent" ] && ! has_pr "$_agent" "$peer_sync"; then
                         info "$_agent is quiescent (no changes) - marking converged"
                         echo "true" > "$peer_sync/${_agent}.converged"
                         eval "${_agent}_converged=true"
+                    elif [ "$_commit_result" = "committed" ]; then
+                        eval "${_agent}_committed=true"
                     fi
                 fi
             done
@@ -4549,20 +4553,26 @@ cmd_run() {
                 handle_escalation_block "$peer_sync" "$feature" "duo" || true
             fi
 
-            # Review phase: skip if both converged
-            if ! $claude_converged || ! $codex_converged; then
+            # Review phase: skip if no agent committed new work
+            # In duo mode, claude reviews codex's work and vice versa.
+            # Only trigger review for an agent if its peer committed changes this round.
+            local claude_needs_review=false  # claude reviews codex → trigger if codex committed
+            local codex_needs_review=false   # codex reviews claude → trigger if claude committed
+            $codex_committed && ! $claude_converged && claude_needs_review=true
+            $claude_committed && ! $codex_converged && codex_needs_review=true
+
+            if $claude_needs_review || $codex_needs_review; then
                 info "=== Round $round: Review Phase ==="
                 echo "review" > "$peer_sync/phase"
 
-                # Trigger review for non-converged agents only
-                if ! $claude_converged; then
+                if $claude_needs_review; then
                     check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
                     atomic_write "$peer_sync/claude.status" "reviewing|$(date +%s)|round $round review phase"
                     info "Triggering duo-review for claude..."
                     send_to_agent "claude" "$claude_session" "$peer_sync" skill "duo-review"
                 fi
 
-                if ! $codex_converged; then
+                if $codex_needs_review; then
                     check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
                     atomic_write "$peer_sync/codex.status" "reviewing|$(date +%s)|round $round review phase"
                     info "Triggering duo-review for codex..."
@@ -4574,9 +4584,9 @@ cmd_run() {
                 claude_done=false
                 codex_done=false
 
-                # Pre-set done for converged agents
-                $claude_converged && claude_done=true
-                $codex_converged && codex_done=true
+                # Pre-set done for agents not triggered for review
+                ! $claude_needs_review && claude_done=true
+                ! $codex_needs_review && codex_done=true
 
                 while ! ($claude_done && $codex_done); do
                     local elapsed=$((SECONDS - review_start))
