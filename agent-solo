@@ -207,6 +207,7 @@ cmd_start() {
     local base_port=""
     local followup_pr=""
     local early_pr=false
+    local docs_update_mode=true
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -220,6 +221,7 @@ cmd_start() {
             --auto-finish) auto_finish=true; shift ;;
             --auto-finish-timeout) auto_finish_timeout="$2"; shift 2 ;;
             --early-pr) early_pr=true; shift ;;
+            --skip-docs-update) docs_update_mode=false; shift ;;
             --work-timeout) work_timeout="$2"; shift 2 ;;
             --review-timeout) review_timeout="$2"; shift 2 ;;
             --gather-timeout) gather_timeout="$2"; shift 2 ;;
@@ -288,7 +290,7 @@ cmd_start() {
                 "$ttyd_mode" "$auto_run" "$gather_mode" "$clarify_mode" "$pushback_mode" "$plan_mode" \
                 "$auto_finish" "$auto_finish_timeout" \
                 "$work_timeout" "$review_timeout" "$gather_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
-                "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port" "$followup_pr" "$early_pr"; then
+                "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port" "$followup_pr" "$early_pr" "$docs_update_mode"; then
                 started=$((started + 1))
             else
                 failed=$((failed + 1))
@@ -311,7 +313,7 @@ cmd_start() {
         "$ttyd_mode" "$auto_run" "$gather_mode" "$clarify_mode" "$pushback_mode" "$plan_mode" \
         "$auto_finish" "$auto_finish_timeout" \
         "$work_timeout" "$review_timeout" "$gather_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
-        "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port" "$followup_pr" "$early_pr"
+        "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port" "$followup_pr" "$early_pr" "$docs_update_mode"
 }
 
 # Start a single solo session for one feature
@@ -340,6 +342,7 @@ start_single_solo_session() {
     local base_port="${22}"
     local followup_pr="${23}"
     local early_pr="${24:-false}"
+    local docs_update_mode="${25:-true}"
 
     # Check for existing session for THIS feature
     local sessions_dir="$main_project_root/.agent-sessions"
@@ -432,6 +435,7 @@ start_single_solo_session() {
     echo "$auto_finish" > "$peer_sync/auto-finish"
     echo "$auto_finish_timeout" > "$peer_sync/auto-finish-timeout"
     echo "$early_pr" > "$peer_sync/early-pr"
+    echo "$docs_update_mode" > "$peer_sync/docs-update-mode"
     echo "1" > "$peer_sync/round"
     echo "$feature" > "$peer_sync/feature"
     [ -n "$followup_pr" ] && echo "$followup_pr" > "$peer_sync/followup-pr"

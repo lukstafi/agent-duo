@@ -2147,6 +2147,7 @@ install_solo_skills_to_worktree() {
     install_skill "$templates_dir/solo-pr-comment.md" "$claude_skills/solo-pr-comment.md" "/solo-pr-comment"
     install_skill "$templates_dir/solo-integrate.md" "$claude_skills/solo-integrate.md" "/solo-integrate"
     install_skill "$templates_dir/solo-final-merge.md" "$claude_skills/solo-final-merge.md" "/solo-final-merge"
+    install_skill "$templates_dir/solo-update-docs.md" "$claude_skills/solo-update-docs.md" "/solo-update-docs"
     install_skill "$templates_dir/solo-suggest-refactor.md" "$claude_skills/solo-suggest-refactor.md" "/solo-suggest-refactor"
 
     # Install Codex skills (project-scoped path is .agents/skills/)
@@ -2168,6 +2169,7 @@ install_solo_skills_to_worktree() {
     install_skill "$templates_dir/solo-pr-comment.md" "$codex_skills/solo-pr-comment/SKILL.md" "\$solo-pr-comment"
     install_skill "$templates_dir/solo-integrate.md" "$codex_skills/solo-integrate/SKILL.md" "\$solo-integrate"
     install_skill "$templates_dir/solo-final-merge.md" "$codex_skills/solo-final-merge/SKILL.md" "\$solo-final-merge"
+    install_skill "$templates_dir/solo-update-docs.md" "$codex_skills/solo-update-docs/SKILL.md" "\$solo-update-docs"
     install_skill "$templates_dir/solo-suggest-refactor.md" "$codex_skills/solo-suggest-refactor/SKILL.md" "\$solo-suggest-refactor"
 }
 
