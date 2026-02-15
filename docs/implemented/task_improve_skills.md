@@ -79,9 +79,9 @@ If blocked by ambiguity/inconsistency, use: `agent-duo escalate <type> "<message
 
 **Problem (from agent complaints, confirmed absent in templates):** Work-phase skills have no guidance for recovering after context compaction. Agents reported losing track of modified files after compaction.
 
-**Cross-reference with agent complaints:** Directly matches **Complaint #4** (context compaction resilience). The proposed solution (a running worklog file) is reasonable and low-cost.
+**Cross-reference with agent complaints:** Directly matches **Complaint #4** (context compaction resilience).
 
-**Recommendation:** Add to work-phase skills: *"Maintain a brief worklog at `$PEER_SYNC/<agent>-worklog.md` listing files modified and decisions made. If your context was compacted, read this file and `git diff --stat` to re-orient."* This is ~2 lines added to the skill template.
+**Applied fix:** With orchestrator-driven per-round commits (section 9), the git history itself serves as the recovery mechanism. Work skills now guide agents to use `git log --oneline main..HEAD` (round progression and decisions) and `git diff --stat` (uncommitted changes) to re-orient after compaction. A separate worklog file would duplicate what's already in commit messages and risk going stale.
 
 ## 8. Minor: `rg` Pattern Safety
 
@@ -161,10 +161,13 @@ The docs-update phase (`duo-update-docs.md`) fits naturally as a step between "f
 
 **New `lib_commit_round()`** — called after each `done` signal:
 
-1. Check `git diff HEAD` in agent's worktree
-2. If no changes: return "quiescent" (caller decides whether to create PR or skip review)
-3. If changes: `git add -A && git commit -m "Round N: <signal message>"` (or `"Round N changes"` if message is empty), return "committed"
-4. If `--early-pr` and PR already exists: `git push`
+1. Check `git status --porcelain` (uncommitted changes) **and** compare HEAD against saved pre-round sha in `.peer-sync/{agent}.head-before-round` (in-phase commits by the agent)
+2. If no uncommitted changes and no new commits: return "quiescent" (caller decides whether to create PR or skip review)
+3. If uncommitted changes: `git add -A && git commit -m "Round N: <signal message>"` (or `"Round N changes"` if message is empty), return "committed"
+4. If only in-phase commits (no uncommitted changes): return "committed" without creating a new commit
+5. If `--early-pr` and PR already exists: `git push`
+
+The orchestrator records each agent's HEAD sha before triggering the work phase. This ensures quiescence detection is resilient to agents that commit during work (e.g., Claude Code's `/commit` command or git hooks).
 
 **Simplified `lib_create_pr()`** — called by orchestrator on quiescence/APPROVE:
 

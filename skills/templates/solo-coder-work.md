@@ -35,13 +35,16 @@ Implement the solution, addressing any feedback from the reviewer.
 - **Address reviewer feedback**: Fix issues mentioned in the review
 - **Follow best practices**: Write clean, tested code
 - **Stay focused**: Implement the requested feature
+- **Annotate the task spec**: Record design decisions and rationale directly in `$FEATURE.md` as you work — this serves as a living design doc and helps you recover after context compaction
 
 ## If Your Context Was Compacted
 
-If you notice your context was compacted mid-work, re-orient:
+If you notice your context was compacted mid-work, re-orient using commit history:
 
 ```bash
-git diff --stat
+git log --oneline main..HEAD   # Round-by-round progression and decisions
+git diff --stat                # Files modified (uncommitted changes)
+git diff main..HEAD --stat     # All files changed across rounds
 ```
 
 ## If You Discover a Blocking Issue

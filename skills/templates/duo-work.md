@@ -31,6 +31,7 @@ Stop any review activity. Your task is to continue developing your implementatio
 - **Diverge to explore the search space**: Maintain your *alternative* approach
 - **Consider peer feedback**: Address valid concerns while keeping your distinct solution
 - **Stay goal focused**: Convergence is fine if it arises organically from a confident consensus
+- **Annotate the task spec**: Record design decisions and rationale directly in `$FEATURE.md` as you work — this serves as a living design doc and helps you recover after context compaction
 
 ## Checking Peer's Progress
 
@@ -50,10 +51,12 @@ This notifies the user without interrupting your work. Continue with your best i
 
 ## If Your Context Was Compacted
 
-If you notice your context was compacted mid-work, re-orient:
+If you notice your context was compacted mid-work, re-orient using commit history:
 
 ```bash
-git diff --stat
+git log --oneline main..HEAD   # Round-by-round progression and decisions
+git diff --stat                # Files modified (uncommitted changes)
+git diff main..HEAD --stat     # All files changed across rounds
 ```
 
 ## When Done

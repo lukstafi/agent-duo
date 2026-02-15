@@ -2341,6 +2341,11 @@ cmd_run() {
         echo "$round" > "$peer_sync/round"
         echo "work" > "$peer_sync/phase"
 
+        # Record pre-round HEAD for quiescence detection (detects in-phase commits)
+        if [ -d "$worktree" ]; then
+            git -C "$worktree" rev-parse HEAD 2>/dev/null > "$peer_sync/coder.head-before-round" || true
+        fi
+
         # Trigger work phase for coder
         atomic_write "$peer_sync/coder.status" "working|$(date +%s)|round $round work phase"
         atomic_write "$peer_sync/reviewer.status" "waiting|$(date +%s)|waiting for coder"

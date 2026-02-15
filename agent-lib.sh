@@ -3012,9 +3012,36 @@ lib_commit_round() {
         return 0
     fi
 
-    # Check for changes
-    if [ -z "$(git -C "$worktree" status --porcelain)" ]; then
+    local has_uncommitted=false
+    [ -n "$(git -C "$worktree" status --porcelain)" ] && has_uncommitted=true
+
+    # Check for in-phase commits (agent may have committed during work)
+    local has_new_commits=false
+    local pre_round_head=""
+    if [ -f "$peer_sync/${agent}.head-before-round" ]; then
+        pre_round_head="$(cat "$peer_sync/${agent}.head-before-round")"
+        local current_head
+        current_head="$(git -C "$worktree" rev-parse HEAD 2>/dev/null)" || true
+        if [ -n "$pre_round_head" ] && [ -n "$current_head" ] && [ "$pre_round_head" != "$current_head" ]; then
+            has_new_commits=true
+        fi
+    fi
+
+    # Quiescent only if no uncommitted changes AND no new commits this round
+    if ! $has_uncommitted && ! $has_new_commits; then
         echo "quiescent"
+        return 0
+    fi
+
+    # If agent committed during work but left nothing uncommitted, push if needed and report
+    if ! $has_uncommitted; then
+        # Still need to push in-phase commits for early-pr
+        local early_pr=""
+        early_pr="$(cat "$peer_sync/early-pr" 2>/dev/null)" || true
+        if [ "$early_pr" = "true" ] && [ -f "$peer_sync/${agent}.pr" ]; then
+            git -C "$worktree" push || true
+        fi
+        echo "committed"
         return 0
     fi
 
