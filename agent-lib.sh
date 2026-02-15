@@ -3043,7 +3043,7 @@ lib_commit_round() {
         local early_pr=""
         early_pr="$(cat "$peer_sync/early-pr" 2>/dev/null)" || true
         if [ "$early_pr" = "true" ] && [ -f "$peer_sync/${agent}.pr" ]; then
-            git -C "$worktree" push || true
+            git -C "$worktree" push >&2 || true
         fi
         echo "committed"
         return 0
@@ -3063,15 +3063,15 @@ lib_commit_round() {
         commit_msg="Round $round changes"
     fi
 
-    # Commit
-    git -C "$worktree" add -A
-    git -C "$worktree" commit -m "$commit_msg" || true
+    # Commit (redirect to stderr so only our echo goes to stdout)
+    git -C "$worktree" add -A >&2
+    git -C "$worktree" commit -m "$commit_msg" >&2 || true
 
     # If early-pr mode and PR exists, push
     local early_pr=""
     early_pr="$(cat "$peer_sync/early-pr" 2>/dev/null)" || true
     if [ "$early_pr" = "true" ] && [ -f "$peer_sync/${agent}.pr" ]; then
-        git -C "$worktree" push || true
+        git -C "$worktree" push >&2 || true
     fi
 
     echo "committed"
