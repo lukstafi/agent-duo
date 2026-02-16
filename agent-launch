@@ -7,8 +7,8 @@
 # Requires Bash 4.0+ (for associative arrays, regex matching, etc.)
 # macOS users: install modern bash via Homebrew: brew install bash
 #
-# Usage: agent-claude <command> [options]
-#        agent-codex  <command> [options]
+# Usage: agent-claude <command> [options] [-- extra-agent-args...]
+#        agent-codex  <command> [options] [-- extra-agent-args...]
 #
 # Commands:
 #   <task> --ide [--branch]    Launch with VS Code IDE integration
@@ -20,6 +20,8 @@
 #   restart <task>             DWIM recovery (reattach tmux, restart ttyd)
 #   attach <task>              Attach to existing tmux session
 #   help                       Show this help
+#
+# Arguments after -- are passed directly to the underlying agent CLI.
 
 set -e
 
@@ -178,7 +180,7 @@ wait_for_tui() {
 #------------------------------------------------------------------------------
 
 cmd_help() {
-    echo "Usage: $INVOKED_AS <command> [options]"
+    echo "Usage: $INVOKED_AS <command> [options] [-- extra-agent-args...]"
     echo ""
     echo "Launch Commands:"
     echo "  <task> --ide [--branch]    Launch $AGENT_TYPE with VS Code IDE integration"
@@ -195,6 +197,11 @@ cmd_help() {
     echo ""
     echo "Options:"
     echo "  --branch    Create a git worktree on a new branch named <task>"
+    echo "  --          Arguments after this are passed to the agent CLI"
+    echo ""
+    echo "Examples:"
+    echo "  $INVOKED_AS my-task --bare -- --chrome"
+    echo "  $INVOKED_AS my-task --ide --branch -- --verbose"
     echo ""
     echo "Session naming: ${SESSION_PREFIX}-<project>-<task>"
 }
@@ -207,11 +214,13 @@ cmd_start() {
     local task=""
     local mode=""
     local use_branch=false
+    local extra_args=()
 
-    # Parse arguments
+    # Parse arguments — everything after standalone -- goes to the agent CLI
     local mode_count=0
     while [ $# -gt 0 ]; do
         case "$1" in
+            --)       shift; extra_args=("$@"); break ;;
             --ide)    mode="ide"; mode_count=$((mode_count + 1)); shift ;;
             --ttyd)   mode="ttyd"; mode_count=$((mode_count + 1)); shift ;;
             --bare)   mode="bare"; mode_count=$((mode_count + 1)); shift ;;
@@ -284,8 +293,8 @@ cmd_start() {
     tmux new-session -d -s "$tmux_name" -c "$workdir"
     tmux_set_title "$tmux_name" "${AGENT_TYPE}: ${task}"
 
-    # Launch agent TUI
-    restart_agent_tui "$AGENT_TYPE" "$tmux_name"
+    # Launch agent TUI (extra_args passed through -- to the agent CLI)
+    restart_agent_tui "$AGENT_TYPE" "$tmux_name" "" "" "${extra_args[@]}"
 
     # Mode-specific setup
     local ttyd_port="" ttyd_pid=""
@@ -338,6 +347,8 @@ worktree=$worktree_path"
 ttyd_port=$ttyd_port"
     [ -n "$ttyd_pid" ] && content="$content
 ttyd_pid=$ttyd_pid"
+    [ ${#extra_args[@]} -gt 0 ] && content="$content
+extra_args=${extra_args[*]}"
     content="$content
 started=$(date +%Y-%m-%dT%H:%M:%S%z)"
 
@@ -515,26 +526,29 @@ cmd_restart() {
     session_file="$(session_file_path "$task")"
     [ -f "$session_file" ] || die "No session found for '$task'. Use '$INVOKED_AS $task --ide|--ttyd|--bare' to start."
 
-    local tmux_name mode workdir ttyd_port ttyd_pid
+    local tmux_name mode workdir ttyd_port ttyd_pid saved_extra_args
     tmux_name="$(read_session_field "$session_file" tmux)"
     mode="$(read_session_field "$session_file" mode)"
     workdir="$(read_session_field "$session_file" workdir)"
     ttyd_port="$(read_session_field "$session_file" ttyd_port)"
     ttyd_pid="$(read_session_field "$session_file" ttyd_pid)"
+    saved_extra_args="$(read_session_field "$session_file" extra_args)"
+    # shellcheck disable=SC2086
+    local restart_extra=($saved_extra_args)
 
     # Recreate tmux session if gone
     if ! tmux_session_exists "$tmux_name"; then
         info "Recreating tmux session: $tmux_name"
         tmux new-session -d -s "$tmux_name" -c "$workdir"
         tmux_set_title "$tmux_name" "${AGENT_TYPE}: ${task}"
-        restart_agent_tui "$AGENT_TYPE" "$tmux_name"
+        restart_agent_tui "$AGENT_TYPE" "$tmux_name" "" "" "${restart_extra[@]}"
     fi
 
     # Mode-specific recovery
     case "$mode" in
         ide)
             if ! agent_tui_is_running "$tmux_name" "$AGENT_TYPE"; then
-                restart_agent_tui "$AGENT_TYPE" "$tmux_name"
+                restart_agent_tui "$AGENT_TYPE" "$tmux_name" "" "" "${restart_extra[@]}"
             fi
             wait_for_tui "$tmux_name" "$AGENT_TYPE" 30
             info "Sending /ide command..."
@@ -546,7 +560,7 @@ cmd_restart() {
             ;;
         ttyd)
             if ! agent_tui_is_running "$tmux_name" "$AGENT_TYPE"; then
-                restart_agent_tui "$AGENT_TYPE" "$tmux_name"
+                restart_agent_tui "$AGENT_TYPE" "$tmux_name" "" "" "${restart_extra[@]}"
             fi
 
             # Restart ttyd if not running
@@ -586,7 +600,7 @@ ttyd_pid=$ttyd_pid"
             ;;
         bare)
             if ! agent_tui_is_running "$tmux_name" "$AGENT_TYPE"; then
-                restart_agent_tui "$AGENT_TYPE" "$tmux_name"
+                restart_agent_tui "$AGENT_TYPE" "$tmux_name" "" "" "${restart_extra[@]}"
             fi
             printf '\033]0;%s\007' "${AGENT_TYPE}: ${task}"
             exec tmux attach -t "$tmux_name"

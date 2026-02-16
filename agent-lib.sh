@@ -490,33 +490,43 @@ get_claude_model() {
 }
 
 # Get agent command
-# Usage: get_agent_cmd <agent> [thinking_effort]
+# Usage: get_agent_cmd <agent> [thinking_effort] [-- extra_args...]
 # thinking_effort is only used for codex (low, medium, high)
+# Extra args after -- are appended verbatim to the command
 get_agent_cmd() {
     local agent="$1"
     local thinking="${2:-$DEFAULT_CODEX_THINKING}"
+    shift 2 2>/dev/null || shift $#
+    # Consume optional -- separator
+    [ "${1:-}" = "--" ] && shift
+    local extra_args="$*"
+
     local codex_model claude_model
     codex_model="$(get_codex_model)"
     claude_model="$(get_claude_model)"
 
+    local cmd
     case "$agent" in
         claude)
             if [ -n "$claude_model" ]; then
-                echo "claude --dangerously-skip-permissions --model $claude_model"
+                cmd="claude --dangerously-skip-permissions --model $claude_model"
             else
-                echo "claude --dangerously-skip-permissions"
+                cmd="claude --dangerously-skip-permissions"
             fi
             ;;
         codex)
             # Disable update prompts via -c to avoid interactive prompts in automation
             if [ -n "$codex_model" ]; then
-                echo "codex --yolo -m \"$codex_model\" -c model_reasoning_effort=\"$thinking\" -c check_for_update_on_startup=false"
+                cmd="codex --yolo -m \"$codex_model\" -c model_reasoning_effort=\"$thinking\" -c check_for_update_on_startup=false"
             else
-                echo "codex --yolo -c model_reasoning_effort=\"$thinking\" -c check_for_update_on_startup=false"
+                cmd="codex --yolo -c model_reasoning_effort=\"$thinking\" -c check_for_update_on_startup=false"
             fi
             ;;
-        *) echo "$agent" ;;  # Allow custom agents
+        *) cmd="$agent" ;;  # Allow custom agents
     esac
+
+    [ -n "$extra_args" ] && cmd="$cmd $extra_args"
+    echo "$cmd"
 }
 
 #------------------------------------------------------------------------------
@@ -742,16 +752,20 @@ restart_ttyd_for_session() {
 }
 
 # Restart an agent TUI in its tmux session
-# Usage: restart_agent_tui <agent> <session> [thinking_effort] [display_name]
+# Usage: restart_agent_tui <agent> <session> [thinking_effort] [display_name] [-- extra_args...]
 # agent: agent name like "claude" or "codex" (used for get_agent_cmd and agent_tui_is_running)
 # session: tmux session name
 # thinking_effort: optional, for codex reasoning effort (low/medium/high)
 # display_name: optional, for display purposes (e.g., "coder (claude)")
+# extra_args: additional arguments passed through to get_agent_cmd after --
 restart_agent_tui() {
     local agent="$1"
     local session="$2"
     local thinking="${3:-$DEFAULT_CODEX_THINKING}"
     local display_name="${4:-$agent}"
+    shift 4 2>/dev/null || shift $#
+    # Remaining args (with or without --) are forwarded to get_agent_cmd
+    local extra_args=("$@")
 
     # Check if tmux session exists
     if ! tmux_session_exists "$session"; then
@@ -777,7 +791,7 @@ restart_agent_tui() {
 
     # Start the agent CLI
     local agent_cmd
-    agent_cmd="$(get_agent_cmd "$agent" "$thinking")"
+    agent_cmd="$(get_agent_cmd "$agent" "$thinking" "${extra_args[@]}")"
     tmux send-keys -t "$session" -l "$agent_cmd"
     tmux send-keys -t "$session" Enter
 
