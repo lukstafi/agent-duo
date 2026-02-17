@@ -49,9 +49,6 @@ else
     exit 1
 fi
 
-# Default agents for solo mode (coder does implementation, reviewer reviews)
-DEFAULT_CODER="claude"
-DEFAULT_REVIEWER="codex"
 
 # Session registry prefix for .agent-sessions/ namespace isolation
 SESSION_REGISTRY_PREFIX="solo"
@@ -200,8 +197,8 @@ cmd_start() {
     local auto_finish_timeout=$DEFAULT_AUTO_FINISH_TIMEOUT
     local max_rounds=10
     local codex_thinking=$DEFAULT_CODEX_THINKING
-    local coder=$DEFAULT_CODER
-    local reviewer=$DEFAULT_REVIEWER
+    local coder=""
+    local reviewer=""
     local codex_model=""
     local claude_model=""
     local base_port=""
@@ -232,6 +229,8 @@ cmd_start() {
             --codex-thinking) codex_thinking="$2"; shift 2 ;;
             --codex-model) codex_model="$2"; shift 2 ;;
             --claude-model) claude_model="$2"; shift 2 ;;
+            --claude) coder="claude"; reviewer="codex"; shift ;;
+            --codex) coder="codex"; reviewer="claude"; shift ;;
             --coder) coder="$2"; shift 2 ;;
             --reviewer) reviewer="$2"; shift 2 ;;
             --port) base_port="$2"; shift 2 ;;
@@ -256,7 +255,12 @@ cmd_start() {
         features+=("$followup_feature")
     fi
 
-    [ ${#features[@]} -eq 0 ] && die "Usage: agent-solo start <feature> [feature2 ...] [--followup <PR-number>] [--no-ttyd] [--auto-run] [--clarify] [--pushback] [--plan] [--coder <agent>] [--reviewer <agent>]"
+    [ ${#features[@]} -eq 0 ] && die "Usage: agent-solo start <feature> [feature2 ...] [--followup <PR-number>] [--no-ttyd] [--auto-run] [--clarify] [--pushback] [--plan] [--claude|--codex|--coder <agent> --reviewer <agent>]"
+
+    # Validate coder/reviewer selection
+    if [ -z "$coder" ] || [ -z "$reviewer" ]; then
+        die "Must specify --claude, --codex, or both --coder <agent> and --reviewer <agent>"
+    fi
 
     # Validate codex thinking effort
     case "$codex_thinking" in
@@ -486,8 +490,8 @@ start_tmux_mode_solo() {
     local peer_sync="$4"
     local codex_thinking="${5:-$DEFAULT_CODEX_THINKING}"
     local clarify_mode="${6:-false}"
-    local coder="${7:-$DEFAULT_CODER}"
-    local reviewer="${8:-$DEFAULT_REVIEWER}"
+    local coder="${7}"
+    local reviewer="${8}"
     local pushback_mode="${9:-false}"
     local gather_mode="${10:-false}"
     local plan_mode="${11:-false}"
@@ -582,8 +586,8 @@ start_ttyd_mode_solo() {
     local codex_thinking="${9:-$DEFAULT_CODEX_THINKING}"
     local clarify_mode="${10:-false}"
     local clarify_timeout="${11:-$DEFAULT_CLARIFY_TIMEOUT}"
-    local coder="${12:-$DEFAULT_CODER}"
-    local reviewer="${13:-$DEFAULT_REVIEWER}"
+    local coder="${12}"
+    local reviewer="${13}"
     local pushback_mode="${14:-false}"
     local pushback_timeout="${15:-$DEFAULT_PUSHBACK_TIMEOUT}"
     local gather_mode="${16:-false}"
@@ -918,8 +922,8 @@ cmd_restart() {
 
     # Load agent assignments
     local coder_agent reviewer_agent
-    coder_agent="$(cat "$peer_sync/coder-agent" 2>/dev/null)" || coder_agent="$DEFAULT_CODER"
-    reviewer_agent="$(cat "$peer_sync/reviewer-agent" 2>/dev/null)" || reviewer_agent="$DEFAULT_REVIEWER"
+    coder_agent="$(cat "$peer_sync/coder-agent" 2>/dev/null)" || die "Missing coder-agent file in $peer_sync"
+    reviewer_agent="$(cat "$peer_sync/reviewer-agent" 2>/dev/null)" || die "Missing reviewer-agent file in $peer_sync"
 
     # Load codex thinking effort
     local codex_thinking
@@ -1741,8 +1745,8 @@ cmd_run() {
 
     # Get coder/reviewer agent assignments
     local coder reviewer
-    coder="$(cat "$peer_sync/coder-agent" 2>/dev/null)" || coder="$DEFAULT_CODER"
-    reviewer="$(cat "$peer_sync/reviewer-agent" 2>/dev/null)" || reviewer="$DEFAULT_REVIEWER"
+    coder="$(cat "$peer_sync/coder-agent" 2>/dev/null)" || die "Missing coder-agent file in $peer_sync"
+    reviewer="$(cat "$peer_sync/reviewer-agent" 2>/dev/null)" || die "Missing reviewer-agent file in $peer_sync"
 
     # Determine tmux session name
     local session_name="solo-${feature}"
