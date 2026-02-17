@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# agent-solo - Coordinate a coder/reviewer AI workflow in a single worktree
+# agent-pair - Coordinate a coder/reviewer AI workflow in a single worktree
 #
 # Requires Bash 4.0+ (for associative arrays, regex matching, etc.)
 # macOS users: install modern bash via Homebrew: brew install bash
 #
-# Usage: agent-solo <command> [options]
+# Usage: agent-pair <command> [options]
 #
 # Session Commands:
 #   start <feature> [<feature2> ...] [options]  Start session(s)
@@ -15,7 +15,7 @@
 #   confirm              Confirm clarify phase completion (proceed to work)
 #   pr                   Create PR for coder's solution
 #   cleanup [--full]     Remove session state (--full: also worktree/branch)
-#   setup                Install agent-solo to PATH and skills
+#   setup                Install agent-pair to PATH and skills
 #
 # Control Commands:
 #   nudge <agent> [msg]  Send message to agent terminal (coder or reviewer)
@@ -51,13 +51,13 @@ fi
 
 
 # Session registry prefix for .agent-sessions/ namespace isolation
-SESSION_REGISTRY_PREFIX="solo"
+SESSION_REGISTRY_PREFIX="pair"
 
-# Allocate ports for a solo session (3 ports: orchestrator, coder, reviewer)
+# Allocate ports for a pair session (3 ports: orchestrator, coder, reviewer)
 # Args: peer_sync [base_port]
 # If base_port is provided, uses consecutive ports starting from it (fails if any occupied)
 # Otherwise, dynamically finds 3 consecutive available ports starting from DEFAULT_BASE_PORT
-allocate_ports_solo() {
+allocate_ports_pair() {
     local peer_sync="$1"
     local base_port="${2:-}"
     local ports_file="$peer_sync/ports"
@@ -103,7 +103,7 @@ EOF
 #------------------------------------------------------------------------------
 
 cmd_setup() {
-    info "Installing agent-solo..."
+    info "Installing agent-pair..."
 
     local templates_dir="$SCRIPT_DIR/skills/templates"
 
@@ -115,13 +115,13 @@ cmd_setup() {
     local install_dir="$HOME/.local/bin"
     mkdir -p "$install_dir"
 
-    local install_path="$install_dir/agent-solo"
-    if [ "$SCRIPT_DIR/agent-solo" != "$install_path" ]; then
-        cp "$SCRIPT_DIR/agent-solo" "$install_path"
+    local install_path="$install_dir/agent-pair"
+    if [ "$SCRIPT_DIR/agent-pair" != "$install_path" ]; then
+        cp "$SCRIPT_DIR/agent-pair" "$install_path"
         chmod +x "$install_path"
-        success "Installed agent-solo to $install_path"
+        success "Installed agent-pair to $install_path"
     else
-        success "agent-solo already installed at $install_path"
+        success "agent-pair already installed at $install_path"
     fi
 
     # Install shared library
@@ -157,7 +157,7 @@ cmd_setup() {
 
     # Skills are now installed per-session into worktrees, not globally
     # Check for and warn about legacy global skill installations
-    warn_legacy_global_skills SOLO_SKILLS
+    warn_legacy_global_skills PAIR_SKILLS
 
     # Install unified notify hook script and configure agent hooks
     local notify_script
@@ -255,7 +255,7 @@ cmd_start() {
         features+=("$followup_feature")
     fi
 
-    [ ${#features[@]} -eq 0 ] && die "Usage: agent-solo start <feature> [feature2 ...] [--followup <PR-number>] [--no-ttyd] [--auto-run] [--clarify] [--pushback] [--plan] [--claude|--codex|--coder <agent> --reviewer <agent>]"
+    [ ${#features[@]} -eq 0 ] && die "Usage: agent-pair start <feature> [feature2 ...] [--followup <PR-number>] [--no-ttyd] [--auto-run] [--clarify] [--pushback] [--plan] [--claude|--codex|--coder <agent> --reviewer <agent>]"
 
     # Validate coder/reviewer selection
     if [ -z "$coder" ] || [ -z "$reviewer" ]; then
@@ -285,12 +285,12 @@ cmd_start() {
 
     # Multiple features: start each one
     if [ ${#features[@]} -gt 1 ]; then
-        info "Starting ${#features[@]} parallel solo sessions..."
+        info "Starting ${#features[@]} parallel pair sessions..."
         local started=0 failed=0
         for feature in "${features[@]}"; do
             echo ""
             info "=== Starting session: $feature ==="
-            if start_single_solo_session "$feature" "$main_project_root" "$project_name" \
+            if start_single_pair_session "$feature" "$main_project_root" "$project_name" \
                 "$ttyd_mode" "$auto_run" "$gather_mode" "$clarify_mode" "$pushback_mode" "$plan_mode" \
                 "$auto_finish" "$auto_finish_timeout" \
                 "$work_timeout" "$review_timeout" "$gather_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
@@ -306,22 +306,22 @@ cmd_start() {
         [ $failed -gt 0 ] && warn "Failed: $failed"
         if [ $started -gt 0 ]; then
             echo ""
-            echo "View all sessions: agent-solo status"
+            echo "View all sessions: agent-pair status"
         fi
         return 0
     fi
 
     # Single feature
     local feature="${features[0]}"
-    start_single_solo_session "$feature" "$main_project_root" "$project_name" \
+    start_single_pair_session "$feature" "$main_project_root" "$project_name" \
         "$ttyd_mode" "$auto_run" "$gather_mode" "$clarify_mode" "$pushback_mode" "$plan_mode" \
         "$auto_finish" "$auto_finish_timeout" \
         "$work_timeout" "$review_timeout" "$gather_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
         "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port" "$followup_pr" "$early_pr" "$docs_update_mode"
 }
 
-# Start a single solo session for one feature
-start_single_solo_session() {
+# Start a single pair session for one feature
+start_single_pair_session() {
     local feature="$1"
     local main_project_root="$2"
     local project_name="$3"
@@ -350,10 +350,10 @@ start_single_solo_session() {
 
     # Check for existing session for THIS feature
     local sessions_dir="$main_project_root/.agent-sessions"
-    if [ -L "$sessions_dir/solo-${feature}.session" ]; then
+    if [ -L "$sessions_dir/pair-${feature}.session" ]; then
         warn "Session already exists for feature '$feature'."
-        warn "To continue: agent-solo run --feature $feature"
-        warn "To start fresh: agent-solo cleanup --feature $feature && agent-solo start $feature"
+        warn "To continue: agent-pair run --feature $feature"
+        warn "To start fresh: agent-pair cleanup --feature $feature && agent-pair start $feature"
         return 1
     fi
 
@@ -367,7 +367,7 @@ start_single_solo_session() {
         warn "Create it with the task description, or the agents won't know what to do."
     fi
 
-    info "Starting Agent Solo session: $feature"
+    info "Starting Agent Pair session: $feature"
     info "Project: $project_name"
     info "Coder: $coder, Reviewer: $reviewer"
 
@@ -406,7 +406,7 @@ start_single_solo_session() {
     mkdir -p "$peer_sync/pids"
 
     echo "active" > "$peer_sync/session"
-    echo "solo" > "$peer_sync/mode"
+    echo "pair" > "$peer_sync/mode"
     echo "$coder" > "$peer_sync/coder-agent"
     echo "$reviewer" > "$peer_sync/reviewer-agent"
     # Determine initial phase: gather -> clarify -> pushback -> plan -> work
@@ -447,7 +447,7 @@ start_single_solo_session() {
 
     # Register session in main project's .agent-sessions directory
     mkdir -p "$sessions_dir"
-    ln -sfn "$peer_sync" "$sessions_dir/solo-${feature}.session"
+    ln -sfn "$peer_sync" "$sessions_dir/pair-${feature}.session"
 
     # Ensure .peer-sync, .agent-sessions, .claude, and .agents are excluded from git
     local git_exclude="$main_project_root/.git/info/exclude"
@@ -464,7 +464,7 @@ start_single_solo_session() {
     # Install skills to worktree (per-session, not global)
     local templates_dir
     templates_dir="$(get_templates_dir)"
-    install_solo_skills_to_worktree "$worktree" "$templates_dir"
+    install_pair_skills_to_worktree "$worktree" "$templates_dir"
     success "Installed skills to worktree"
 
     # Copy task file to worktree if it exists
@@ -476,14 +476,14 @@ start_single_solo_session() {
     echo "$ttyd_mode" > "$peer_sync/ttyd-mode"
 
     if [ "$ttyd_mode" = "true" ]; then
-        start_ttyd_mode_solo "$feature" "$worktree" "$worktree" "$peer_sync" \
+        start_ttyd_mode_pair "$feature" "$worktree" "$worktree" "$peer_sync" \
             "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" "$clarify_mode" "$clarify_timeout" "$coder" "$reviewer" "$pushback_mode" "$pushback_timeout" "$gather_mode" "$gather_timeout" "$plan_mode" "$plan_timeout" "$early_pr"
     else
-        start_tmux_mode_solo "$feature" "$worktree" "$worktree" "$peer_sync" "$codex_thinking" "$clarify_mode" "$coder" "$reviewer" "$pushback_mode" "$gather_mode" "$plan_mode"
+        start_tmux_mode_pair "$feature" "$worktree" "$worktree" "$peer_sync" "$codex_thinking" "$clarify_mode" "$coder" "$reviewer" "$pushback_mode" "$gather_mode" "$plan_mode"
     fi
 }
 
-start_tmux_mode_solo() {
+start_tmux_mode_pair() {
     local feature="$1"
     local project_root="$2"
     local worktree="$3"
@@ -496,14 +496,14 @@ start_tmux_mode_solo() {
     local gather_mode="${10:-false}"
     local plan_mode="${11:-false}"
 
-    local session_name="solo-${feature}"
+    local session_name="pair-${feature}"
 
     # Kill existing session if any
     tmux kill-session -t "$session_name" 2>/dev/null || true
 
     # Create new tmux session with orchestrator window
     tmux new-session -d -s "$session_name" -n "orchestrator" -c "$project_root"
-    tmux_set_title "$session_name" "solo: ${feature}"
+    tmux_set_title "$session_name" "pair: ${feature}"
 
     # Create coder window (in shared worktree)
     tmux new-window -t "$session_name" -n "coder" -c "$worktree"
@@ -574,7 +574,7 @@ start_tmux_mode_solo() {
     fi
 }
 
-start_ttyd_mode_solo() {
+start_ttyd_mode_pair() {
     local feature="$1"
     local project_root="$2"
     local worktree="$3"
@@ -596,7 +596,7 @@ start_ttyd_mode_solo() {
     local plan_timeout="${19:-$DEFAULT_PLAN_TIMEOUT}"
     local early_pr="${20:-false}"
 
-    local session_name="solo-${feature}"
+    local session_name="pair-${feature}"
 
     # Check ttyd is installed
     command -v ttyd >/dev/null 2>&1 || die "ttyd not found. Install with: brew install ttyd"
@@ -633,7 +633,7 @@ start_ttyd_mode_solo() {
     done
 
     # Allocate and load ports
-    allocate_ports_solo "$peer_sync" "$base_port"
+    allocate_ports_pair "$peer_sync" "$base_port"
     get_ports "$peer_sync"
     local orchestrator_port=$ORCHESTRATOR_PORT
     local coder_port=$CODER_PORT
@@ -659,7 +659,7 @@ start_ttyd_mode_solo() {
     # If auto-run, start the orchestrator loop in the orchestrator session
     if [ "$auto_run" = "true" ]; then
         info "Starting orchestrator with --auto-start..."
-        local run_cmd="agent-solo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
+        local run_cmd="agent-pair run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
         if [ "$gather_mode" = "true" ]; then
             run_cmd="$run_cmd --gather-timeout $gather_timeout"
         fi
@@ -678,9 +678,9 @@ start_ttyd_mode_solo() {
         tmux send-keys -t "${session_name}-orchestrator" "$run_cmd"
         tmux send-keys -t "${session_name}-orchestrator" C-m
     else
-        echo "Start orchestrator with: agent-solo run --auto-start"
+        echo "Start orchestrator with: agent-pair run --auto-start"
     fi
-    echo "Stop with: agent-solo stop"
+    echo "Stop with: agent-pair stop"
     if [ "$gather_mode" = "true" ]; then
         echo ""
         echo "Gather stage enabled. The reviewer will first:"
@@ -730,13 +730,13 @@ cmd_stop() {
     if [ -n "$feature_arg" ]; then
         local root_worktree
         root_worktree="$(get_session_root "$feature_arg" "$main_root")" || die "No session found for feature: $feature_arg"
-        stop_single_solo_session "$feature_arg" "$root_worktree" "$root_worktree/.peer-sync"
+        stop_single_pair_session "$feature_arg" "$root_worktree" "$root_worktree/.peer-sync"
         return
     fi
 
     # Try to resolve session from current directory
     if resolve_session 2>/dev/null; then
-        stop_single_solo_session "$RESOLVED_FEATURE" "$RESOLVED_ROOT" "$RESOLVED_PEER_SYNC"
+        stop_single_pair_session "$RESOLVED_FEATURE" "$RESOLVED_ROOT" "$RESOLVED_PEER_SYNC"
         return
     fi
 
@@ -754,19 +754,19 @@ cmd_stop() {
         [ -z "$feat" ] && continue
         echo ""
         info "=== Stopping: $feat ==="
-        stop_single_solo_session "$feat" "$root" "$root/.peer-sync"
+        stop_single_pair_session "$feat" "$root" "$root/.peer-sync"
     done <<< "$sessions"
 
     success "All sessions stopped"
 }
 
-# Stop a single solo session
-stop_single_solo_session() {
+# Stop a single pair session
+stop_single_pair_session() {
     local feature="$1"
     local root="$2"
     local peer_sync="$3"
 
-    info "Stopping Agent Solo session: $feature"
+    info "Stopping Agent Pair session: $feature"
 
     # Kill ttyd processes from PID files
     if [ -d "$peer_sync/pids" ]; then
@@ -783,11 +783,11 @@ stop_single_solo_session() {
     fi
 
     # Kill tmux sessions for this feature
-    pkill -f "ttyd.*solo-${feature}-" 2>/dev/null && info "Killed remaining ttyd processes for solo-${feature}" || true
-    tmux kill-session -t "solo-${feature}" 2>/dev/null && info "Killed tmux session: solo-${feature}" || true
-    tmux kill-session -t "solo-${feature}-orchestrator" 2>/dev/null && info "Killed tmux session: solo-${feature}-orchestrator" || true
-    tmux kill-session -t "solo-${feature}-coder" 2>/dev/null && info "Killed tmux session: solo-${feature}-coder" || true
-    tmux kill-session -t "solo-${feature}-reviewer" 2>/dev/null && info "Killed tmux session: solo-${feature}-reviewer" || true
+    pkill -f "ttyd.*pair-${feature}-" 2>/dev/null && info "Killed remaining ttyd processes for pair-${feature}" || true
+    tmux kill-session -t "pair-${feature}" 2>/dev/null && info "Killed tmux session: pair-${feature}" || true
+    tmux kill-session -t "pair-${feature}-orchestrator" 2>/dev/null && info "Killed tmux session: pair-${feature}-orchestrator" || true
+    tmux kill-session -t "pair-${feature}-coder" 2>/dev/null && info "Killed tmux session: pair-${feature}-coder" || true
+    tmux kill-session -t "pair-${feature}-reviewer" 2>/dev/null && info "Killed tmux session: pair-${feature}-reviewer" || true
 
     success "Stopped: $feature"
 }
@@ -903,9 +903,9 @@ cmd_restart() {
     local project_name
     project_name="$(basename "$root")"
 
-    # In agent-solo, the root worktree IS the shared worktree (contains .peer-sync/)
+    # In agent-pair, the root worktree IS the shared worktree (contains .peer-sync/)
     local worktree="$root"
-    local session_name="solo-${feature}"
+    local session_name="pair-${feature}"
 
     # Load ports (only for ttyd mode)
     local orchestrator_port="" coder_port="" reviewer_port=""
@@ -930,7 +930,7 @@ cmd_restart() {
     codex_thinking="$(cat "$peer_sync/codex-thinking" 2>/dev/null)" || codex_thinking="$DEFAULT_CODEX_THINKING"
 
     echo ""
-    echo "=== Agent Solo Restart ==="
+    echo "=== Agent Pair Restart ==="
     echo ""
     echo "Feature:  $feature"
     echo "Project:  $project_name"
@@ -1019,7 +1019,7 @@ cmd_restart() {
             info "Creating tmux session: $session_name"
             # Create session with orchestrator window
             tmux new-session -d -s "$session_name" -n "orchestrator" -c "$root"
-            tmux_set_title "$session_name" "solo: ${feature}"
+            tmux_set_title "$session_name" "pair: ${feature}"
 
             if [ -d "$worktree" ]; then
                 # Create coder window
@@ -1110,7 +1110,7 @@ cmd_restart() {
     echo "  Phase:   $phase"
     echo "  Round:   $round"
 
-    # Check if PR has been created (terminal state for solo mode)
+    # Check if PR has been created (terminal state for pair mode)
     local has_pr=false
     [ -f "$peer_sync/coder.pr" ] && has_pr=true
 
@@ -1123,7 +1123,7 @@ cmd_restart() {
             info "PR created. Transitioning to pr-comments phase for monitoring..."
             echo "pr-comments" > "$peer_sync/phase"
             echo "active" > "$peer_sync/session"
-            local run_cmd="agent-solo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
+            local run_cmd="agent-pair run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
             run_cmd="$run_cmd --clarify-timeout $clarify_timeout --pushback-timeout $pushback_timeout"
             [ -n "$auto_finish" ] && run_cmd+=" --auto-finish"
             [ -n "$auto_finish_timeout" ] && run_cmd+=" --auto-finish-timeout $auto_finish_timeout"
@@ -1133,7 +1133,7 @@ cmd_restart() {
             success "Started PR comment monitoring"
         else
             info "PR created. To monitor for PR comments:"
-            echo "  agent-solo restart --auto-run"
+            echo "  agent-pair restart --auto-run"
         fi
     elif [ "$auto_run" = "true" ]; then
         echo ""
@@ -1146,7 +1146,7 @@ cmd_restart() {
         fi
 
         if ! $orchestrator_running; then
-            local run_cmd="agent-solo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
+            local run_cmd="agent-pair run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
             run_cmd="$run_cmd --clarify-timeout $clarify_timeout --pushback-timeout $pushback_timeout"
             [ -n "$auto_finish" ] && run_cmd+=" --auto-finish"
             [ -n "$auto_finish_timeout" ] && run_cmd+=" --auto-finish-timeout $auto_finish_timeout"
@@ -1160,9 +1160,9 @@ cmd_restart() {
     else
         echo ""
         info "Session is not complete. To restart the orchestrator loop:"
-        echo "  agent-solo restart --auto-run"
+        echo "  agent-pair restart --auto-run"
         echo "Or manually in the orchestrator terminal:"
-        echo "  agent-solo run --auto-start"
+        echo "  agent-pair run --auto-start"
     fi
 
     #---------------------------------------------------------------------------
@@ -1208,9 +1208,9 @@ cmd_status() {
     # Try to resolve session
     if [ -n "$feature_arg" ]; then
         resolve_session --feature "$feature_arg"
-        show_single_solo_status "$RESOLVED_PEER_SYNC"
+        show_single_pair_status "$RESOLVED_PEER_SYNC"
     elif resolve_session 2>/dev/null; then
-        show_single_solo_status "$RESOLVED_PEER_SYNC"
+        show_single_pair_status "$RESOLVED_PEER_SYNC"
     else
         local main_root
         main_root="$(get_main_project_root 2>/dev/null)" || die "Not in a git repository"
@@ -1220,27 +1220,27 @@ cmd_status() {
         sessions="$(list_active_sessions "$main_root")"
 
         if [ -z "$sessions" ]; then
-            die "No active sessions found. Start one with: agent-solo start <feature>"
+            die "No active sessions found. Start one with: agent-pair start <feature>"
         fi
 
         echo ""
-        echo "=== All Agent Solo Sessions ==="
+        echo "=== All Agent Pair Sessions ==="
 
         while IFS=: read -r feat root state; do
             [ -z "$feat" ] && continue
             echo ""
             echo "━━━ Feature: $feat ($state) ━━━"
-            show_single_solo_status "$root/.peer-sync"
+            show_single_pair_status "$root/.peer-sync"
         done <<< "$sessions"
     fi
 }
 
-# Show status for a single solo session
-show_single_solo_status() {
+# Show status for a single pair session
+show_single_pair_status() {
     local peer_sync="$1"
 
     echo ""
-    echo "=== Agent Solo Status ==="
+    echo "=== Agent Pair Status ==="
     echo ""
 
     if [ -f "$peer_sync/feature" ]; then
@@ -1339,9 +1339,9 @@ generate_coder_clarify_message() {
 $task_content
 
 ---
-## Agent-Solo Context - CLARIFY PHASE (Coder)
+## Agent-Pair Context - CLARIFY PHASE (Coder)
 
-You are the **CODER** in a solo workflow. A reviewer will review your code.
+You are the **CODER** in a pair workflow. A reviewer will review your code.
 
 **PHASE: CLARIFY** - Before starting implementation, propose your high-level approach and ask clarifying questions.
 
@@ -1374,7 +1374,7 @@ CLARIFY_EOF
 Edit the file with actual content, then signal completion:
 
 \`\`\`bash
-agent-solo signal coder clarify-done "approach and questions submitted"
+agent-pair signal coder clarify-done "approach and questions submitted"
 \`\`\`
 
 Then **STOP and wait**. The reviewer will also provide comments, then the user will respond.
@@ -1394,9 +1394,9 @@ generate_reviewer_clarify_message() {
 $task_content
 
 ---
-## Agent-Solo Context - CLARIFY PHASE (Reviewer)
+## Agent-Pair Context - CLARIFY PHASE (Reviewer)
 
-You are the **REVIEWER** in a solo workflow. The coder has proposed an approach.
+You are the **REVIEWER** in a pair workflow. The coder has proposed an approach.
 
 **PHASE: CLARIFY** - Review the coder's proposed approach and add your own questions or comments.
 
@@ -1426,7 +1426,7 @@ CLARIFY_EOF
 Edit the file with actual content, then signal completion:
 
 \`\`\`bash
-agent-solo signal reviewer clarify-done "comments submitted"
+agent-pair signal reviewer clarify-done "comments submitted"
 \`\`\`
 
 Then **STOP and wait**. The user will review both and respond.
@@ -1446,9 +1446,9 @@ generate_coder_work_message() {
 $task_content
 
 ---
-## Agent-Solo Context - WORK PHASE (Coder)
+## Agent-Pair Context - WORK PHASE (Coder)
 
-You are the **CODER** in a solo workflow. A reviewer will review your code.
+You are the **CODER** in a pair workflow. A reviewer will review your code.
 
 - **Phase**: Work (Round $round)
 - **Worktree**: Current directory (read/write)
@@ -1471,9 +1471,9 @@ Implement the solution. The reviewer will examine your work after you signal don
 
 If you find ambiguity, inconsistency, or evidence the task is misguided — escalate:
 \`\`\`bash
-agent-solo escalate ambiguity "requirements unclear: what should happen when X?"
-agent-solo escalate inconsistency "docs say X but code does Y"
-agent-solo escalate misguided "this feature already exists in module Z"
+agent-pair escalate ambiguity "requirements unclear: what should happen when X?"
+agent-pair escalate inconsistency "docs say X but code does Y"
+agent-pair escalate misguided "this feature already exists in module Z"
 \`\`\`
 This notifies the user without interrupting your work. Continue with your best interpretation.
 
@@ -1481,7 +1481,7 @@ This notifies the user without interrupting your work. Continue with your best i
 
 Signal completion and **STOP**:
 \`\`\`bash
-agent-solo signal coder done "brief summary of what you did"
+agent-pair signal coder done "brief summary of what you did"
 \`\`\`
 
 The reviewer will then examine your work.
@@ -1490,13 +1490,13 @@ The reviewer will then examine your work.
 
 When the reviewer approves your solution:
 \`\`\`bash
-agent-solo pr   # handles commit, push, and PR creation
+agent-pair pr   # handles commit, push, and PR creation
 \`\`\`
 EOF
 }
 
-# Generate pushback message for reviewer (only reviewer pushes back in solo mode)
-generate_solo_pushback_message() {
+# Generate pushback message for reviewer (only reviewer pushes back in pair mode)
+generate_pair_pushback_message() {
     local feature="$1"
     local task_content="$2"
     local peer_sync="$3"
@@ -1507,9 +1507,9 @@ generate_solo_pushback_message() {
 $task_content
 
 ---
-## Agent-Solo Context - PUSHBACK STAGE (Reviewer)
+## Agent-Pair Context - PUSHBACK STAGE (Reviewer)
 
-You are the **REVIEWER** in a solo workflow. Before the coder starts implementing, you may propose improvements to the task specification.
+You are the **REVIEWER** in a pair workflow. Before the coder starts implementing, you may propose improvements to the task specification.
 
 - **Sync directory**: $peer_sync
 
@@ -1550,7 +1550,7 @@ PUSHBACK_EOF
 Edit the file with actual content, then signal completion:
 
 \`\`\`bash
-agent-solo signal reviewer pushback-done "proposed task modifications submitted"
+agent-pair signal reviewer pushback-done "proposed task modifications submitted"
 \`\`\`
 
 Then **STOP and wait**. The user will review task file changes (via diff) and your rationale, then decide whether to accept or reject.
@@ -1570,9 +1570,9 @@ generate_reviewer_gather_message() {
 $task_content
 
 ---
-## Agent-Solo Context - GATHER PHASE (Reviewer)
+## Agent-Pair Context - GATHER PHASE (Reviewer)
 
-You are the **REVIEWER** in a solo workflow. Before the coder starts implementing, you will gather relevant context from the codebase to help them.
+You are the **REVIEWER** in a pair workflow. Before the coder starts implementing, you will gather relevant context from the codebase to help them.
 
 - **Sync directory**: $peer_sync
 
@@ -1626,7 +1626,7 @@ Edit the file with actual content based on your exploration. Use specific file:l
 ### Signal Completion
 
 \`\`\`bash
-agent-solo signal reviewer gather-done "task context collected"
+agent-pair signal reviewer gather-done "task context collected"
 \`\`\`
 
 Then **STOP and wait**. The coder will read your context file before starting work.
@@ -1636,9 +1636,9 @@ EOF
 
 #------------------------------------------------------------------------------
 # Trigger final merge for PR (auto-finish mode)
-# Usage: trigger_solo_final_merge <coder> <session> <peer_sync> <tui_exit_behavior>
+# Usage: trigger_pair_final_merge <coder> <session> <peer_sync> <tui_exit_behavior>
 #------------------------------------------------------------------------------
-trigger_solo_final_merge() {
+trigger_pair_final_merge() {
     local coder="$1"
     local session="$2"
     local peer_sync="$3"
@@ -1651,8 +1651,8 @@ trigger_solo_final_merge() {
     check_tui_health "$coder" "$session" "$peer_sync" "$tui_exit_behavior"
     atomic_write "$peer_sync/coder.status" "working|$(date +%s)|performing final merge"
 
-    info "Triggering solo-final-merge for coder..."
-    send_to_agent "coder" "$session" "$peer_sync" skill "solo-final-merge"
+    info "Triggering pair-final-merge for coder..."
+    send_to_agent "coder" "$session" "$peer_sync" skill "pair-final-merge"
 
     # Wait for completion
     local merge_start=$SECONDS
@@ -1736,7 +1736,7 @@ cmd_run() {
 
     # Must be run from within a session worktree
     local root
-    root="$(get_project_root 2>/dev/null)" || die "Not in an agent-solo session. Run from the orchestrator worktree."
+    root="$(get_project_root 2>/dev/null)" || die "Not in an agent-pair session. Run from the orchestrator worktree."
     local peer_sync="$root/.peer-sync"
     [ -f "$peer_sync/feature" ] || die "No active session (missing .peer-sync/feature)"
 
@@ -1749,7 +1749,7 @@ cmd_run() {
     reviewer="$(cat "$peer_sync/reviewer-agent" 2>/dev/null)" || die "Missing reviewer-agent file in $peer_sync"
 
     # Determine tmux session name
-    local session_name="solo-${feature}"
+    local session_name="pair-${feature}"
 
     # Check tmux session exists
     local coder_session reviewer_session
@@ -1760,11 +1760,11 @@ cmd_run() {
         coder_session="${session_name}:coder"
         reviewer_session="${session_name}:reviewer"
     else
-        die "No tmux session found. Run 'agent-solo restart' to resume, or 'agent-solo start $feature' to start fresh."
+        die "No tmux session found. Run 'agent-pair restart' to resume, or 'agent-pair start $feature' to start fresh."
     fi
 
     echo ""
-    echo "=== Agent Solo Orchestrator ==="
+    echo "=== Agent Pair Orchestrator ==="
     echo "Feature:        $feature"
     echo "Coder:          $coder"
     echo "Reviewer:       $reviewer"
@@ -1956,7 +1956,7 @@ cmd_run() {
         echo ""
 
         # Send notification (ntfy and/or email)
-        send_clarify_notification "$peer_sync" "$feature" "solo"
+        send_clarify_notification "$peer_sync" "$feature" "pair"
 
         # Display clarify results
         echo ""
@@ -2022,7 +2022,7 @@ cmd_run() {
     fi
 
     # Handle pushback stage if enabled and not already confirmed
-    # In solo mode, only the reviewer pushes back
+    # In pair mode, only the reviewer pushes back
     if [ "$pushback_mode" = "true" ] && [ ! -f "$peer_sync/pushback-confirmed" ]; then
         info "=== Pushback Stage ==="
         echo "pushback" > "$peer_sync/phase"
@@ -2032,12 +2032,12 @@ cmd_run() {
         task_content="$(read_task_content "$root" "$feature")" || true
         local task_basename="${feature}.md"
 
-        # Only reviewer pushes back in solo mode
+        # Only reviewer pushes back in pair mode
         atomic_write "$peer_sync/coder.status" "waiting|$(date +%s)|waiting for reviewer pushback"
         atomic_write "$peer_sync/reviewer.status" "pushing-back|$(date +%s)|pushback stage"
         info "Sending pushback task to reviewer..."
         local reviewer_pushback_msg
-        reviewer_pushback_msg="$(generate_solo_pushback_message "$feature" "$task_content" "$peer_sync")"
+        reviewer_pushback_msg="$(generate_pair_pushback_message "$feature" "$task_content" "$peer_sync")"
         send_to_agent "reviewer" "$reviewer_session" "$peer_sync" message "$reviewer_pushback_msg" "pushback"
 
         # Wait for reviewer to complete pushback stage
@@ -2072,7 +2072,7 @@ cmd_run() {
         echo ""
 
         # Send notification with pushback results
-        send_pushback_notification "$peer_sync" "$feature" "solo"
+        send_pushback_notification "$peer_sync" "$feature" "pair"
 
         # Display pushback results
         echo ""
@@ -2146,8 +2146,8 @@ cmd_run() {
             check_tui_health "coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
             atomic_write "$peer_sync/coder.status" "planning|$(date +%s)|plan phase round $plan_round"
             atomic_write "$peer_sync/reviewer.status" "waiting|$(date +%s)|waiting for coder plan"
-            info "Triggering solo-coder-plan for coder..."
-            send_to_agent "coder" "$coder_session" "$peer_sync" skill "solo-coder-plan"
+            info "Triggering pair-coder-plan for coder..."
+            send_to_agent "coder" "$coder_session" "$peer_sync" skill "pair-coder-plan"
 
             local plan_start=$SECONDS
             local coder_plan_done=false
@@ -2203,8 +2203,8 @@ cmd_run() {
             check_tui_health "reviewer" "$reviewer_session" "$peer_sync" "$tui_exit_behavior"
             atomic_write "$peer_sync/reviewer.status" "plan-reviewing|$(date +%s)|plan-review phase round $plan_round"
             atomic_write "$peer_sync/coder.status" "waiting|$(date +%s)|waiting for reviewer verdict"
-            info "Triggering solo-reviewer-plan for reviewer..."
-            send_to_agent "reviewer" "$reviewer_session" "$peer_sync" skill "solo-reviewer-plan"
+            info "Triggering pair-reviewer-plan for reviewer..."
+            send_to_agent "reviewer" "$reviewer_session" "$peer_sync" skill "pair-reviewer-plan"
 
             local review_start=$SECONDS
             local reviewer_review_done=false
@@ -2325,12 +2325,12 @@ cmd_run() {
         if [ -f "$prev_review" ] && grep -qi "APPROVE" "$prev_review" 2>/dev/null; then
             success "Found approved review (round $round). Creating PR..."
             lib_commit_round "$worktree" "$round" "$peer_sync" "coder" >/dev/null
-            if ( lib_create_pr "$feature" "coder" "$worktree" "$root" "$peer_sync" "$feature" "solo" "Solution for $feature" \
-                 && persist_workflow_feedback "$peer_sync" "$feature" "solo" \
+            if ( lib_create_pr "$feature" "coder" "$worktree" "$root" "$peer_sync" "$feature" "pair" "Solution for $feature" \
+                 && persist_workflow_feedback "$peer_sync" "$feature" "pair" \
                  && echo "complete" > "$peer_sync/session" ); then
                 success "PR created!"
             else
-                warn "PR creation failed — create manually with: agent-solo pr"
+                warn "PR creation failed — create manually with: agent-pair pr"
             fi
             break
         fi
@@ -2360,8 +2360,8 @@ cmd_run() {
             send_to_agent "coder" "$coder_session" "$peer_sync" message "$coder_msg" "round1-work"
         else
             # Round 2+: Trigger skill
-            info "Triggering solo-coder-work for coder..."
-            send_to_agent "coder" "$coder_session" "$peer_sync" skill "solo-coder-work"
+            info "Triggering pair-coder-work for coder..."
+            send_to_agent "coder" "$coder_session" "$peer_sync" skill "pair-coder-work"
         fi
 
         # Wait for coder to complete work
@@ -2403,12 +2403,12 @@ cmd_run() {
         if [ "$commit_result" = "quiescent" ] && ! has_pr "coder" "$peer_sync"; then
             # No changes after work phase — create PR directly (skip review)
             info "Coder is quiescent (no changes) - creating PR..."
-            if ( lib_create_pr "$feature" "coder" "$worktree" "$root" "$peer_sync" "$feature" "solo" "Solution for $feature" \
-                 && persist_workflow_feedback "$peer_sync" "$feature" "solo" \
+            if ( lib_create_pr "$feature" "coder" "$worktree" "$root" "$peer_sync" "$feature" "pair" "Solution for $feature" \
+                 && persist_workflow_feedback "$peer_sync" "$feature" "pair" \
                  && echo "complete" > "$peer_sync/session" ); then
                 success "PR created!"
             else
-                warn "PR creation failed — create manually with: agent-solo pr"
+                warn "PR creation failed — create manually with: agent-pair pr"
             fi
             break
         fi
@@ -2417,7 +2417,7 @@ cmd_run() {
         if [ "$early_pr" = "true" ] && ! has_pr "coder" "$peer_sync"; then
             if [ -n "$(git -C "$worktree" log --oneline "${feature}..HEAD" 2>/dev/null)" ]; then
                 info "Early PR: creating PR for coder..."
-                lib_create_pr "$feature" "coder" "$worktree" "$root" "$peer_sync" "$feature" "solo" "Solution for $feature" || true
+                lib_create_pr "$feature" "coder" "$worktree" "$root" "$peer_sync" "$feature" "pair" "Solution for $feature" || true
             fi
         fi
 
@@ -2432,7 +2432,7 @@ cmd_run() {
 
         # Check for escalations before transitioning to review phase
         if has_pending_escalations "$peer_sync" >/dev/null; then
-            handle_escalation_block "$peer_sync" "$feature" "solo" || true
+            handle_escalation_block "$peer_sync" "$feature" "pair" || true
         fi
 
         # Review phase
@@ -2442,8 +2442,8 @@ cmd_run() {
         atomic_write "$peer_sync/reviewer.status" "reviewing|$(date +%s)|round $round review phase"
         atomic_write "$peer_sync/coder.status" "waiting|$(date +%s)|waiting for review"
 
-        info "Triggering solo-reviewer-work for reviewer..."
-        send_to_agent "reviewer" "$reviewer_session" "$peer_sync" "skill" "solo-reviewer-work"
+        info "Triggering pair-reviewer-work for reviewer..."
+        send_to_agent "reviewer" "$reviewer_session" "$peer_sync" "skill" "pair-reviewer-work"
 
         # Wait for reviewer to complete review
         local review_start=$SECONDS
@@ -2479,12 +2479,12 @@ cmd_run() {
                 success "Reviewer approved! Creating PR..."
                 # Commit any last changes before creating PR
                 lib_commit_round "$worktree" "$round" "$peer_sync" "coder" >/dev/null
-                if ( lib_create_pr "$feature" "coder" "$worktree" "$root" "$peer_sync" "$feature" "solo" "Solution for $feature" \
-                     && persist_workflow_feedback "$peer_sync" "$feature" "solo" \
+                if ( lib_create_pr "$feature" "coder" "$worktree" "$root" "$peer_sync" "$feature" "pair" "Solution for $feature" \
+                     && persist_workflow_feedback "$peer_sync" "$feature" "pair" \
                      && echo "complete" > "$peer_sync/session" ); then
                     success "PR created!"
                 else
-                    warn "PR creation failed — create manually with: agent-solo pr"
+                    warn "PR creation failed — create manually with: agent-pair pr"
                 fi
                 break
             else
@@ -2494,7 +2494,7 @@ cmd_run() {
 
         # Check for escalations before transitioning to next work round
         if has_pending_escalations "$peer_sync" >/dev/null; then
-            handle_escalation_block "$peer_sync" "$feature" "solo" || true
+            handle_escalation_block "$peer_sync" "$feature" "pair" || true
         fi
 
         round=$((round + 1))
@@ -2543,7 +2543,7 @@ cmd_run() {
                     if is_pr_merged "$pr_url"; then
                         success "PR accepted and merged to main. Session complete!"
                         echo "accepted" > "$peer_sync/session"
-                        run_suggest_refactor_solo "$peer_sync" "$coder_session" "$feature"
+                        run_suggest_refactor_pair "$peer_sync" "$coder_session" "$feature"
                     else
                         info "PR closed without merging. Session complete."
                         echo "closed" > "$peer_sync/session"
@@ -2565,8 +2565,8 @@ cmd_run() {
                         # Trigger integrate skill for coder
                         check_tui_health "$coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
                         atomic_write "$peer_sync/coder.status" "working|$(date +%s)|integrating (rebasing onto main)"
-                        info "Triggering solo-integrate for coder..."
-                        send_to_agent "coder" "$coder_session" "$peer_sync" "skill" "solo-integrate"
+                        info "Triggering pair-integrate for coder..."
+                        send_to_agent "coder" "$coder_session" "$peer_sync" "skill" "pair-integrate"
 
                         # Wait for integration to complete
                         local integrate_start=$SECONDS
@@ -2608,11 +2608,11 @@ cmd_run() {
                     echo ""
                     success "Merge trigger detected ('Proceed to merge' comment found)!"
                     info "Triggering final merge..."
-                    trigger_solo_final_merge "$coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
+                    trigger_pair_final_merge "$coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
                     if is_pr_merged "$pr_url"; then
                         success "PR merged successfully!"
                         echo "accepted" > "$peer_sync/session"
-                        run_suggest_refactor_solo "$peer_sync" "$coder_session" "$feature"
+                        run_suggest_refactor_pair "$peer_sync" "$coder_session" "$feature"
                     fi
                     break
                 fi
@@ -2634,7 +2634,7 @@ cmd_run() {
                 elif pr_has_new_comments "coder" "$peer_sync"; then
                     needs_attention=true
                     info "New comments on PR!"
-                    send_pr_comment_notification "coder" "$feature" "$pr_url" "solo"
+                    send_pr_comment_notification "coder" "$feature" "$pr_url" "pair"
                 fi
 
                 if $needs_attention; then
@@ -2642,8 +2642,8 @@ cmd_run() {
                     # Trigger pr-comment skill for coder
                     check_tui_health "$coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
                     atomic_write "$peer_sync/coder.status" "working|$(date +%s)|addressing PR comments"
-                    info "Triggering solo-pr-comment for coder..."
-                    send_to_agent "coder" "$coder_session" "$peer_sync" "skill" "solo-pr-comment"
+                    info "Triggering pair-pr-comment for coder..."
+                    send_to_agent "coder" "$coder_session" "$peer_sync" "skill" "pair-pr-comment"
 
                     # Wait for coder to finish
                     local pr_watch_start=$SECONDS
@@ -2683,12 +2683,12 @@ cmd_run() {
                     if [ "$inactivity_elapsed" -ge "$auto_finish_timeout" ]; then
                         info "Auto-finish timeout reached (${auto_finish_timeout}s inactivity)"
                         info "Triggering final merge..."
-                        trigger_solo_final_merge "$coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
+                        trigger_pair_final_merge "$coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
                         # Check if merge succeeded
                         if is_pr_merged "$pr_url"; then
                             success "PR merged successfully!"
                             echo "accepted" > "$peer_sync/session"
-                            run_suggest_refactor_solo "$peer_sync" "$coder_session" "$feature"
+                            run_suggest_refactor_pair "$peer_sync" "$coder_session" "$feature"
                         fi
                         break
                     fi
@@ -2757,10 +2757,10 @@ cmd_pr() {
         git -C "$worktree" commit -m "Manual PR: solution from coder for $feature" || true
     fi
 
-    lib_create_pr "$pr_name" "coder" "$worktree" "$root" "$peer_sync" "$feature" "solo" "Solution for $feature" || return 1
+    lib_create_pr "$pr_name" "coder" "$worktree" "$root" "$peer_sync" "$feature" "pair" "Solution for $feature" || return 1
 
     # Persist workflow feedback and mark session complete
-    persist_workflow_feedback "$peer_sync" "$feature" "solo"
+    persist_workflow_feedback "$peer_sync" "$feature" "pair"
     echo "complete" > "$peer_sync/session"
     success "Session complete!"
 }
@@ -2787,13 +2787,13 @@ cmd_cleanup() {
 
     # If feature specified, clean just that one
     if [ -n "$feature_arg" ]; then
-        cleanup_single_solo_session "$feature_arg" "$main_root" "$full"
+        cleanup_single_pair_session "$feature_arg" "$main_root" "$full"
         return
     fi
 
     # Try to resolve session from current directory
     if resolve_session 2>/dev/null; then
-        cleanup_single_solo_session "$RESOLVED_FEATURE" "$main_root" "$full"
+        cleanup_single_pair_session "$RESOLVED_FEATURE" "$main_root" "$full"
         return
     fi
 
@@ -2817,14 +2817,14 @@ cmd_cleanup() {
         [ -z "$feat" ] && continue
         echo ""
         info "=== Cleaning up: $feat ==="
-        cleanup_single_solo_session "$feat" "$main_root" "$full"
+        cleanup_single_pair_session "$feat" "$main_root" "$full"
     done <<< "$sessions"
 
     success "All sessions cleaned up"
 }
 
-# Cleanup a single solo session
-cleanup_single_solo_session() {
+# Cleanup a single pair session
+cleanup_single_pair_session() {
     local feature="$1"
     local main_root="$2"
     local full="$3"
@@ -2835,7 +2835,7 @@ cleanup_single_solo_session() {
     parent_dir="$(dirname "$main_root")"
     local sessions_dir="$main_root/.agent-sessions"
 
-    # Get worktree path (solo uses single worktree)
+    # Get worktree path (pair uses single worktree)
     local worktree="$parent_dir/${project_name}-${feature}"
     local peer_sync="$worktree/.peer-sync"
 
@@ -2843,15 +2843,15 @@ cleanup_single_solo_session() {
 
     # Stop any running processes first
     if [ -d "$peer_sync" ]; then
-        stop_single_solo_session "$feature" "$worktree" "$peer_sync"
+        stop_single_pair_session "$feature" "$worktree" "$peer_sync"
     fi
 
     # Accumulate workflow feedback before cleanup
-    persist_workflow_feedback "$peer_sync" "$feature" "solo"
+    persist_workflow_feedback "$peer_sync" "$feature" "pair"
 
     # Remove session from registry
-    if [ -L "$sessions_dir/solo-${feature}.session" ]; then
-        rm -f "$sessions_dir/solo-${feature}.session"
+    if [ -L "$sessions_dir/pair-${feature}.session" ]; then
+        rm -f "$sessions_dir/pair-${feature}.session"
         info "Removed from registry"
     fi
 
@@ -3002,14 +3002,14 @@ cmd_nudge() {
     local agent="$1"
     local message="${2:-Continue.}"
 
-    [ -z "$agent" ] && die "Usage: agent-solo nudge <agent> [message]"
+    [ -z "$agent" ] && die "Usage: agent-pair nudge <agent> [message]"
     [[ "$agent" =~ ^(coder|reviewer)$ ]] || die "Agent must be 'coder' or 'reviewer'"
 
     local root
     root="$(get_project_root)"
     local feature
     feature="$(get_feature)"
-    local session_name="solo-${feature}"
+    local session_name="pair-${feature}"
 
     # Determine session target
     local session
@@ -3018,7 +3018,7 @@ cmd_nudge() {
     elif tmux has-session -t "${session_name}-${agent}" 2>/dev/null; then
         session="${session_name}-${agent}"
     else
-        die "No tmux session found for $agent. Run 'agent-solo restart' first."
+        die "No tmux session found for $agent. Run 'agent-pair restart' first."
     fi
 
     nudge_agent "$agent" "$session" "$message"
@@ -3032,7 +3032,7 @@ cmd_nudge() {
 cmd_interrupt() {
     local agent="$1"
 
-    [ -z "$agent" ] && die "Usage: agent-solo interrupt <agent>"
+    [ -z "$agent" ] && die "Usage: agent-pair interrupt <agent>"
     [[ "$agent" =~ ^(coder|reviewer)$ ]] || die "Agent must be 'coder' or 'reviewer'"
 
     local root
@@ -3040,7 +3040,7 @@ cmd_interrupt() {
     local peer_sync="$root/.peer-sync"
     local feature
     feature="$(get_feature)"
-    local session_name="solo-${feature}"
+    local session_name="pair-${feature}"
 
     # Determine session target
     local session
@@ -3049,7 +3049,7 @@ cmd_interrupt() {
     elif tmux has-session -t "${session_name}-${agent}" 2>/dev/null; then
         session="${session_name}-${agent}"
     else
-        die "No tmux session found for $agent. Run 'agent-solo restart' first."
+        die "No tmux session found for $agent. Run 'agent-pair restart' first."
     fi
 
     interrupt_agent "$agent" "$session" "$peer_sync"
@@ -3062,10 +3062,10 @@ cmd_interrupt() {
 
 cmd_help() {
     cat << 'EOF'
-Agent Solo - Coder/Reviewer AI Workflow
+Agent Pair - Coder/Reviewer AI Workflow
 
 USAGE
-    agent-solo <command> [options]
+    agent-pair <command> [options]
 
 SESSION COMMANDS
     start <feature> [<feature2> ...] [options]
@@ -3149,7 +3149,7 @@ SESSION COMMANDS
         worktree and deletes the feature branch.
 
     setup
-        Install agent-solo to ~/.local/bin and skills to agent dirs.
+        Install agent-pair to ~/.local/bin and skills to agent dirs.
 
 CONTROL COMMANDS
     nudge <agent> [message]
@@ -3183,7 +3183,7 @@ AGENT COMMANDS (used by AI agents)
           misguided     - Evidence the task approach is wrong
 
 WORKFLOW
-    Solo mode uses a sequential workflow:
+    Pair mode uses a sequential workflow:
 
     GATHER PHASE (if --gather):
       1. Reviewer explores codebase and collects relevant context
@@ -3205,28 +3205,28 @@ WORKFLOW
 
 EXAMPLES
     # Start with auto-run (opens 3 web terminals, starts everything)
-    agent-solo start auth --auto-run
+    agent-pair start auth --auto-run
 
     # With gather phase (reviewer collects context first)
-    agent-solo start auth --auto-run --gather
+    agent-pair start auth --auto-run --gather
 
     # With clarify phase
-    agent-solo start auth --auto-run --clarify
+    agent-pair start auth --auto-run --clarify
 
     # With all optional phases (gather -> clarify -> pushback -> work)
-    agent-solo start auth --auto-run --gather --clarify --pushback
+    agent-pair start auth --auto-run --gather --clarify --pushback
 
     # Swap agent roles (codex codes, claude reviews)
-    agent-solo start auth --coder codex --reviewer claude
+    agent-pair start auth --coder codex --reviewer claude
 
     # Check status
-    agent-solo status
+    agent-pair status
 
     # Create PR when reviewer approves
-    agent-solo pr
+    agent-pair pr
 
     # Clean up
-    agent-solo cleanup --full
+    agent-pair cleanup --full
 EOF
 }
 
@@ -3256,7 +3256,7 @@ main() {
         peer-status) cmd_peer_status "$@" ;;
         phase)       cmd_phase "$@" ;;
         help|--help|-h) cmd_help ;;
-        *)           die "Unknown command: $cmd (try 'agent-solo help')" ;;
+        *)           die "Unknown command: $cmd (try 'agent-pair help')" ;;
     esac
 }
 

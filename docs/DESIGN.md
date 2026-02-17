@@ -30,7 +30,7 @@ Agent Duo coordinates two AI coding agents working in parallel on the same task,
 ```bash
 # From the agent-duo repository
 ./agent-duo setup    # For duo mode
-./agent-solo setup   # For solo mode (optional)
+./agent-pair setup   # For pair mode (optional)
 
 # Installs to ~/.local/bin/ (add to PATH if needed)
 # Also installs skills to ~/.claude/commands/ and ~/.codex/skills/
@@ -129,26 +129,26 @@ Given project directory `myapp` and feature `auth`:
 ├── feature           # Feature name for this session
 ├── followup-pr       # PR number this session follows up on (if started with --followup)
 ├── ports             # Port allocations (ORCHESTRATOR_PORT, CLAUDE_PORT, CODEX_PORT)
-├── gather-mode       # "true" or "false" - whether gather phase is enabled (solo mode)
+├── gather-mode       # "true" or "false" - whether gather phase is enabled (pair mode)
 ├── clarify-mode      # "true" or "false" - whether clarify phase is enabled
 ├── pushback-mode     # "true" or "false" - whether pushback phase is enabled
 ├── docs-update-mode  # "true" or "false" - whether update-docs phase is enabled
-├── gather-confirmed  # Present when gather phase is complete (solo mode)
+├── gather-confirmed  # Present when gather phase is complete (pair mode)
 ├── clarify-confirmed # Present when user confirms clarify phase
 ├── pushback-confirmed # Present when user confirms pushback phase
-├── task-context.md   # Reviewer's gathered context for the coder (solo mode gather phase)
+├── task-context.md   # Reviewer's gathered context for the coder (pair mode gather phase)
 ├── clarify-claude.md # Claude's approach and questions (clarify phase)
 ├── clarify-codex.md  # Codex's approach and questions (clarify phase)
 ├── plan-mode         # "true" or "false" - whether plan phase is enabled
 ├── plan-claude.md    # Claude's implementation plan (duo mode)
 ├── plan-codex.md     # Codex's implementation plan (duo mode)
-├── plan-coder.md     # Coder's implementation plan (solo mode)
+├── plan-coder.md     # Coder's implementation plan (pair mode)
 ├── plan-review-claude.md # Claude's review of Codex's plan (duo mode)
 ├── plan-review-codex.md  # Codex's review of Claude's plan (duo mode)
-├── plan-review.md    # Reviewer's plan feedback with verdict (solo mode)
-├── plan-round        # Current plan revision round (solo mode, 1-3)
+├── plan-review.md    # Reviewer's plan feedback with verdict (pair mode)
+├── plan-round        # Current plan revision round (pair mode, 1-3)
 ├── plan-confirmed    # Present when plan phase is complete
-├── mode              # Session mode: "duo" or "solo"
+├── mode              # Session mode: "duo" or "pair"
 ├── auto-finish       # "true" or "false" - whether auto-finish mode is enabled
 ├── auto-finish-timeout # Inactivity timeout for auto-finish (seconds)
 ├── codex-thinking    # Codex reasoning effort level
@@ -184,7 +184,7 @@ Given project directory `myapp` and feature `auth`:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ GATHER PHASE (solo mode only, optional, --gather flag)          │
+│ GATHER PHASE (pair mode only, optional, --gather flag)          │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  1. Orchestrator sets phase=gather                              │
@@ -195,7 +195,7 @@ Given project directory `myapp` and feature `auth`:
 │  4. User reviews context and proceeds                           │
 │  5. Coder will read task-context.md before starting work        │
 │                                                                 │
-│  Note: This phase is only available in solo mode. The reviewer  │
+│  Note: This phase is only available in pair mode. The reviewer  │
 │  gathers context to help the coder understand the codebase.     │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
@@ -253,7 +253,7 @@ Given project directory `myapp` and feature `auth`:
 │  risks/edge cases, and test strategy. Plan reviews are          │
 │  informational (no binding verdict in duo mode).                │
 │                                                                 │
-│  SOLO MODE                                                      │
+│  PAIR MODE                                                      │
 │  ─────────                                                      │
 │  1. Orchestrator sets phase=plan                                │
 │  2. Coder explores codebase and writes plan (status: planning)  │
@@ -450,7 +450,7 @@ This differs from clarify/pushback phases which are enforced blocking points. Es
 
 | Status | Meaning | Set by |
 |--------|---------|--------|
-| `gathering` | Collecting task context (solo mode) | Agent (start of gather phase) |
+| `gathering` | Collecting task context (pair mode) | Agent (start of gather phase) |
 | `gather-done` | Finished gather phase | Agent |
 | `clarifying` | Proposing approach and questions | Agent (start of clarify phase) |
 | `clarify-done` | Finished clarify phase | Agent |
@@ -560,7 +560,7 @@ Skills provide phase-specific instructions to agents. Installed to:
 - Codex: `~/.codex/skills/duo-{work,review,clarify,pushback,plan,plan-review,amend,update-docs,pr-comment,integrate,final-merge,merge-vote,merge-debate,merge-execute,merge-review,merge-amend}/SKILL.md`
 
 Key skill behaviors:
-- **Gather phase** (solo mode): Explore codebase, collect relevant file links and notes, write `task-context.md`, signal `gather-done`
+- **Gather phase** (pair mode): Explore codebase, collect relevant file links and notes, write `task-context.md`, signal `gather-done`
 - **Clarify phase**: Propose high-level approach, ask clarifying questions, signal `clarify-done`
 - **Pushback phase**: Propose improvements to the task file, signal `pushback-done`
 - **Plan phase**: Explore codebase and write detailed implementation plan, signal `plan-done`; can signal `needs-clarify` if ambiguity discovered
@@ -683,17 +683,17 @@ agent-claude attach <task>              # Attach to tmux session
 **Key behaviors:**
 - Session naming: `<agent>-<project>-<task>` (e.g., `claude-myapp-refactor`)
 - `--branch` creates a git worktree on a new branch named after the task
-- Session state tracked in `.agent-sessions/<agent>-<task>.session` (same registry as duo/solo)
+- Session state tracked in `.agent-sessions/<agent>-<task>.session` (same registry as duo/pair)
 - If `<task>.md` exists, its contents are sent as the initial prompt (searched in `.`, `doc/`, `docs/`, or recursively)
 - `--ttyd` mode auto-allocates a port and launches a web terminal
 
-## Agent Solo Mode
+## Agent Pair Mode
 
-Agent-solo is an alternative mode where one agent codes and another reviews in a single worktree:
+Agent-pair is an alternative mode where one agent codes and another reviews in a single worktree:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      Agent Solo Session                         │
+│                      Agent Pair Session                         │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ~/myapp/                    (main branch, task specs here)     │
@@ -721,11 +721,11 @@ Agent-solo is an alternative mode where one agent codes and another reviews in a
 - Sequential rather than parallel work
 - Clear coder/reviewer roles (swappable with `--coder` and `--reviewer`)
 - Gather phase available (reviewer collects context for coder)
-- Skills: `solo-coder-{work,clarify,plan}.md`, `solo-reviewer-{work,clarify,gather,pushback,plan}.md`, `solo-pr-comment.md`, `solo-integrate.md`, `solo-final-merge.md`
+- Skills: `pair-coder-{work,clarify,plan}.md`, `pair-reviewer-{work,clarify,gather,pushback,plan}.md`, `pair-pr-comment.md`, `pair-integrate.md`, `pair-final-merge.md`
 
 ## Multi-Session Support (Parallel Task Execution)
 
-Both agent-duo and agent-solo support running multiple features in parallel. Each feature gets its own isolated session with a root worktree.
+Both agent-duo and agent-pair support running multiple features in parallel. Each feature gets its own isolated session with a root worktree.
 
 ### Directory Structure (Multi-Session)
 
@@ -794,7 +794,7 @@ When running multiple features in parallel, after one PR is merged to main:
 
 1. **Detection**: Orchestrator polls `origin/main` for changes
 2. **Check**: If main advanced, check if agent branches need rebasing
-3. **Trigger**: If behind, trigger `duo-integrate` or `solo-integrate` skill
+3. **Trigger**: If behind, trigger `duo-integrate` or `pair-integrate` skill
 4. **Rebase**: Agent rebases onto main, resolves conflicts, force-pushes
 5. **Resume**: Orchestrator returns to PR comment watch phase
 
@@ -911,7 +911,7 @@ Major feature additions since the initial bootstrap:
 | **ntfy.sh notifications** | Push notifications via ntfy.sh service |
 | **Model selection** | `--claude-model`, `--codex-model`, `--codex-thinking` options |
 | **Dynamic port allocation** | Ports stored in `.peer-sync/ports` instead of hardcoded |
-| **agent-solo mode** | Single-worktree coder/reviewer workflow |
+| **agent-pair mode** | Single-worktree coder/reviewer workflow |
 | **Escalation** | `escalate` command for agents to flag ambiguity/inconsistency/misguided tasks |
 
 The pushback phase allows agents to propose improvements to the task file before implementation begins, enabling iterative task refinement.
@@ -933,15 +933,15 @@ The session's ttyd mode is recorded in `.peer-sync/ttyd-mode` during start. When
 |---------|-------------|
 | **Plan phase** | New `--plan` flag with `planning`/`plan-done`/`plan-reviewing`/`plan-review-done`/`needs-clarify` statuses |
 | **Plan-review phase** (duo) | After planning, agents cross-review each other's plans with `duo-plan-review` skill |
-| **Plan phase** (solo) | Iterative plan → review → revise loop (up to 3 rounds) with binding reviewer verdict |
+| **Plan phase** (pair) | Iterative plan → review → revise loop (up to 3 rounds) with binding reviewer verdict |
 | **Auto-finish mode** | `--auto-finish` flag: when one PR closes during PR-comments phase, remaining agent auto-merges via `final-merge` phase |
-| **Final merge phase** | `duo-final-merge`/`solo-final-merge` skills: rebase, test, squash-merge, delete branch |
+| **Final merge phase** | `duo-final-merge`/`pair-final-merge` skills: rebase, test, squash-merge, delete branch |
 | **`learn` command** | Agents record project learnings to `AGENTS_STAGING.md` during sessions |
 | **`workflow-feedback` command** | Agents record feedback about the agent-duo workflow itself |
 | **`feedback` command** | User manages accumulated workflow feedback (list, view, delete, submit as GitHub issue) |
 | **TUI health checks** | Orchestrator monitors agent TUI processes, handles `--on-tui-exit=pause\|quit\|ignore` |
 
-The plan phase enables agents to write and review implementation plans before coding begins. In duo mode, both agents plan simultaneously and then cross-review each other's plans (informational feedback only). In solo mode, the coder writes a plan that the reviewer evaluates with a binding verdict (`APPROVE` or `REQUEST_CHANGES`), iterating up to 3 rounds.
+The plan phase enables agents to write and review implementation plans before coding begins. In duo mode, both agents plan simultaneously and then cross-review each other's plans (informational feedback only). In pair mode, the coder writes a plan that the reviewer evaluates with a binding verdict (`APPROVE` or `REQUEST_CHANGES`), iterating up to 3 rounds.
 
 Auto-finish mode (`--auto-finish`) enables fully unattended sessions. During the PR-comments watch phase, if one PR is closed/merged and only one remains, the orchestrator triggers the `final-merge` phase where the remaining agent rebases onto main, runs tests, waits for CI, and squash-merges the PR.
 

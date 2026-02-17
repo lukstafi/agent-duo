@@ -1,11 +1,11 @@
 ---
-name: solo-integrate
-description: Solo mode integrate phase for rebasing onto updated main
+name: pair-integrate
+description: Pair mode integrate phase for rebasing onto updated main
 metadata:
   short-description: Rebase your branch onto updated main
 ---
 
-# Agent Solo - Integrate Phase
+# Agent Pair - Integrate Phase
 
 **The main branch has been updated** (another feature was merged). Your branch needs to be rebased to incorporate those changes.
 
@@ -66,7 +66,7 @@ This updates your PR with the rebased commits.
 ### 6. Signal Completion
 
 ```bash
-agent-solo signal coder integrate-done "rebased onto main"
+agent-pair signal coder integrate-done "rebased onto main"
 ```
 
 ## Important Guidelines
@@ -89,5 +89,5 @@ git fetch origin
 git reset --hard origin/$FEATURE
 
 # Try again or signal for help
-agent-solo signal coder integrate-done "rebase failed, needs manual intervention"
+agent-pair signal coder integrate-done "rebase failed, needs manual intervention"
 ```

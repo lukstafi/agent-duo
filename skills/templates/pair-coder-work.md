@@ -1,15 +1,15 @@
 ---
-name: solo-coder-work
-description: Solo mode - coder work phase instructions for implementing the solution
+name: pair-coder-work
+description: Pair mode - coder work phase instructions for implementing the solution
 metadata:
-  short-description: Continue coding work in solo collaboration
+  short-description: Continue coding work in pair collaboration
 ---
 
-# Agent Solo - Coder Work Phase (Round 2+)
+# Agent Pair - Coder Work Phase (Round 2+)
 
 **PHASE CHANGE: You are now in the WORK phase.**
 
-You are the **CODER** in a solo workflow. A reviewer will examine your work.
+You are the **CODER** in a pair workflow. A reviewer will examine your work.
 
 ## First Things First
 
@@ -27,7 +27,7 @@ You are the **CODER** in a solo workflow. A reviewer will examine your work.
 
 2. Check current phase:
    ```bash
-   agent-solo phase
+   agent-pair phase
    ```
 
 ## Your Task
@@ -55,9 +55,9 @@ git diff main..HEAD --stat     # All files changed across rounds
 
 If you find ambiguity, inconsistency, or evidence the task is misguided — escalate:
 ```bash
-agent-solo escalate ambiguity "requirements unclear: what should happen when X?"
-agent-solo escalate inconsistency "docs say X but code does Y"
-agent-solo escalate misguided "this feature already exists in module Z"
+agent-pair escalate ambiguity "requirements unclear: what should happen when X?"
+agent-pair escalate inconsistency "docs say X but code does Y"
+agent-pair escalate misguided "this feature already exists in module Z"
 ```
 This notifies the user without interrupting your work. Continue with your best interpretation.
 
@@ -65,7 +65,7 @@ This notifies the user without interrupting your work. Continue with your best i
 
 Signal completion and **STOP**:
 ```bash
-agent-solo signal coder done "brief summary of what you did"
+agent-pair signal coder done "brief summary of what you did"
 ```
 
 The reviewer will examine your work next.

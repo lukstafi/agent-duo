@@ -1,11 +1,11 @@
 ---
-name: solo-final-merge
-description: Agent-solo final merge phase - rebase and merge the PR
+name: pair-final-merge
+description: Agent-pair final merge phase - rebase and merge the PR
 metadata:
   short-description: Perform final rebase and merge of your PR
 ---
 
-# Agent Solo - Final Merge Phase
+# Agent Pair - Final Merge Phase
 
 **AUTO-FINISH MODE**: The session is completing automatically. Your PR needs to be merged.
 
@@ -106,7 +106,7 @@ git push origin --delete "$BRANCH_NAME" 2>/dev/null || true
 ### 7. Signal Completion
 
 ```bash
-agent-solo signal coder final-merge-done "PR merged to main"
+agent-pair signal coder final-merge-done "PR merged to main"
 ```
 
 ## If CI Checks Fail
@@ -120,7 +120,7 @@ If CI checks are failing and cannot be fixed quickly:
 
 2. Signal completion with the issue noted:
    ```bash
-   agent-solo signal coder final-merge-done "merge blocked by failing CI"
+   agent-pair signal coder final-merge-done "merge blocked by failing CI"
    ```
 
 ## If Merge is Blocked
@@ -129,7 +129,7 @@ If the merge is blocked (e.g., requires review approval, branch protection):
 
 ```bash
 gh pr comment "$PR_URL" --body "Auto-merge attempted but blocked by repository settings. Manual merge required."
-agent-solo signal coder final-merge-done "merge blocked, needs manual intervention"
+agent-pair signal coder final-merge-done "merge blocked, needs manual intervention"
 ```
 
 ## Important Guidelines

@@ -30,13 +30,13 @@ Also relates to **Complaint #1**: the PR-creation path in work/review means agen
 
 ## 3. Escalation Boilerplate Repeated Verbatim in 4 Skills
 
-**Files:** `duo-work.md` (lines 42-49), `duo-review.md` (lines 101-109), `solo-coder-work.md` (lines 40-47), `solo-reviewer-work.md` (lines 94-101)
+**Files:** `duo-work.md` (lines 42-49), `duo-review.md` (lines 101-109), `pair-coder-work.md` (lines 40-47), `pair-reviewer-work.md` (lines 94-101)
 
 **Problem:** The "If You Discover a Blocking Issue" block — 3 `escalate` examples with descriptions — appears identically in four skills (~8 lines each, ~32 lines total). After the first encounter, subsequent copies are pure overhead.
 
 **Cross-reference with agent complaints:** Indirectly supported by **Complaint #4** (context compaction resilience). Repeated boilerplate consumes context window space. When context gets compacted, those tokens were wasted — space that could have held actual work context. Reducing repetition improves compaction resilience.
 
-**Recommendation:** Keep the full escalation block in the first skill the agent encounters (typically `duo-work.md` round 1 or `solo-coder-work.md`). In subsequent skills, condense to a single line:
+**Recommendation:** Keep the full escalation block in the first skill the agent encounters (typically `duo-work.md` round 1 or `pair-coder-work.md`). In subsequent skills, condense to a single line:
 ```
 If blocked by ambiguity/inconsistency, use: `agent-duo escalate <type> "<message>"`
 ```
@@ -65,9 +65,9 @@ If blocked by ambiguity/inconsistency, use: `agent-duo escalate <type> "<message
 
 ## 6. Review Skill Lacks Prior-Review Context
 
-**Files:** `duo-review.md`, `solo-reviewer-work.md`
+**Files:** `duo-review.md`, `pair-reviewer-work.md`
 
-**Problem (from agent complaints, confirmed in templates):** The review skills don't instruct the agent to compare against prior round reviews. `solo-reviewer-work.md` has a "Check previous rounds" step (lines 79-85) but frames it as optional and places it *after* writing the review, not before. `duo-review.md` shows peer's review of you, but not your own prior review of the peer.
+**Problem (from agent complaints, confirmed in templates):** The review skills don't instruct the agent to compare against prior round reviews. `pair-reviewer-work.md` has a "Check previous rounds" step (lines 79-85) but frames it as optional and places it *after* writing the review, not before. `duo-review.md` shows peer's review of you, but not your own prior review of the peer.
 
 **Cross-reference with agent complaints:** Directly corroborated by **Complaint #3** (review deduplication). Agents reported repeating the same feedback across rounds verbatim. The skill template doesn't guide them to focus on deltas.
 
@@ -75,7 +75,7 @@ If blocked by ambiguity/inconsistency, use: `agent-duo escalate <type> "<message
 
 ## 7. No Compaction Recovery Guidance in Work/Review Skills
 
-**Files:** `duo-work.md`, `solo-coder-work.md`
+**Files:** `duo-work.md`, `pair-coder-work.md`
 
 **Problem (from agent complaints, confirmed absent in templates):** Work-phase skills have no guidance for recovering after context compaction. Agents reported losing track of modified files after compaction.
 
@@ -85,7 +85,7 @@ If blocked by ambiguity/inconsistency, use: `agent-duo escalate <type> "<message
 
 ## 8. Minor: `rg` Pattern Safety
 
-**Files:** `duo-plan.md` (line 40), `solo-coder-plan.md` (line 47)
+**Files:** `duo-plan.md` (line 40), `pair-coder-plan.md` (line 47)
 
 **Problem:** Plan-phase skills show `rg -n "pattern|keyword|module"` as an example. If patterns start with `-`, they'll be parsed as options.
 
@@ -125,13 +125,13 @@ The orchestrator detects convergence by checking for changes after each `done` s
 3. **If changes exist**: commit them (using signal message), proceed to review
 4. **If no changes** (quiescence): the agent has converged — skip review, trigger PR creation
 
-This replaces the current "detect both PRs exist" loop-stopping logic with a natural signal: the agent made no changes, so there's nothing more to review. Works identically for both duo and solo modes.
+This replaces the current "detect both PRs exist" loop-stopping logic with a natural signal: the agent made no changes, so there's nothing more to review. Works identically for both duo and pair modes.
 
-In solo mode, reviewer APPROVE also triggers PR creation (the coder may still have uncommitted changes from addressing final feedback — commit those, then create PR).
+In pair mode, reviewer APPROVE also triggers PR creation (the coder may still have uncommitted changes from addressing final feedback — commit those, then create PR).
 
 ### PR Creation Timing (Configurable)
 
-**Default** (`--early-pr` not set): Create PR on APPROVE (solo) or on work quiescence (duo). Cleaner PR — no intermediate states visible externally.
+**Default** (`--early-pr` not set): Create PR on APPROVE (pair) or on work quiescence (duo). Cleaner PR — no intermediate states visible externally.
 
 **`--early-pr` flag**: Create PR after the first work-round commit. Each subsequent `lib_commit_round()` that returns "committed" is followed by a `git push` to update the open PR. Enables early external feedback via GitHub reviews.
 
@@ -203,7 +203,7 @@ Review skills updated to use `git diff main...HEAD` (full feature diff) and `git
 
 - **`lib_commit_round()`**: New function after each `done` signal — checks for changes, commits with `"Round N: <message>"` prefix, pushes if `--early-pr` and PR exists, returns quiescent/committed
 - **Quiescence-based loop stopping**: Replace "detect both PRs exist" with "no diff after done signal" as convergence criterion
-- **PR creation on convergence**: Orchestrator calls `lib_create_pr()` on quiescence (duo) or APPROVE (solo), with `--early-pr` flag for first-commit PR creation
+- **PR creation on convergence**: Orchestrator calls `lib_create_pr()` on quiescence (duo) or APPROVE (pair), with `--early-pr` flag for first-commit PR creation
 - **Docs-update integration**: Trigger as part of PR-creation flow, not as agent-facing blocker
 - **Complaint #2 (phase headers):** Dynamic header with resolved paths/round — orchestrator-level, not skill template
 - **Complaint #5 (path validation):** Orchestrator verifies worktree paths before sending skills

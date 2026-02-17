@@ -11,7 +11,7 @@ Complex tasks benefit from explicit upfront planning before implementation begin
 ```bash
 agent-duo start <feature> --plan              # Enable plan phase
 agent-duo start <feature> --clarify --plan    # Combine with clarify
-agent-solo start <feature> --plan             # Also works in solo mode
+agent-pair start <feature> --plan             # Also works in pair mode
 ```
 
 ## Duo Mode Flow
@@ -54,11 +54,11 @@ agent-solo start <feature> --plan             # Also works in solo mode
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Solo Mode Flow
+## Pair Mode Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ PLAN PHASE (solo mode, --plan flag)                             │
+│ PLAN PHASE (pair mode, --plan flag)                             │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  1. Orchestrator sets phase=plan                                │
@@ -69,7 +69,7 @@ agent-solo start <feature> --plan             # Also works in solo mode
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
-│ PLAN-REVIEW PHASE (solo mode)                                   │
+│ PLAN-REVIEW PHASE (pair mode)                                   │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  1. Orchestrator sets phase=plan-review                         │
@@ -90,7 +90,7 @@ agent-solo start <feature> --plan             # Also works in solo mode
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Motivation for a different approach in solo mode relative to duo mode: solo mode is consensus driven while duo mode is divergence driven.
+Motivation for a different approach in pair mode relative to duo mode: pair mode is consensus driven while duo mode is divergence driven.
 
 ## Phase Ordering
 
@@ -105,7 +105,7 @@ Start
   │                    │                │
   │               Plan-Review Phase     │
   │                    │                │
-  │                    ├─(solo, REQUEST_CHANGES)
+  │                    ├─(pair, REQUEST_CHANGES)
   │                    │
   ▼                    ▼
 Work Phase ◄───────────┘
@@ -126,13 +126,13 @@ Work Phase ◄───────────┘
 ```
 .peer-sync/
 ├── plan-mode             # "true" or "false"
-├── plan-round            # Current plan iteration (solo mode, 1-2)
+├── plan-round            # Current plan iteration (pair mode, 1-2)
 ├── plan-claude.md        # Claude's implementation plan (duo)
 ├── plan-codex.md         # Codex's implementation plan (duo)
-├── plan-coder.md         # Coder's implementation plan (solo)
+├── plan-coder.md         # Coder's implementation plan (pair)
 ├── plan-review-claude.md # Claude's review of Codex's plan (duo)
 ├── plan-review-codex.md  # Codex's review of Claude's plan (duo)
-├── plan-review.md        # Reviewer's verdict on coder's plan (solo)
+├── plan-review.md        # Reviewer's verdict on coder's plan (pair)
 └── plan-confirmed        # Present when plan phase is complete
 ```
 
@@ -157,17 +157,17 @@ Instructs agent to review peer's plan:
 - **Risks**: Missing edge cases or failure modes?
 - **Feasibility**: Will this approach work?
 
-### `solo-coder-plan.md`
+### `pair-coder-plan.md`
 
-Same structure as `duo-plan.md`, adapted for solo mode (single plan, no peer).
+Same structure as `duo-plan.md`, adapted for pair mode (single plan, no peer).
 
-### `solo-reviewer-plan.md`
+### `pair-reviewer-plan.md`
 
 Same structure as `duo-plan-review.md`, plus writes a verdict (APPROVE/REQUEST_CHANGES).
 
-## Key Differences: Duo vs Solo
+## Key Differences: Duo vs Pair
 
-| Aspect | Duo Mode | Solo Mode |
+| Aspect | Duo Mode | Pair Mode |
 |--------|----------|-----------|
 | Who plans | Both agents in parallel | Coder only |
 | Who reviews | Cross-review (each reviews peer) | Reviewer reviews coder |
@@ -181,7 +181,7 @@ Same structure as `duo-plan-review.md`, plus writes a verdict (APPROVE/REQUEST_C
 - Peer feedback is available during work phase
 - Keeps the workflow simpler
 
-**Why loop in solo mode?**
+**Why loop in pair mode?**
 - Single implementation path—plan quality matters more
 - Reviewer acts as staff engineer gate
 - Capped at 3 iterations (initial + 2 revisions) to prevent infinite loops

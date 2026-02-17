@@ -1,11 +1,11 @@
 ---
-name: solo-pr-comment
-description: Solo mode - PR comment phase for addressing GitHub PR feedback
+name: pair-pr-comment
+description: Pair mode - PR comment phase for addressing GitHub PR feedback
 metadata:
   short-description: Address PR comments from GitHub
 ---
 
-# Agent Solo - PR Comment Phase
+# Agent Pair - PR Comment Phase
 
 **New comments or reviews have been posted on your PR.** The orchestrator detected fresh feedback that needs your attention.
 
@@ -53,7 +53,7 @@ gh pr comment "$PR_URL" --body "Regarding the feedback: <your explanation of why
 Signal completion:
 
 ```bash
-agent-solo signal coder done "addressed PR comments, [amended / no changes needed]"
+agent-pair signal coder done "addressed PR comments, [amended / no changes needed]"
 ```
 
 The orchestrator continues monitoring your PR for new comments.

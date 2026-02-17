@@ -4,13 +4,23 @@ All notable changes to agent-duo will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`--claude` / `--codex` shorthand flags** for `agent-pair start`: `--claude` sets coder=claude/reviewer=codex, `--codex` sets the reverse
+- **Task file auto-send** in `agent-claude`/`agent-codex`: launchers find `<task>.md` and send its contents as the initial prompt (large files >3KB send a path reference instead)
+- **Extra CLI argument forwarding** in `agent-claude`/`agent-codex`: use `-- <args>` to pass additional flags (e.g. `--chrome`) to the underlying CLI; args persist across restarts
+
+### Changed
+- **Breaking**: Renamed `agent-solo` → `agent-pair` and all `solo-*` skills → `pair-*` skills. "Pair" better describes the coder+reviewer collaboration mode.
+- **Breaking**: `agent-pair start` no longer defaults coder/reviewer — must specify `--claude`, `--codex`, or both `--coder`/`--reviewer`
+- Removed `--ide` access mode from `agent-launch` (unreliable: Codex doesn't support it, only one Claude Code terminal can connect to IDE at a time)
+
 ## [v0.5] - 2026-02-15
 
 ### Added
-- **`--followup` flag**: Convert observations from an existing PR into a new task with `agent-duo start --followup <PR-number>` and `agent-solo start --followup <PR-number>`
+- **`--followup` flag**: Convert observations from an existing PR into a new task with `agent-duo start --followup <PR-number>` and `agent-pair start --followup <PR-number>`
 - **Feedback-digest pipeline**: Automatically file structured GitHub issues from agent feedback via ludics
 - **High-priority ntfy notification** when merge vote reaches no consensus
-- **`update-docs` phase** for solo mode
+- **`update-docs` phase** for pair mode
 
 ### Changed
 - **Orchestrator-driven commits and PR creation**: Quiescence detection triggers automatic commits and PR creation instead of relying on agents
@@ -42,7 +52,7 @@ All notable changes to agent-duo will be documented in this file.
   - Prefix-isolated session state (`claude-*`/`codex-*`) in `.agent-sessions/`
 - **Suggest-refactor post-merge phase**: After a PR is merged, agents reflect on what they'd do differently
   - Suggestions saved locally, posted as PR comment, and sent via ntfy
-- **"Proceed to merge" PR comment trigger** in solo mode (consistent with duo mode)
+- **"Proceed to merge" PR comment trigger** in pair mode (consistent with duo mode)
 - **Local skills**: Skills installed per-project instead of globally (#7)
   - `doctor` command updated to check templates instead of global skills
 - **Descriptive terminal/browser titles** for all agent sessions
@@ -52,7 +62,7 @@ All notable changes to agent-duo will be documented in this file.
 ### Changed
 - Increased phase timeouts: work 20m→1h, review 10m→30m, vote 10m→3h, debate 5m→40m
 - Vote/debate timeouts now gracefully interrupt agents and create synthetic votes instead of killing the session
-- Namespace duo/solo registry entries (`duo-*`/`solo-*`) with unified cross-type status display
+- Namespace duo/pair registry entries (`duo-*`/`pair-*`) with unified cross-type status display
 - Push current branch at start to avoid PRs with unpushed commits
 
 ### Fixed
@@ -60,7 +70,7 @@ All notable changes to agent-duo will be documented in this file.
   - Auto-create PR after approval instead of just exiting
   - Resume from persisted round number instead of hardcoding round=1
   - Detect already-approved reviews on restart to create PR immediately
-- Fix agent-solo infinite approve loop: break after reviewer approval
+- Fix agent-pair infinite approve loop: break after reviewer approval
 - Fix glob quoting for paths with spaces and include legacy unprefixed sessions
 - Fix tmux terminal titles for VS Code and standard terminals
 
@@ -75,18 +85,18 @@ All notable changes to agent-duo will be documented in this file.
   - Auto-triggers merge phase after inactivity timeout (default 30 min)
   - With 2 open PRs: triggers merge voting phase
   - With 1 open PR: triggers final rebase and merge
-  - New `duo-final-merge` and `solo-final-merge` skills for automated merging
+  - New `duo-final-merge` and `pair-final-merge` skills for automated merging
 - **Integrate phase**: Automatic rebase when main branch advances
   - Detects when parallel sessions need rebasing after a PR merges
-  - New `duo-integrate` and `solo-integrate` skills
+  - New `duo-integrate` and `pair-integrate` skills
   - Orchestrator polls origin/main and triggers integration automatically
 - **Plan/plan-review phase** (`--plan`): Agents write implementation plans
   - Agents write plans to `.peer-sync/plan-<agent>.md`
   - Peer review of plans before work begins
-  - New skills: `duo-plan`, `duo-plan-review`, `solo-coder-plan`, `solo-reviewer-plan`
-- **Gather phase** for solo mode (`--gather`): Reviewer collects task context
+  - New skills: `duo-plan`, `duo-plan-review`, `pair-coder-plan`, `pair-reviewer-plan`
+- **Gather phase** for pair mode (`--gather`): Reviewer collects task context
   - Reviewer explores codebase and writes `task-context.md` for coder
-  - New `solo-reviewer-gather` skill
+  - New `pair-reviewer-gather` skill
 - **Unified agent communication** with API error retry
   - Automatic retry on 500/429 errors with exponential backoff
   - New `send_to_agent`, `retry_last_send` helper functions
@@ -101,10 +111,10 @@ All notable changes to agent-duo will be documented in this file.
 
 ### Fixed
 - Fix `has_pr` to work from any directory and after rebases
-- Workflow feedback now persisted in solo mode (moved to shared lib)
+- Workflow feedback now persisted in pair mode (moved to shared lib)
 - Fix final-merge phase: add missing status and worktree-safe merge
 - Fix merge phase to work in winning worktree instead of main
-- Fix spurious `/solo-pr-comment` triggers after rebase
+- Fix spurious `/pair-pr-comment` triggers after rebase
 - Fix duplicate TUI startup command in restart flow
 - Fix undefined `DEFAULT_TIMEOUT` in integration loop
 - Fix cleanup `--full` for legacy sessions with missing worktrees
@@ -123,10 +133,10 @@ All notable changes to agent-duo will be documented in this file.
 - PR comment monitoring phase after PRs are created
   - Auto-trigger pr-comment skill on first entry if PR has reviews
   - Fetch inline code review comments via `gh api`
-  - Shared `fetch-pr-feedback.sh` script for both duo and solo modes
+  - Shared `fetch-pr-feedback.sh` script for both duo and pair modes
   - Require PR comment when declining to make changes from feedback
   - Preserve PR comment hash baseline across session restarts
-- `agent-solo restart` command for session recovery after system restart
+- `agent-pair restart` command for session recovery after system restart
 - `--port` flag for configurable consecutive port allocation
 - Test infrastructure with unit and integration tests
 - `duo-amend` skill and require review before session completion
@@ -136,7 +146,7 @@ All notable changes to agent-duo will be documented in this file.
 - Require Bash 4+ and use `#!/usr/bin/env bash` for macOS compatibility
 - Use only Escape to interrupt agents, not Ctrl-C
 - Cleanup command now removes session state only by default
-- Refactored `restart_agent_tui` in agent-lib.sh to be generic (works for both duo and solo modes)
+- Refactored `restart_agent_tui` in agent-lib.sh to be generic (works for both duo and pair modes)
 - Doubled default timeouts for agent operations
 
 ### Fixed
@@ -163,7 +173,7 @@ Initial release with core functionality:
 - `restart` command for session recovery after system restart
 - `doctor` command for system health checks
 - `escalate` command for agents to flag blocking issues
-- `agent-solo` mode for coder/reviewer workflow
+- `agent-pair` mode for coder/reviewer workflow
 - ntfy.sh push notification support with token authentication
 - Configurable model selection via `--codex-model` and `--claude-model` flags
 - Configurable Codex thinking effort (default: high)

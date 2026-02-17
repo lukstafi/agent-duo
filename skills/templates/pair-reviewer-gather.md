@@ -1,15 +1,15 @@
 ---
-name: solo-reviewer-gather
-description: Solo mode - reviewer gather phase for collecting task context
+name: pair-reviewer-gather
+description: Pair mode - reviewer gather phase for collecting task context
 metadata:
   short-description: Gather codebase context for the coder
 ---
 
-# Agent Solo - Reviewer Gather Phase
+# Agent Pair - Reviewer Gather Phase
 
 **PHASE: GATHER** - Collect relevant context from the codebase to help the coder.
 
-You are the **REVIEWER** in a solo workflow.
+You are the **REVIEWER** in a pair workflow.
 
 ## Your Environment
 
@@ -76,7 +76,7 @@ Edit the file to fill in actual content based on your exploration. Use specific 
 ### 4. Signal Completion
 
 ```bash
-agent-solo signal reviewer gather-done "task context collected"
+agent-pair signal reviewer gather-done "task context collected"
 ```
 
 Then **STOP and wait**. The coder will read your context file before starting work.

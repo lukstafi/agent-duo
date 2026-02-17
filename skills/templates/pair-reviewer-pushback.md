@@ -1,15 +1,15 @@
 ---
-name: solo-reviewer-pushback
-description: Solo mode - reviewer pushback stage for proposing task improvements
+name: pair-reviewer-pushback
+description: Pair mode - reviewer pushback stage for proposing task improvements
 metadata:
   short-description: Propose task improvements before coder starts work
 ---
 
-# Agent Solo - Reviewer Pushback Stage
+# Agent Pair - Reviewer Pushback Stage
 
 **STAGE: PUSHBACK** - Before the coder starts implementing, you may propose improvements to the task specification.
 
-You are the **REVIEWER** in a solo workflow.
+You are the **REVIEWER** in a pair workflow.
 
 ## Your Environment
 
@@ -74,7 +74,7 @@ Edit the file to fill in actual content.
 ### 5. Signal Completion
 
 ```bash
-agent-solo signal reviewer pushback-done "proposed task modifications submitted"
+agent-pair signal reviewer pushback-done "proposed task modifications submitted"
 ```
 
 Then **STOP and wait**. The user will review your task file changes (via diff) and rationale, then decide:

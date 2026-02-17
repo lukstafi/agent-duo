@@ -201,10 +201,10 @@ cmd_setup() {
     info "VS Code tip: To show agent names in terminal tabs, add to VS Code settings:"
     echo '  "terminal.integrated.tabs.title": "${sequence}"'
 
-    # Prominent message about agent-solo
+    # Prominent message about agent-pair
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    info "To install agent-solo (single-agent mode), run: ./agent-solo setup"
+    info "To install agent-pair (single-agent mode), run: ./agent-pair setup"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
@@ -1708,7 +1708,7 @@ cmd_status() {
     fi
 }
 
-# Unified project-root status: shows ALL session types (duo, solo, claude, codex)
+# Unified project-root status: shows ALL session types (duo, pair, claude, codex)
 show_all_sessions() {
     local main_root="$1"
     local sessions_dir="$main_root/.agent-sessions"
@@ -1719,13 +1719,13 @@ show_all_sessions() {
 
     local has_any=false
 
-    # Show orchestrated sessions (duo-* and solo-* symlinks)
-    for session_link in "$sessions_dir"/duo-*.session "$sessions_dir"/solo-*.session; do
+    # Show orchestrated sessions (duo-* and pair-* symlinks)
+    for session_link in "$sessions_dir"/duo-*.session "$sessions_dir"/pair-*.session; do
         [ -L "$session_link" ] || continue
 
         local filename
         filename="$(basename "$session_link" .session)"
-        local entry_type="${filename%%-*}"   # "duo" or "solo"
+        local entry_type="${filename%%-*}"   # "duo" or "pair"
         local feature="${filename#*-}"       # strip first prefix
 
         local peer_sync_path
@@ -1793,7 +1793,7 @@ show_single_status() {
     local session_mode="Duo"
     if [ -f "$peer_sync/mode" ]; then
         case "$(cat "$peer_sync/mode")" in
-            solo) session_mode="Solo" ;;
+            pair) session_mode="Pair" ;;
             duo)  session_mode="Duo" ;;
         esac
     fi

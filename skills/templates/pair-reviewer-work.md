@@ -1,17 +1,17 @@
 ---
-name: solo-reviewer-work
-description: Solo mode - reviewer review phase instructions for examining coder's work
+name: pair-reviewer-work
+description: Pair mode - reviewer review phase instructions for examining coder's work
 metadata:
-  short-description: Review coder's work in solo collaboration
+  short-description: Review coder's work in pair collaboration
 ---
 
-# Agent Solo - Reviewer Phase
+# Agent Pair - Reviewer Phase
 
 **PHASE CHANGE: You are now in the REVIEW phase.**
 
 Stop any other activity. Your task is to review the coder's solution.
 
-You are the **REVIEWER** in a solo workflow. Your job is to review code, NOT to write code.
+You are the **REVIEWER** in a pair workflow. Your job is to review code, NOT to write code.
 
 ## Your Environment
 
@@ -28,7 +28,7 @@ The coder has completed their work. Now you review it.
 Signal that you're reviewing:
 
 ```bash
-agent-solo signal reviewer reviewing "examining coder's work"
+agent-pair signal reviewer reviewing "examining coder's work"
 ```
 
 ### Your Tasks
@@ -98,7 +98,7 @@ agent-solo signal reviewer reviewing "examining coder's work"
 
 ### If You Discover a Blocking Issue
 
-If blocked by ambiguity or inconsistency, use: `agent-solo escalate <type> "<message>"` (types: ambiguity, inconsistency, misguided). Continue with your review.
+If blocked by ambiguity or inconsistency, use: `agent-pair escalate <type> "<message>"` (types: ambiguity, inconsistency, misguided). Continue with your review.
 
 ### Verdict Guidelines
 
@@ -110,9 +110,9 @@ If blocked by ambiguity or inconsistency, use: `agent-solo escalate <type> "<mes
 Signal that your review is complete:
 
 ```bash
-agent-solo signal reviewer review-done "verdict: APPROVE"
+agent-pair signal reviewer review-done "verdict: APPROVE"
 # or
-agent-solo signal reviewer review-done "verdict: REQUEST_CHANGES"
+agent-pair signal reviewer review-done "verdict: REQUEST_CHANGES"
 ```
 
 Then **STOP and wait**. If you approved, the coder will create a PR. If you requested changes, there will be another work round.

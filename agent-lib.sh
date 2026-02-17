@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# agent-lib.sh - Shared library for agent-duo and agent-solo
+# agent-lib.sh - Shared library for agent-duo and agent-pair
 #
 # Requires Bash 4.0+ (for associative arrays, regex matching, etc.)
 # macOS users: install modern bash via Homebrew: brew install bash
 #
 # This file contains common functions used by both agent coordination modes.
-# Source this file from agent-duo or agent-solo scripts.
+# Source this file from agent-duo or agent-pair scripts.
 
 #------------------------------------------------------------------------------
 # Bash version check
@@ -118,7 +118,7 @@ get_main_project_root() {
 
 # Registry prefix for session files. Set by each entry point:
 #   agent-duo sets SESSION_REGISTRY_PREFIX="duo"
-#   agent-solo sets SESSION_REGISTRY_PREFIX="solo"
+#   agent-pair sets SESSION_REGISTRY_PREFIX="pair"
 # When set, session files are named ${prefix}-${feature}.session
 SESSION_REGISTRY_PREFIX="${SESSION_REGISTRY_PREFIX:-}"
 
@@ -144,8 +144,8 @@ list_active_sessions() {
         for f in "$sessions_dir/"*.session; do
             [ -L "$f" ] || continue
             local base; base="$(basename "$f")"
-            # Skip if it has any known prefix (duo-/solo-/claude-/codex-)
-            case "$base" in duo-*|solo-*|claude-*|codex-*) continue ;; esac
+            # Skip if it has any known prefix (duo-/pair-/claude-/codex-)
+            case "$base" in duo-*|pair-*|claude-*|codex-*) continue ;; esac
             session_files+=("$f")
         done
     else
@@ -293,7 +293,7 @@ resolve_session() {
         sessions="$(list_active_sessions "$main_root")"
 
         if [ -z "$sessions" ]; then
-            die "No active sessions found. Start one with: agent-duo start <feature> or agent-solo start <feature>"
+            die "No active sessions found. Start one with: agent-duo start <feature> or agent-pair start <feature>"
         fi
 
         # Count sessions
@@ -322,7 +322,7 @@ resolve_session() {
     die "Not in an agent session. Use --feature <name> or cd to a session worktree."
 }
 
-# Get session mode (duo or solo)
+# Get session mode (duo or pair)
 get_mode() {
     local root
     root="$(get_project_root)"
@@ -878,8 +878,8 @@ has_pr() {
     # Determine branch name based on mode
     local mode branch
     mode="$(cat "$peer_sync/mode" 2>/dev/null)" || mode="duo"
-    if [ "$mode" = "solo" ]; then
-        branch="${feature}"  # Solo uses single branch
+    if [ "$mode" = "pair" ]; then
+        branch="${feature}"  # Pair uses single branch
     else
         branch="${feature}-${agent}"  # Duo uses agent-specific branches
     fi
@@ -1112,7 +1112,7 @@ send_to_agent() {
     local agent_type="$agent"
     case "$agent" in
         coder|reviewer)
-            # Solo mode - look up which CLI this role uses
+            # Pair mode - look up which CLI this role uses
             local coder_agent reviewer_agent
             coder_agent="$(cat "$peer_sync/coder-agent" 2>/dev/null)" || coder_agent="claude"
             reviewer_agent="$(cat "$peer_sync/reviewer-agent" 2>/dev/null)" || reviewer_agent="codex"
@@ -1595,7 +1595,7 @@ send_clarify_ntfy() {
     message+="Feature: $feature"
     message+=$'\n\n'
 
-    if [ "$mode" = "solo" ]; then
+    if [ "$mode" = "pair" ]; then
         if [ -f "$peer_sync/clarify-coder.md" ]; then
             message+="CODER'S APPROACH:"
             message+=$'\n'
@@ -1639,7 +1639,7 @@ send_clarify_ntfy() {
 send_clarify_email() {
     local peer_sync="$1"
     local feature="$2"
-    local mode="${3:-duo}"  # duo or solo
+    local mode="${3:-duo}"  # duo or pair
 
     # Check if mail command is available
     if ! command -v mail >/dev/null 2>&1; then
@@ -1667,8 +1667,8 @@ send_clarify_email() {
     body+="Feature: $feature"
     body+=$'\n\n'
 
-    if [ "$mode" = "solo" ]; then
-        # Solo mode: coder and reviewer
+    if [ "$mode" = "pair" ]; then
+        # Pair mode: coder and reviewer
         if [ -f "$peer_sync/clarify-coder.md" ]; then
             body+="--- CODER'S APPROACH ---"
             body+=$'\n\n'
@@ -1931,7 +1931,7 @@ send_pushback_ntfy() {
     message+="Feature: $feature"
     message+=$'\n\n'
 
-    if [ "$mode" = "solo" ]; then
+    if [ "$mode" = "pair" ]; then
         if [ -f "$peer_sync/pushback-reviewer.md" ]; then
             message+="REVIEWER'S PUSHBACK:"
             message+=$'\n'
@@ -1993,7 +1993,7 @@ send_pushback_email() {
     body+="Feature: $feature"
     body+=$'\n\n'
 
-    if [ "$mode" = "solo" ]; then
+    if [ "$mode" = "pair" ]; then
         if [ -f "$peer_sync/pushback-reviewer.md" ]; then
             body+="--- REVIEWER'S PUSHBACK ---"
             body+=$'\n\n'
@@ -2103,7 +2103,7 @@ get_templates_dir() {
     if [ -d "$installed_templates" ]; then
         echo "$installed_templates"
     else
-        die "Skill templates not found. Run 'agent-duo setup' or 'agent-solo setup' first."
+        die "Skill templates not found. Run 'agent-duo setup' or 'agent-pair setup' first."
     fi
 }
 
@@ -2164,9 +2164,9 @@ install_duo_skills_to_worktree() {
     install_skill "$templates_dir/duo-suggest-refactor.md" "$codex_skills/duo-suggest-refactor/SKILL.md" "\$duo-suggest-refactor"
 }
 
-# Install solo skills to a worktree for both Claude and Codex
-# Usage: install_solo_skills_to_worktree <worktree_path> <templates_dir>
-install_solo_skills_to_worktree() {
+# Install pair skills to a worktree for both Claude and Codex
+# Usage: install_pair_skills_to_worktree <worktree_path> <templates_dir>
+install_pair_skills_to_worktree() {
     local worktree="$1"
     local templates_dir="$2"
 
@@ -2174,41 +2174,41 @@ install_solo_skills_to_worktree() {
     local claude_skills="$worktree/.claude/commands"
     mkdir -p "$claude_skills"
 
-    install_skill "$templates_dir/solo-coder-work.md" "$claude_skills/solo-coder-work.md" "/solo-coder-work"
-    install_skill "$templates_dir/solo-coder-clarify.md" "$claude_skills/solo-coder-clarify.md" "/solo-coder-clarify"
-    install_skill "$templates_dir/solo-coder-plan.md" "$claude_skills/solo-coder-plan.md" "/solo-coder-plan"
-    install_skill "$templates_dir/solo-reviewer-work.md" "$claude_skills/solo-reviewer-work.md" "/solo-reviewer-work"
-    install_skill "$templates_dir/solo-reviewer-clarify.md" "$claude_skills/solo-reviewer-clarify.md" "/solo-reviewer-clarify"
-    install_skill "$templates_dir/solo-reviewer-gather.md" "$claude_skills/solo-reviewer-gather.md" "/solo-reviewer-gather"
-    install_skill "$templates_dir/solo-reviewer-pushback.md" "$claude_skills/solo-reviewer-pushback.md" "/solo-reviewer-pushback"
-    install_skill "$templates_dir/solo-reviewer-plan.md" "$claude_skills/solo-reviewer-plan.md" "/solo-reviewer-plan"
-    install_skill "$templates_dir/solo-pr-comment.md" "$claude_skills/solo-pr-comment.md" "/solo-pr-comment"
-    install_skill "$templates_dir/solo-integrate.md" "$claude_skills/solo-integrate.md" "/solo-integrate"
-    install_skill "$templates_dir/solo-final-merge.md" "$claude_skills/solo-final-merge.md" "/solo-final-merge"
-    install_skill "$templates_dir/solo-update-docs.md" "$claude_skills/solo-update-docs.md" "/solo-update-docs"
-    install_skill "$templates_dir/solo-suggest-refactor.md" "$claude_skills/solo-suggest-refactor.md" "/solo-suggest-refactor"
+    install_skill "$templates_dir/pair-coder-work.md" "$claude_skills/pair-coder-work.md" "/pair-coder-work"
+    install_skill "$templates_dir/pair-coder-clarify.md" "$claude_skills/pair-coder-clarify.md" "/pair-coder-clarify"
+    install_skill "$templates_dir/pair-coder-plan.md" "$claude_skills/pair-coder-plan.md" "/pair-coder-plan"
+    install_skill "$templates_dir/pair-reviewer-work.md" "$claude_skills/pair-reviewer-work.md" "/pair-reviewer-work"
+    install_skill "$templates_dir/pair-reviewer-clarify.md" "$claude_skills/pair-reviewer-clarify.md" "/pair-reviewer-clarify"
+    install_skill "$templates_dir/pair-reviewer-gather.md" "$claude_skills/pair-reviewer-gather.md" "/pair-reviewer-gather"
+    install_skill "$templates_dir/pair-reviewer-pushback.md" "$claude_skills/pair-reviewer-pushback.md" "/pair-reviewer-pushback"
+    install_skill "$templates_dir/pair-reviewer-plan.md" "$claude_skills/pair-reviewer-plan.md" "/pair-reviewer-plan"
+    install_skill "$templates_dir/pair-pr-comment.md" "$claude_skills/pair-pr-comment.md" "/pair-pr-comment"
+    install_skill "$templates_dir/pair-integrate.md" "$claude_skills/pair-integrate.md" "/pair-integrate"
+    install_skill "$templates_dir/pair-final-merge.md" "$claude_skills/pair-final-merge.md" "/pair-final-merge"
+    install_skill "$templates_dir/pair-update-docs.md" "$claude_skills/pair-update-docs.md" "/pair-update-docs"
+    install_skill "$templates_dir/pair-suggest-refactor.md" "$claude_skills/pair-suggest-refactor.md" "/pair-suggest-refactor"
 
     # Install Codex skills (project-scoped path is .agents/skills/)
     local codex_skills="$worktree/.agents/skills"
-    mkdir -p "$codex_skills/solo-coder-work" "$codex_skills/solo-coder-clarify" "$codex_skills/solo-coder-plan"
-    mkdir -p "$codex_skills/solo-reviewer-work" "$codex_skills/solo-reviewer-clarify"
-    mkdir -p "$codex_skills/solo-reviewer-gather" "$codex_skills/solo-reviewer-pushback" "$codex_skills/solo-reviewer-plan"
-    mkdir -p "$codex_skills/solo-pr-comment" "$codex_skills/solo-integrate" "$codex_skills/solo-final-merge"
-    mkdir -p "$codex_skills/solo-suggest-refactor"
+    mkdir -p "$codex_skills/pair-coder-work" "$codex_skills/pair-coder-clarify" "$codex_skills/pair-coder-plan"
+    mkdir -p "$codex_skills/pair-reviewer-work" "$codex_skills/pair-reviewer-clarify"
+    mkdir -p "$codex_skills/pair-reviewer-gather" "$codex_skills/pair-reviewer-pushback" "$codex_skills/pair-reviewer-plan"
+    mkdir -p "$codex_skills/pair-pr-comment" "$codex_skills/pair-integrate" "$codex_skills/pair-final-merge"
+    mkdir -p "$codex_skills/pair-suggest-refactor"
 
-    install_skill "$templates_dir/solo-coder-work.md" "$codex_skills/solo-coder-work/SKILL.md" "\$solo-coder-work"
-    install_skill "$templates_dir/solo-coder-clarify.md" "$codex_skills/solo-coder-clarify/SKILL.md" "\$solo-coder-clarify"
-    install_skill "$templates_dir/solo-coder-plan.md" "$codex_skills/solo-coder-plan/SKILL.md" "\$solo-coder-plan"
-    install_skill "$templates_dir/solo-reviewer-work.md" "$codex_skills/solo-reviewer-work/SKILL.md" "\$solo-reviewer-work"
-    install_skill "$templates_dir/solo-reviewer-clarify.md" "$codex_skills/solo-reviewer-clarify/SKILL.md" "\$solo-reviewer-clarify"
-    install_skill "$templates_dir/solo-reviewer-gather.md" "$codex_skills/solo-reviewer-gather/SKILL.md" "\$solo-reviewer-gather"
-    install_skill "$templates_dir/solo-reviewer-pushback.md" "$codex_skills/solo-reviewer-pushback/SKILL.md" "\$solo-reviewer-pushback"
-    install_skill "$templates_dir/solo-reviewer-plan.md" "$codex_skills/solo-reviewer-plan/SKILL.md" "\$solo-reviewer-plan"
-    install_skill "$templates_dir/solo-pr-comment.md" "$codex_skills/solo-pr-comment/SKILL.md" "\$solo-pr-comment"
-    install_skill "$templates_dir/solo-integrate.md" "$codex_skills/solo-integrate/SKILL.md" "\$solo-integrate"
-    install_skill "$templates_dir/solo-final-merge.md" "$codex_skills/solo-final-merge/SKILL.md" "\$solo-final-merge"
-    install_skill "$templates_dir/solo-update-docs.md" "$codex_skills/solo-update-docs/SKILL.md" "\$solo-update-docs"
-    install_skill "$templates_dir/solo-suggest-refactor.md" "$codex_skills/solo-suggest-refactor/SKILL.md" "\$solo-suggest-refactor"
+    install_skill "$templates_dir/pair-coder-work.md" "$codex_skills/pair-coder-work/SKILL.md" "\$pair-coder-work"
+    install_skill "$templates_dir/pair-coder-clarify.md" "$codex_skills/pair-coder-clarify/SKILL.md" "\$pair-coder-clarify"
+    install_skill "$templates_dir/pair-coder-plan.md" "$codex_skills/pair-coder-plan/SKILL.md" "\$pair-coder-plan"
+    install_skill "$templates_dir/pair-reviewer-work.md" "$codex_skills/pair-reviewer-work/SKILL.md" "\$pair-reviewer-work"
+    install_skill "$templates_dir/pair-reviewer-clarify.md" "$codex_skills/pair-reviewer-clarify/SKILL.md" "\$pair-reviewer-clarify"
+    install_skill "$templates_dir/pair-reviewer-gather.md" "$codex_skills/pair-reviewer-gather/SKILL.md" "\$pair-reviewer-gather"
+    install_skill "$templates_dir/pair-reviewer-pushback.md" "$codex_skills/pair-reviewer-pushback/SKILL.md" "\$pair-reviewer-pushback"
+    install_skill "$templates_dir/pair-reviewer-plan.md" "$codex_skills/pair-reviewer-plan/SKILL.md" "\$pair-reviewer-plan"
+    install_skill "$templates_dir/pair-pr-comment.md" "$codex_skills/pair-pr-comment/SKILL.md" "\$pair-pr-comment"
+    install_skill "$templates_dir/pair-integrate.md" "$codex_skills/pair-integrate/SKILL.md" "\$pair-integrate"
+    install_skill "$templates_dir/pair-final-merge.md" "$codex_skills/pair-final-merge/SKILL.md" "\$pair-final-merge"
+    install_skill "$templates_dir/pair-update-docs.md" "$codex_skills/pair-update-docs/SKILL.md" "\$pair-update-docs"
+    install_skill "$templates_dir/pair-suggest-refactor.md" "$codex_skills/pair-suggest-refactor/SKILL.md" "\$pair-suggest-refactor"
 }
 
 # List of all duo skill names (for cleanup of legacy global installs)
@@ -2219,16 +2219,16 @@ DUO_SKILLS=(
     "duo-integrate" "duo-final-merge" "duo-suggest-refactor"
 )
 
-# List of all solo skill names (for cleanup of legacy global installs)
-SOLO_SKILLS=(
-    "solo-coder-work" "solo-coder-clarify" "solo-coder-plan"
-    "solo-reviewer-work" "solo-reviewer-clarify" "solo-reviewer-gather" "solo-reviewer-pushback" "solo-reviewer-plan"
-    "solo-pr-comment" "solo-integrate" "solo-final-merge" "solo-suggest-refactor"
+# List of all pair skill names (for cleanup of legacy global installs)
+PAIR_SKILLS=(
+    "pair-coder-work" "pair-coder-clarify" "pair-coder-plan"
+    "pair-reviewer-work" "pair-reviewer-clarify" "pair-reviewer-gather" "pair-reviewer-pushback" "pair-reviewer-plan"
+    "pair-pr-comment" "pair-integrate" "pair-final-merge" "pair-suggest-refactor"
 )
 
 # Check and warn about legacy global skill installations
 # Usage: warn_legacy_global_skills <skill_list_name>
-# skill_list_name is either "DUO_SKILLS" or "SOLO_SKILLS"
+# skill_list_name is either "DUO_SKILLS" or "PAIR_SKILLS"
 # Note: Uses case statement instead of nameref for Bash 3.2 compatibility (macOS default)
 warn_legacy_global_skills() {
     local skill_list_name="$1"
@@ -2244,8 +2244,8 @@ warn_legacy_global_skills() {
         DUO_SKILLS)
             skills=("${DUO_SKILLS[@]}")
             ;;
-        SOLO_SKILLS)
-            skills=("${SOLO_SKILLS[@]}")
+        PAIR_SKILLS)
+            skills=("${PAIR_SKILLS[@]}")
             ;;
         *)
             warn "Unknown skill list: $skill_list_name"
@@ -2299,7 +2299,7 @@ warn_legacy_global_skills() {
 }
 
 #------------------------------------------------------------------------------
-# Setup helpers (shared between agent-duo and agent-solo setup commands)
+# Setup helpers (shared between agent-duo and agent-pair setup commands)
 #------------------------------------------------------------------------------
 
 # Install the unified notify hook script
@@ -2307,14 +2307,14 @@ warn_legacy_global_skills() {
 # Returns the path to the installed script
 install_notify_hook() {
     local install_dir="$1"
-    local notify_script="$install_dir/agent-duo-and-solo-notify"
+    local notify_script="$install_dir/agent-duo-and-pair-notify"
 
     cat > "$notify_script" << 'NOTIFY_EOF'
 #!/usr/bin/env bash
-# Unified notify hook for both agent-duo and agent-solo modes
+# Unified notify hook for both agent-duo and agent-pair modes
 # Called by agent hooks when they complete a turn
 # Signals the appropriate status based on current phase and mode
-# Usage: agent-duo-and-solo-notify <agent-type>
+# Usage: agent-duo-and-pair-notify <agent-type>
 #   Agent type (claude or codex) is required as $1
 #   PEER_SYNC is discovered from $PWD/.peer-sync symlink
 
@@ -2347,13 +2347,13 @@ fi
 
 log_debug "hook fired, PWD=$PWD"
 
-# Check mode (duo or solo)
+# Check mode (duo or pair)
 mode="$(cat "$PEER_SYNC/mode" 2>/dev/null)" || mode="duo"
 log_debug "mode=$mode"
 
 # Determine agent name based on mode
-if [ "$mode" = "solo" ]; then
-    # Solo mode: look up which role this agent type is playing
+if [ "$mode" = "pair" ]; then
+    # Pair mode: look up which role this agent type is playing
     coder_agent="$(cat "$PEER_SYNC/coder-agent" 2>/dev/null)"
     reviewer_agent="$(cat "$PEER_SYNC/reviewer-agent" 2>/dev/null)"
 
@@ -2365,7 +2365,7 @@ if [ "$mode" = "solo" ]; then
         log_debug "agent type $agent_type doesn't match coder ($coder_agent) or reviewer ($reviewer_agent)"
         exit 0
     fi
-    signal_cmd="agent-solo"
+    signal_cmd="agent-pair"
 else
     # Duo mode: agent type is the agent name (claude or codex)
     agent="$agent_type"
@@ -2403,8 +2403,8 @@ case "$phase" in
         case "$current_status" in
             gather-done|clarify-done|pushback-done|done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
         esac
-        # In solo mode, only reviewer gathers in gather phase
-        if [ "$mode" = "solo" ] && [ "$agent" != "reviewer" ]; then
+        # In pair mode, only reviewer gathers in gather phase
+        if [ "$mode" = "pair" ] && [ "$agent" != "reviewer" ]; then
             log_debug "skipping (not reviewer in gather phase)"
             exit 0
         fi
@@ -2434,8 +2434,8 @@ case "$phase" in
         case "$current_status" in
             pushback-done|done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
         esac
-        # In solo mode, only reviewer pushes back
-        if [ "$mode" = "solo" ] && [ "$agent" != "reviewer" ]; then
+        # In pair mode, only reviewer pushes back
+        if [ "$mode" = "pair" ] && [ "$agent" != "reviewer" ]; then
             log_debug "skipping (not reviewer in pushback phase)"
             exit 0
         fi
@@ -2452,8 +2452,8 @@ case "$phase" in
         case "$current_status" in
             done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
         esac
-        # In solo mode, only coder works in work phase
-        if [ "$mode" = "solo" ] && [ "$agent" != "coder" ]; then
+        # In pair mode, only coder works in work phase
+        if [ "$mode" = "pair" ] && [ "$agent" != "coder" ]; then
             log_debug "skipping (not coder in work phase)"
             exit 0
         fi
@@ -2465,14 +2465,14 @@ case "$phase" in
         case "$current_status" in
             review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
         esac
-        # In solo mode, only reviewer works in review phase
-        if [ "$mode" = "solo" ] && [ "$agent" != "reviewer" ]; then
+        # In pair mode, only reviewer works in review phase
+        if [ "$mode" = "pair" ] && [ "$agent" != "reviewer" ]; then
             log_debug "skipping (not reviewer in review phase)"
             exit 0
         fi
         # Guard: require review file before signaling (cross-phase race protection)
         review_round="$(cat "$PEER_SYNC/round" 2>/dev/null)" || review_round="1"
-        if [ "$mode" = "solo" ]; then
+        if [ "$mode" = "pair" ]; then
             review_file="$PEER_SYNC/reviews/round-${review_round}-review.md"
         else
             # Duo: determine peer name for review file
@@ -2491,8 +2491,8 @@ case "$phase" in
         case "$current_status" in
             plan-done|plan-reviewing|plan-review-done|done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
         esac
-        # In solo mode, only coder plans
-        if [ "$mode" = "solo" ] && [ "$agent" != "coder" ]; then
+        # In pair mode, only coder plans
+        if [ "$mode" = "pair" ] && [ "$agent" != "coder" ]; then
             log_debug "skipping (not coder in plan phase)"
             exit 0
         fi
@@ -2509,13 +2509,13 @@ case "$phase" in
         case "$current_status" in
             plan-review-done|done|review-done|pr-created) log_debug "skipping (already $current_status)"; exit 0 ;;
         esac
-        # In solo mode, only reviewer reviews plans
-        if [ "$mode" = "solo" ] && [ "$agent" != "reviewer" ]; then
+        # In pair mode, only reviewer reviews plans
+        if [ "$mode" = "pair" ] && [ "$agent" != "reviewer" ]; then
             log_debug "skipping (not reviewer in plan-review phase)"
             exit 0
         fi
         # Guard: require output file before signaling (cross-phase race protection)
-        if [ "$mode" = "solo" ]; then
+        if [ "$mode" = "pair" ]; then
             plan_review_file="$PEER_SYNC/plan-review.md"
         else
             plan_review_file="$PEER_SYNC/plan-review-${agent}.md"
@@ -2586,7 +2586,7 @@ configure_codex_notify() {
                 # Insert before first section header
                 awk -v notify="$notify_line" '
                     /^\[/ && !inserted {
-                        print "# Unified notify hook for agent-duo and agent-solo"
+                        print "# Unified notify hook for agent-duo and agent-pair"
                         print notify
                         print ""
                         inserted=1
@@ -2597,14 +2597,14 @@ configure_codex_notify() {
             else
                 # No sections, safe to append
                 echo "" >> "$codex_config"
-                echo "# Unified notify hook for agent-duo and agent-solo" >> "$codex_config"
+                echo "# Unified notify hook for agent-duo and agent-pair" >> "$codex_config"
                 echo "$notify_line" >> "$codex_config"
             fi
             success "Added notify hook to Codex config"
         fi
     else
         mkdir -p "$(dirname "$codex_config")"
-        echo "# Unified notify hook for agent-duo and agent-solo" > "$codex_config"
+        echo "# Unified notify hook for agent-duo and agent-pair" > "$codex_config"
         echo "$notify_line" >> "$codex_config"
         success "Created Codex config with notify hook"
     fi
@@ -2859,7 +2859,7 @@ $pr_url"
 }
 
 #------------------------------------------------------------------------------
-# Workflow Feedback (shared between duo and solo modes)
+# Workflow Feedback (shared between duo and pair modes)
 #------------------------------------------------------------------------------
 
 workflow_feedback_dir() {
@@ -2911,7 +2911,7 @@ persist_workflow_feedback() {
     date_stamp="$(date +%F)"
 
     local agents=()
-    if [ "$mode" = "solo" ]; then
+    if [ "$mode" = "pair" ]; then
         agents=("coder" "reviewer")
     else
         agents=("claude" "codex")
@@ -2951,12 +2951,12 @@ persist_workflow_feedback() {
 }
 
 #------------------------------------------------------------------------------
-# PR Creation (shared between duo and solo modes)
+# PR Creation (shared between duo and pair modes)
 #------------------------------------------------------------------------------
 
 # Ensure docs update is complete before PR creation
 # Args: agent peer_sync feature mode
-# mode: "duo" or "solo"
+# mode: "duo" or "pair"
 lib_ensure_docs_update() {
     local agent="$1"
     local peer_sync="$2"
@@ -3126,7 +3126,7 @@ lib_commit_round() {
 # root: project root (for finding task files)
 # peer_sync: path to .peer-sync directory
 # feature: feature name
-# mode: "duo" or "solo"
+# mode: "duo" or "pair"
 # pr_title: title for the PR (optional, defaults to "Solution for $feature")
 lib_create_pr() {
     local pr_name="$1"
@@ -3235,7 +3235,7 @@ lib_create_pr() {
 }
 
 #------------------------------------------------------------------------------
-# Suggest-Refactor Phase (shared between duo and solo modes)
+# Suggest-Refactor Phase (shared between duo and pair modes)
 #------------------------------------------------------------------------------
 
 # Run suggest-refactor phase for duo mode
@@ -3308,10 +3308,10 @@ run_suggest_refactor_duo() {
     _post_suggest_refactor_comment "$peer_sync" "$feature" "duo" "claude" "codex"
 }
 
-# Run suggest-refactor phase for solo mode
+# Run suggest-refactor phase for pair mode
 # Called after session transitions to "accepted" (PR merged)
-# Usage: run_suggest_refactor_solo <peer_sync> <coder_session> <feature>
-run_suggest_refactor_solo() {
+# Usage: run_suggest_refactor_pair <peer_sync> <coder_session> <feature>
+run_suggest_refactor_pair() {
     local peer_sync="$1"
     local coder_session="$2"
     local feature="$3"
@@ -3324,7 +3324,7 @@ run_suggest_refactor_solo() {
 
     # Send skill to coder
     info "Asking coder for refactoring suggestions..."
-    send_to_agent "coder" "$coder_session" "$peer_sync" skill "solo-suggest-refactor"
+    send_to_agent "coder" "$coder_session" "$peer_sync" skill "pair-suggest-refactor"
 
     # Wait for suggest-refactor-done (5 min timeout)
     local sr_start=$SECONDS
@@ -3361,7 +3361,7 @@ run_suggest_refactor_solo() {
     [ "$file_wait" -gt 0 ] && echo ""
 
     # Collect and post suggestions
-    _post_suggest_refactor_comment "$peer_sync" "$feature" "solo" "coder"
+    _post_suggest_refactor_comment "$peer_sync" "$feature" "pair" "coder"
 }
 
 # Internal helper: collect suggest-refactor files, post as PR comment, send ntfy

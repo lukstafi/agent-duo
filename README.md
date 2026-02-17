@@ -2,7 +2,7 @@
 
 Coordinate two AI coding agents (Claude, Codex, etc.) working in parallel on the same task, producing **two alternative solutions** as separate PRs.
 
-Also includes **agent-solo**: a single-worktree mode where one agent codes and another reviews.
+Also includes **agent-pair**: a single-worktree mode where one agent codes and another reviews.
 
 ## Why?
 
@@ -13,7 +13,7 @@ When solving complex problems, different approaches have different tradeoffs. In
 - **Divergent thinking** - agents are encouraged to take different approaches
 - **Better coverage** of the solution space
 
-Or with **agent-solo**, a single agent implements while another reviews, giving you:
+Or with **agent-pair**, a single agent implements while another reviews, giving you:
 
 - **Focused implementation** by a dedicated coder agent
 - **Independent code review** by a separate reviewer agent
@@ -47,11 +47,11 @@ Each agent works in its own git worktree. They can peek at each other's uncommit
 git clone https://github.com/lukstafi/agent-duo
 cd agent-duo
 ./agent-duo setup    # For duo mode (two parallel agents)
-./agent-solo setup   # For solo mode (coder + reviewer)
+./agent-pair setup   # For pair mode (coder + reviewer)
 ```
 
 This installs:
-- `agent-duo` and/or `agent-solo` CLI to `~/.local/bin/`
+- `agent-duo` and/or `agent-pair` CLI to `~/.local/bin/`
 - `agent-claude` and `agent-codex` standalone launchers to `~/.local/bin/`
 - Skills to `~/.claude/commands/` and `~/.codex/skills/`
 - Completion hooks for automatic phase signaling
@@ -100,20 +100,20 @@ agent-duo start add-auth --no-ttyd
 tmux attach -t duo-add-auth
 ```
 
-### Solo Mode Quick Start
+### Pair Mode Quick Start
 
 ```bash
-# Solo mode: one agent codes, another reviews
-agent-solo start add-auth --auto-run
+# Pair mode: one agent codes, another reviews
+agent-pair start add-auth --auto-run
 
 # Swap roles (codex codes, claude reviews)
-agent-solo start add-auth --auto-run --coder codex --reviewer claude
+agent-pair start add-auth --auto-run --coder codex --reviewer claude
 
 # With gather phase (reviewer collects context for coder first)
-agent-solo start add-auth --auto-run --gather
+agent-pair start add-auth --auto-run --gather
 
 # Follow up on PR feedback
-agent-solo start --followup 42 --auto-run
+agent-pair start --followup 42 --auto-run
 ```
 
 ## Example Session
@@ -230,10 +230,10 @@ agent-duo confirm            # Confirm clarify phase, proceed to work
 
 ### Optional Pre-Work Phases (run once at session start)
 
-1. **Gather Phase** (solo mode only, `--gather`): Reviewer collects context
+1. **Gather Phase** (pair mode only, `--gather`): Reviewer collects context
    - Reviewer explores codebase and writes `.peer-sync/task-context.md`
    - Coder reads this context before starting work
-   - Run `agent-solo confirm` to proceed
+   - Run `agent-pair confirm` to proceed
 
 2. **Clarify Phase** (`--clarify`): Agents propose approaches
    - Write approach and questions to `.peer-sync/clarify-<agent>.md`
@@ -249,7 +249,7 @@ agent-duo confirm            # Confirm clarify phase, proceed to work
    - Write to `.peer-sync/plan-<agent>.md`
    - Signal `plan-done` when finished
    - **Duo mode**: Agents then review each other's plans (1 round)
-   - **Solo mode**: Reviewer approves or requests changes (up to 3 rounds)
+   - **Pair mode**: Reviewer approves or requests changes (up to 3 rounds)
 
 ### Main Loop (repeats until PRs created)
 
@@ -373,12 +373,12 @@ agent-duo cleanup --feature auth --full
 
 Commands auto-detect which session to operate on based on your current directory. Use `--feature <name>` to explicitly target a specific session.
 
-## Agent Solo Mode
+## Agent Pair Mode
 
-Agent-solo is a simpler alternative where one agent codes and another reviews:
+Agent-pair is a simpler alternative where one agent codes and another reviews:
 
 ```bash
-agent-solo start <feature> --auto-run
+agent-pair start <feature> --auto-run
 ```
 
 **Workflow:**
@@ -391,11 +391,11 @@ agent-solo start <feature> --auto-run
 - Sequential rather than parallel work
 - Clear coder/reviewer roles (swappable with `--coder` and `--reviewer`)
 
-See `agent-solo help` for full command reference.
+See `agent-pair help` for full command reference.
 
 ## Standalone Agent Launchers
 
-`agent-claude` and `agent-codex` provide managed tmux sessions for running a single agent without the full duo/solo orchestration. Useful for ad-hoc tasks, exploration, or when you only need one agent.
+`agent-claude` and `agent-codex` provide managed tmux sessions for running a single agent without the full duo/pair orchestration. Useful for ad-hoc tasks, exploration, or when you only need one agent.
 
 ```bash
 # Launch Codex with a web terminal

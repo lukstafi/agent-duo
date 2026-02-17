@@ -1,11 +1,11 @@
 ---
-name: solo-coder-plan
-description: Solo mode coder plan phase - write implementation plan before work
+name: pair-coder-plan
+description: Pair mode coder plan phase - write implementation plan before work
 metadata:
-  short-description: Write implementation plan (solo coder)
+  short-description: Write implementation plan (pair coder)
 ---
 
-# Agent Solo - Plan Phase (Coder)
+# Agent Pair - Plan Phase (Coder)
 
 **PHASE: PLAN** - Before starting implementation, write a detailed implementation plan.
 
@@ -95,7 +95,7 @@ If you're revising based on feedback, address each point raised in the previous 
 ### 5. Signal Completion
 
 ```bash
-agent-solo signal coder plan-done "implementation plan submitted"
+agent-pair signal coder plan-done "implementation plan submitted"
 ```
 
 Then **STOP and wait**. The reviewer will examine your plan before you start implementation.
@@ -105,7 +105,7 @@ Then **STOP and wait**. The reviewer will examine your plan before you start imp
 If you discover ambiguity or need user input while planning:
 
 ```bash
-agent-solo signal coder needs-clarify "question: what should happen when X?"
+agent-pair signal coder needs-clarify "question: what should happen when X?"
 ```
 
 The orchestrator will pause and notify the user. After they respond, continue planning and signal `plan-done` when ready.

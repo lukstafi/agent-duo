@@ -1,15 +1,15 @@
 ---
-name: solo-reviewer-clarify
-description: Solo mode - reviewer clarify phase for reviewing coder's proposed approach
+name: pair-reviewer-clarify
+description: Pair mode - reviewer clarify phase for reviewing coder's proposed approach
 metadata:
   short-description: Review coder's approach and add comments
 ---
 
-# Agent Solo - Reviewer Clarify Phase
+# Agent Pair - Reviewer Clarify Phase
 
 **PHASE: CLARIFY** - Review the coder's proposed approach and add your own questions or comments.
 
-You are the **REVIEWER** in a solo workflow.
+You are the **REVIEWER** in a pair workflow.
 
 ## Your Environment
 
@@ -60,7 +60,7 @@ Edit the file to fill in actual content (don't leave placeholders).
 ### 4. Signal Completion
 
 ```bash
-agent-solo signal reviewer clarify-done "comments submitted"
+agent-pair signal reviewer clarify-done "comments submitted"
 ```
 
 Then **STOP and wait**. The user will review both the coder's approach and your comments, then respond.

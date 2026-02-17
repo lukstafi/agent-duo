@@ -1,11 +1,11 @@
 ---
-name: solo-suggest-refactor
-description: Agent-solo suggest-refactor phase - reflect on what you'd do differently
+name: pair-suggest-refactor
+description: Agent-pair suggest-refactor phase - reflect on what you'd do differently
 metadata:
   short-description: Write refactoring suggestions after PR merge
 ---
 
-# Agent Solo - Suggest Refactor Phase
+# Agent Pair - Suggest Refactor Phase
 
 The PR has been merged. Now take a step back and reflect on the work you did.
 
@@ -46,7 +46,7 @@ Make sure to replace `[Your suggestions here]` with your actual reflections. Be 
 ### 3. Signal Completion
 
 ```bash
-agent-solo signal coder suggest-refactor-done "wrote refactoring suggestions"
+agent-pair signal coder suggest-refactor-done "wrote refactoring suggestions"
 ```
 
 ## Important Guidelines

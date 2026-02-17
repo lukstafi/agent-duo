@@ -1,11 +1,11 @@
 ---
-name: solo-reviewer-plan
-description: Solo mode reviewer plan-review phase - review coder plan
+name: pair-reviewer-plan
+description: Pair mode reviewer plan-review phase - review coder plan
 metadata:
-  short-description: Review coder plan with verdict (solo reviewer)
+  short-description: Review coder plan with verdict (pair reviewer)
 ---
 
-# Agent Solo - Plan-Review Phase (Reviewer)
+# Agent Pair - Plan-Review Phase (Reviewer)
 
 **PHASE: PLAN-REVIEW** - Review the coder's plan before implementation begins.
 
@@ -73,9 +73,9 @@ Edit the file to fill in actual content (don't leave placeholders). Include a cl
 Include the verdict in your signal message:
 
 ```bash
-agent-solo signal reviewer plan-review-done "verdict: APPROVE"
+agent-pair signal reviewer plan-review-done "verdict: APPROVE"
 # or
-agent-solo signal reviewer plan-review-done "verdict: REQUEST_CHANGES"
+agent-pair signal reviewer plan-review-done "verdict: REQUEST_CHANGES"
 ```
 
 Then **STOP and wait**.
@@ -88,7 +88,7 @@ Then **STOP and wait**.
 If you discover ambiguity or need user input while reviewing:
 
 ```bash
-agent-solo signal reviewer needs-clarify "question: what should happen when X?"
+agent-pair signal reviewer needs-clarify "question: what should happen when X?"
 ```
 
 The orchestrator will pause and notify the user. After they respond, continue reviewing and signal `plan-review-done` when ready.

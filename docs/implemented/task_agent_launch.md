@@ -2,11 +2,11 @@
 
 ## Summary
 
-Add two new top-level commands `agent-claude` and `agent-codex` that launch managed tmux sessions for individual agent use, without orchestration. These are independent entry points alongside the existing `agent-duo` and `agent-solo` commands.
+Add two new top-level commands `agent-claude` and `agent-codex` that launch managed tmux sessions for individual agent use, without orchestration. These are independent entry points alongside the existing `agent-duo` and `agent-pair` commands.
 
 ## Motivation
 
-Users often want a persistent, managed Claude Code or Codex session without the full duo/solo orchestration (phases, reviews, PRs). Currently the only options are raw `claude`/`codex` in a terminal or the VS Code extension. These commands provide tmux persistence, optional web terminal access, optional VS Code IDE integration, and session tracking via `.agent-sessions/` — reusing agent-duo's existing infrastructure.
+Users often want a persistent, managed Claude Code or Codex session without the full duo/pair orchestration (phases, reviews, PRs). Currently the only options are raw `claude`/`codex` in a terminal or the VS Code extension. These commands provide tmux persistence, optional web terminal access, optional VS Code IDE integration, and session tracking via `.agent-sessions/` — reusing agent-duo's existing infrastructure.
 
 ## CLI Interface
 
@@ -84,19 +84,19 @@ When absent:
 
 ### `.agent-sessions/` Registry
 
-Namespace session files by entry point prefix to avoid conflicts with agent-duo/agent-solo:
+Namespace session files by entry point prefix to avoid conflicts with agent-duo/agent-pair:
 
 ```
 .agent-sessions/
 ├── duo-auth.session              # existing agent-duo sessions
-├── solo-payments.session         # existing agent-solo sessions
+├── pair-payments.session         # existing agent-pair sessions
 ├── claude-refactor.session       # new: agent-claude sessions
 ├── codex-bugfix.session          # new: agent-codex sessions
 ```
 
-Each command's cleanup only touches its own prefix (`claude-*`, `codex-*`, `duo-*`, `solo-*`).
+Each command's cleanup only touches its own prefix (`claude-*`, `codex-*`, `duo-*`, `pair-*`).
 
-**Concurrency audit required**: review existing `.agent-sessions/` read/write code in agent-duo and agent-solo to ensure concurrent writes from different entry points don't race. Use the existing mkdir-based locking if needed.
+**Concurrency audit required**: review existing `.agent-sessions/` read/write code in agent-duo and agent-pair to ensure concurrent writes from different entry points don't race. Use the existing mkdir-based locking if needed.
 
 ### Session State File Format
 
@@ -136,7 +136,7 @@ Factor out or directly call existing functions from agent-duo for:
 
 ### Unified Status View
 
-`agent-duo status` (from a project root) should optionally show all session types — duo, solo, claude, codex — by reading all `*.session` files regardless of prefix. Each entry point's own `status` command shows only its sessions.
+`agent-duo status` (from a project root) should optionally show all session types — duo, pair, claude, codex — by reading all `*.session` files regardless of prefix. Each entry point's own `status` command shows only its sessions.
 
 ## Out of Scope
 

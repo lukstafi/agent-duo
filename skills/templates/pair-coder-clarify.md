@@ -1,15 +1,15 @@
 ---
-name: solo-coder-clarify
-description: Solo mode - coder clarify phase for proposing approach
+name: pair-coder-clarify
+description: Pair mode - coder clarify phase for proposing approach
 metadata:
   short-description: Propose approach before starting work
 ---
 
-# Agent Solo - Coder Clarify Phase
+# Agent Pair - Coder Clarify Phase
 
 **PHASE: CLARIFY** - Before starting implementation, propose your high-level approach and ask clarifying questions.
 
-You are the **CODER** in a solo workflow. A reviewer will review your code.
+You are the **CODER** in a pair workflow. A reviewer will review your code.
 
 ## Your Environment
 
@@ -58,7 +58,7 @@ Edit the file to fill in actual content (don't leave placeholders).
 ### 3. Signal Completion
 
 ```bash
-agent-solo signal coder clarify-done "approach and questions submitted"
+agent-pair signal coder clarify-done "approach and questions submitted"
 ```
 
 Then **STOP and wait**. The reviewer will also provide comments, then the user will review both and respond.

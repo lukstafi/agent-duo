@@ -1,15 +1,15 @@
 ---
-name: solo-update-docs
-description: Agent-solo update-docs phase instructions for capturing learnings
+name: pair-update-docs
+description: Agent-pair update-docs phase instructions for capturing learnings
 metadata:
   short-description: Capture project and workflow learnings before PR
 ---
 
-# Agent Solo - Update Docs Phase
+# Agent Pair - Update Docs Phase
 
 **PHASE CHANGE: You are now in the UPDATE-DOCS phase, not work or review.**
 
-Stop implementation work. Your task is to capture what you learned for future agents and the agent-solo workflow.
+Stop implementation work. Your task is to capture what you learned for future agents and the agent-pair workflow.
 
 ## 1) Project learnings (AGENTS_STAGING.md)
 
@@ -47,7 +47,7 @@ ENTRY_EOF
 
 Edit the new entry to replace the placeholder text with your actual learnings.
 
-## 2) Workflow feedback (agent-solo)
+## 2) Workflow feedback (agent-pair)
 
 Write workflow feedback to the sync directory so it can be collected later:
 
@@ -58,7 +58,7 @@ FEEDBACK_FILE="$PEER_SYNC/workflow-feedback-${MY_NAME}.md"
 cat > "$FEEDBACK_FILE" << FEEDBACK_EOF
 # Workflow feedback (${MY_NAME}) - ${FEATURE} - ${DATE}
 
-- [Actionable feedback about agent-solo workflow/skills/tooling]
+- [Actionable feedback about agent-pair workflow/skills/tooling]
 - [Another specific, actionable point]
 FEEDBACK_EOF
 ```
@@ -68,7 +68,7 @@ Keep feedback actionable (avoid generic complaints). Include missing commands, u
 ## 3) Signal completion
 
 ```bash
-agent-solo signal "$MY_NAME" docs-update-done "learnings captured"
+agent-pair signal "$MY_NAME" docs-update-done "learnings captured"
 ```
 
 The orchestrator will handle PR creation after docs are updated.
