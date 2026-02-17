@@ -1812,11 +1812,8 @@ cmd_run() {
         echo "gather" > "$peer_sync/phase"
 
         # Read task content
-        local task_file
         local task_content=""
-        if task_file="$(find_task_file "$root" "$feature")"; then
-            task_content="$(cat "$task_file" | head -c 4000)"
-        fi
+        task_content="$(read_task_content "$root" "$feature")" || true
 
         # Reviewer gathers context
         atomic_write "$peer_sync/coder.status" "waiting|$(date +%s)|waiting for reviewer to gather context"
@@ -1889,11 +1886,8 @@ cmd_run() {
         echo "clarify" > "$peer_sync/phase"
 
         # Read task content
-        local task_file
         local task_content=""
-        if task_file="$(find_task_file "$root" "$feature")"; then
-            task_content="$(cat "$task_file" | head -c 4000)"
-        fi
+        task_content="$(read_task_content "$root" "$feature")" || true
 
         # Step 1: Coder proposes approach
         atomic_write "$peer_sync/coder.status" "clarifying|$(date +%s)|clarify phase"
@@ -2029,12 +2023,9 @@ cmd_run() {
         info "=== Pushback Stage ==="
         echo "pushback" > "$peer_sync/phase"
 
-        # Find task file
-        local task_file
+        # Read task content
         local task_content=""
-        if task_file="$(find_task_file "$root" "$feature")"; then
-            task_content="$(cat "$task_file" | head -c 4000)"
-        fi
+        task_content="$(read_task_content "$root" "$feature")" || true
         local task_basename="${feature}.md"
 
         # Only reviewer pushes back in solo mode
@@ -2356,11 +2347,8 @@ cmd_run() {
 
         if [ "$round" -eq 1 ]; then
             # Round 1: Send full context message
-            local task_file
             local task_content=""
-            if task_file="$(find_task_file "$root" "$feature")"; then
-                task_content="$(cat "$task_file" | head -c 4000)"
-            fi
+            task_content="$(read_task_content "$root" "$feature")" || true
 
             info "Sending task to coder..."
             local coder_msg

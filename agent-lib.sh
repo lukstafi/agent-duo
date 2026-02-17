@@ -360,6 +360,30 @@ find_task_file() {
     return 1
 }
 
+# Read task file content for a feature, suitable for pasting into an agent prompt.
+# If the file is small enough, outputs the content directly.
+# If the file exceeds the threshold, outputs a instruction to read the file instead.
+# Usage: task_content="$(read_task_content "$project_root" "$feature")"
+MAX_TASK_INLINE_SIZE="${MAX_TASK_INLINE_SIZE:-3000}"
+
+read_task_content() {
+    local project_root="$1"
+    local feature="$2"
+
+    local task_file
+    if ! task_file="$(find_task_file "$project_root" "$feature")"; then
+        return 1
+    fi
+
+    local size
+    size="$(wc -c < "$task_file")"
+    if [ "$size" -le "$MAX_TASK_INLINE_SIZE" ]; then
+        cat "$task_file"
+    else
+        echo "The task description is in file: $task_file — read it with cat before starting work."
+    fi
+}
+
 # Generate a task file from a PR's metadata and comments
 # Usage: feature_name=$(generate_followup_task "$project_root" "$pr_number")
 generate_followup_task() {

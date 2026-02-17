@@ -398,9 +398,6 @@ See `agent-solo help` for full command reference.
 `agent-claude` and `agent-codex` provide managed tmux sessions for running a single agent without the full duo/solo orchestration. Useful for ad-hoc tasks, exploration, or when you only need one agent.
 
 ```bash
-# Launch Claude in VS Code IDE mode on a task
-agent-claude my-task --ide
-
 # Launch Codex with a web terminal
 agent-codex my-task --ttyd
 
@@ -408,8 +405,10 @@ agent-codex my-task --ttyd
 agent-claude my-task --bare
 
 # Create a git worktree on a new branch for the task
-agent-claude my-task --ide --branch
+agent-claude my-task --ttyd --branch
 ```
+
+If a file `<task>.md` exists (searched in `.`, `doc/`, `docs/`, or recursively), its contents are sent as the initial prompt to the agent.
 
 ### Launcher Management
 

@@ -11,7 +11,6 @@
 #        agent-codex  <command> [options] [-- extra-agent-args...]
 #
 # Commands:
-#   <task> --ide [--branch]    Launch with VS Code IDE integration
 #   <task> --ttyd [--branch]   Launch with web terminal (ttyd)
 #   <task> --bare [--branch]   Launch with tmux only
 #   status                     List active sessions
@@ -183,7 +182,6 @@ cmd_help() {
     echo "Usage: $INVOKED_AS <command> [options] [-- extra-agent-args...]"
     echo ""
     echo "Launch Commands:"
-    echo "  <task> --ide [--branch]    Launch $AGENT_TYPE with VS Code IDE integration"
     echo "  <task> --ttyd [--branch]   Launch $AGENT_TYPE with web terminal (ttyd)"
     echo "  <task> --bare [--branch]   Launch $AGENT_TYPE in tmux only"
     echo ""
@@ -199,9 +197,11 @@ cmd_help() {
     echo "  --branch    Create a git worktree on a new branch named <task>"
     echo "  --          Arguments after this are passed to the agent CLI"
     echo ""
+    echo "If a file <task>.md exists, its contents are sent as the initial prompt."
+    echo ""
     echo "Examples:"
     echo "  $INVOKED_AS my-task --bare -- --chrome"
-    echo "  $INVOKED_AS my-task --ide --branch -- --verbose"
+    echo "  $INVOKED_AS my-task --ttyd --branch -- --verbose"
     echo ""
     echo "Session naming: ${SESSION_PREFIX}-<project>-<task>"
 }
@@ -221,7 +221,6 @@ cmd_start() {
     while [ $# -gt 0 ]; do
         case "$1" in
             --)       shift; extra_args=("$@"); break ;;
-            --ide)    mode="ide"; mode_count=$((mode_count + 1)); shift ;;
             --ttyd)   mode="ttyd"; mode_count=$((mode_count + 1)); shift ;;
             --bare)   mode="bare"; mode_count=$((mode_count + 1)); shift ;;
             --branch) use_branch=true; shift ;;
@@ -235,9 +234,9 @@ cmd_start() {
     done
 
     # Validate arguments
-    [ -z "$task" ] && die "Task name required. Usage: $INVOKED_AS <task> --ide|--ttyd|--bare [--branch]"
-    [ -z "$mode" ] && die "Access mode required: --ide, --ttyd, or --bare"
-    [ "$mode_count" -gt 1 ] && die "Only one access mode allowed. Choose one of: --ide, --ttyd, --bare"
+    [ -z "$task" ] && die "Task name required. Usage: $INVOKED_AS <task> --ttyd|--bare [--branch]"
+    [ -z "$mode" ] && die "Access mode required: --ttyd or --bare"
+    [ "$mode_count" -gt 1 ] && die "Only one access mode allowed. Choose one of: --ttyd, --bare"
 
     # Require git repo
     local main_root
@@ -296,18 +295,20 @@ cmd_start() {
     # Launch agent TUI (extra_args passed through -- to the agent CLI)
     restart_agent_tui "$AGENT_TYPE" "$tmux_name" "" "" "${extra_args[@]}"
 
+    # Send task file content if found
+    local task_content
+    if task_content="$(read_task_content "$main_root" "$task")"; then
+        info "Sending task to $AGENT_TYPE..."
+        wait_for_tui "$tmux_name" "$AGENT_TYPE" 30
+        tmux send-keys -t "$tmux_name" "$task_content"
+        sleep 0.5
+        tmux send-keys -t "$tmux_name" C-m
+    fi
+
     # Mode-specific setup
     local ttyd_port="" ttyd_pid=""
 
     case "$mode" in
-        ide)
-            info "Waiting for $AGENT_TYPE TUI to be ready..."
-            wait_for_tui "$tmux_name" "$AGENT_TYPE" 30
-            info "Sending /ide command..."
-            tmux send-keys -t "$tmux_name" -l "/ide"
-            tmux send-keys -t "$tmux_name" Enter
-            sleep 1
-            ;;
         ttyd)
             ttyd_port="$(find_available_port "$DEFAULT_BASE_PORT")" || \
                 die "Could not find available port for ttyd"
@@ -360,7 +361,7 @@ started=$(date +%Y-%m-%dT%H:%M:%S%z)"
 
     # Final action
     case "$mode" in
-        ide|bare)
+        bare)
             printf '\033]0;%s\007' "${AGENT_TYPE}: ${task}"
             exec tmux attach -t "$tmux_name"
             ;;
@@ -524,7 +525,7 @@ cmd_restart() {
 
     local session_file
     session_file="$(session_file_path "$task")"
-    [ -f "$session_file" ] || die "No session found for '$task'. Use '$INVOKED_AS $task --ide|--ttyd|--bare' to start."
+    [ -f "$session_file" ] || die "No session found for '$task'. Use '$INVOKED_AS $task --ttyd|--bare' to start."
 
     local tmux_name mode workdir ttyd_port ttyd_pid saved_extra_args
     tmux_name="$(read_session_field "$session_file" tmux)"
@@ -546,18 +547,6 @@ cmd_restart() {
 
     # Mode-specific recovery
     case "$mode" in
-        ide)
-            if ! agent_tui_is_running "$tmux_name" "$AGENT_TYPE"; then
-                restart_agent_tui "$AGENT_TYPE" "$tmux_name" "" "" "${restart_extra[@]}"
-            fi
-            wait_for_tui "$tmux_name" "$AGENT_TYPE" 30
-            info "Sending /ide command..."
-            tmux send-keys -t "$tmux_name" -l "/ide"
-            tmux send-keys -t "$tmux_name" Enter
-            sleep 1
-            printf '\033]0;%s\007' "${AGENT_TYPE}: ${task}"
-            exec tmux attach -t "$tmux_name"
-            ;;
         ttyd)
             if ! agent_tui_is_running "$tmux_name" "$AGENT_TYPE"; then
                 restart_agent_tui "$AGENT_TYPE" "$tmux_name" "" "" "${restart_extra[@]}"
@@ -651,8 +640,8 @@ main() {
         restart)     cmd_restart "$@" ;;
         attach)      cmd_attach "$@" ;;
         help|--help|-h) cmd_help ;;
-        --ide|--ttyd|--bare|--branch)
-            die "Task name must come before flags. Usage: $INVOKED_AS <task> --ide|--ttyd|--bare [--branch]"
+        --ttyd|--bare|--branch)
+            die "Task name must come before flags. Usage: $INVOKED_AS <task> --ttyd|--bare [--branch]"
             ;;
         -*)          die "Unknown option: $cmd (try '$INVOKED_AS help')" ;;
         *)

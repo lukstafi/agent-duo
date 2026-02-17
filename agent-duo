@@ -3877,11 +3877,8 @@ cmd_run() {
         echo "clarify" > "$peer_sync/phase"
 
         # Read task content
-        local task_file
         local task_content=""
-        if task_file="$(find_task_file "$root" "$feature")"; then
-            task_content="$(cat "$task_file" | head -c 4000)"
-        fi
+        task_content="$(read_task_content "$root" "$feature")" || true
 
         # Send clarify message to both agents
         atomic_write "$peer_sync/claude.status" "clarifying|$(date +%s)|clarify phase"
@@ -3991,12 +3988,9 @@ cmd_run() {
         info "=== Pushback Stage ==="
         echo "pushback" > "$peer_sync/phase"
 
-        # Find task file
-        local task_file
+        # Read task content
         local task_content=""
-        if task_file="$(find_task_file "$root" "$feature")"; then
-            task_content="$(cat "$task_file" | head -c 4000)"
-        fi
+        task_content="$(read_task_content "$root" "$feature")" || true
         local task_basename="${feature}.md"
 
         # Send pushback message to both agents
@@ -4379,11 +4373,8 @@ cmd_run() {
             # Round 2+: Trigger duo-work skill (agent already has context)
             if [ "$round" -eq 1 ]; then
                 # Round 1: Send augmented task with full context
-                local task_file
                 local task_content=""
-                if task_file="$(find_task_file "$root" "$feature")"; then
-                    task_content="$(cat "$task_file" | head -c 4000)"
-                fi
+                task_content="$(read_task_content "$root" "$feature")" || true
 
                 if ! $claude_converged && ! has_pr "claude" "$peer_sync"; then
                     atomic_write "$peer_sync/claude.status" "working|$(date +%s)|round $round work phase"
