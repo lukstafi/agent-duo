@@ -4,6 +4,8 @@ All notable changes to agent-duo will be documented in this file.
 
 ## [Unreleased]
 
+## [v0.6] - 2026-02-19
+
 ### Added
 - **`--claude` / `--codex` shorthand flags** for `agent-pair start`: `--claude` sets coder=claude/reviewer=codex, `--codex` sets the reverse
 - **Task file auto-send** in `agent-claude`/`agent-codex`: launchers find `<task>.md` and send its contents as the initial prompt (large files >3KB send a path reference instead)
