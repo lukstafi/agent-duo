@@ -385,10 +385,11 @@ read_task_content() {
 }
 
 # Generate a task file from a PR's metadata and comments
-# Usage: feature_name=$(generate_followup_task "$project_root" "$pr_number")
+# Usage: feature_name=$(generate_followup_task "$project_root" "$pr_number" ["$followup_msg"])
 generate_followup_task() {
     local project_root="$1"
     local pr_number="$2"
+    local followup_msg="${3:-}"
 
     # Fetch PR metadata via gh
     local pr_json
@@ -409,6 +410,9 @@ generate_followup_task() {
     # Build task file content
     local task_file="$project_root/${feature}.md"
     {
+        if [ -n "$followup_msg" ]; then
+            printf '%s\n\n' "$followup_msg"
+        fi
         echo "# Follow-up: ${pr_title}"
         echo ""
         echo "This is a follow-up task based on feedback from PR #${pr_number}."

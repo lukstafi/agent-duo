@@ -243,6 +243,74 @@ else
 fi
 
 #------------------------------------------------------------------------------
+# Test: Follow-up task generation
+#------------------------------------------------------------------------------
+
+echo ""
+echo "--- Follow-up Task Generation ---"
+
+MOCK_BIN_DIR="$TEST_DIR/mock-bin"
+mkdir -p "$MOCK_BIN_DIR"
+cat > "$MOCK_BIN_DIR/gh" << 'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "42" ]; then
+    cat << 'JSON'
+{
+  "title": "Improve auth flow",
+  "body": "Original PR description.",
+  "url": "https://github.com/example/repo/pull/42",
+  "headRefName": "auth-codex",
+  "comments": [
+    {
+      "author": {"login": "reviewer1"},
+      "createdAt": "2026-02-20T10:00:00Z",
+      "body": "Please fix login validation."
+    }
+  ],
+  "reviews": [
+    {
+      "author": {"login": "reviewer2"},
+      "state": "CHANGES_REQUESTED",
+      "createdAt": "2026-02-20T11:00:00Z",
+      "body": "Add tests for the new behavior."
+    }
+  ]
+}
+JSON
+else
+    echo "unexpected gh invocation: $*" >&2
+    exit 1
+fi
+EOF
+chmod +x "$MOCK_BIN_DIR/gh"
+
+ORIG_PATH="$PATH"
+export PATH="$MOCK_BIN_DIR:$PATH"
+
+test_start "generate_followup_task creates task file from PR data"
+if FOLLOWUP_FEATURE="$(generate_followup_task "$MOCK_PROJECT" "42")" && \
+   assert_eq "$FOLLOWUP_FEATURE" "auth-followup" && \
+   assert_file_exists "$MOCK_PROJECT/auth-followup.md" && \
+   grep -Fq "# Follow-up: Improve auth flow" "$MOCK_PROJECT/auth-followup.md" && \
+   grep -Fq "Please fix login validation." "$MOCK_PROJECT/auth-followup.md" && \
+   grep -Fq "Add tests for the new behavior." "$MOCK_PROJECT/auth-followup.md"; then
+    test_pass
+else
+    test_fail "generated follow-up task content mismatch"
+fi
+
+test_start "generate_followup_task prepends followup message as first line"
+if FOLLOWUP_FEATURE="$(generate_followup_task "$MOCK_PROJECT" "42" "PRIORITY: fix blocker comments first")" && \
+   FIRST_LINE="$(head -n 1 "$MOCK_PROJECT/${FOLLOWUP_FEATURE}.md")" && \
+   assert_eq "$FIRST_LINE" "PRIORITY: fix blocker comments first"; then
+    test_pass
+else
+    test_fail "follow-up message was not prepended"
+fi
+
+export PATH="$ORIG_PATH"
+
+#------------------------------------------------------------------------------
 # Test: Project root discovery
 #------------------------------------------------------------------------------
 

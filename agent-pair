@@ -203,6 +203,7 @@ cmd_start() {
     local claude_model=""
     local base_port=""
     local followup_pr=""
+    local followup_msg=""
     local early_pr=false
     local docs_update_mode=true
 
@@ -235,6 +236,7 @@ cmd_start() {
             --reviewer) reviewer="$2"; shift 2 ;;
             --port) base_port="$2"; shift 2 ;;
             --followup) followup_pr="$2"; shift 2 ;;
+            --followup-msg) followup_msg="$2"; shift 2 ;;
             -*) die "Unknown option: $1" ;;
             *) features+=("$1"); shift ;;
         esac
@@ -244,18 +246,22 @@ cmd_start() {
     [ -n "$codex_model" ] && export AGENT_DUO_CODEX_MODEL="$codex_model"
     [ -n "$claude_model" ] && export AGENT_DUO_CLAUDE_MODEL="$claude_model"
 
+    if [ -n "$followup_msg" ] && [ -z "$followup_pr" ]; then
+        die "--followup-msg requires --followup <PR-number>"
+    fi
+
     # Generate task from PR if --followup was specified
     if [ -n "$followup_pr" ]; then
         git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not a git repository"
         local main_root
         main_root="$(get_main_project_root)"
         local followup_feature
-        followup_feature="$(generate_followup_task "$main_root" "$followup_pr")"
+        followup_feature="$(generate_followup_task "$main_root" "$followup_pr" "$followup_msg")"
         info "Generated follow-up task: ${followup_feature}.md"
         features+=("$followup_feature")
     fi
 
-    [ ${#features[@]} -eq 0 ] && die "Usage: agent-pair start <feature> [feature2 ...] [--followup <PR-number>] [--no-ttyd] [--auto-run] [--clarify] [--pushback] [--plan] [--claude|--codex|--coder <agent> --reviewer <agent>]"
+    [ ${#features[@]} -eq 0 ] && die "Usage: agent-pair start <feature> [feature2 ...] [--followup <PR-number>] [--followup-msg <message>] [--no-ttyd] [--auto-run] [--clarify] [--pushback] [--plan] [--claude|--codex|--coder <agent> --reviewer <agent>]"
 
     # Validate coder/reviewer selection
     if [ -z "$coder" ] || [ -z "$reviewer" ]; then
@@ -3094,6 +3100,8 @@ SESSION COMMANDS
           --port <port>          Base port for web terminals (uses 3 consecutive ports)
                                  If not specified, finds first available consecutive ports.
                                  Fails if any of the 3 ports are occupied.
+          --followup <PR#>       Generate task from PR comments/reviews
+          --followup-msg <msg>   Prepend a custom line to generated follow-up task
 
     run [options]
         Run the orchestrator loop (coder work -> reviewer review -> repeat).
@@ -3215,6 +3223,9 @@ EXAMPLES
 
     # With all optional phases (gather -> clarify -> pushback -> work)
     agent-pair start auth --auto-run --gather --clarify --pushback
+
+    # Follow up on PR feedback with a custom prepended note
+    agent-pair start --followup 42 --followup-msg "Address blocker comments first" --auto-run
 
     # Swap agent roles (codex codes, claude reviews)
     agent-pair start auth --coder codex --reviewer claude

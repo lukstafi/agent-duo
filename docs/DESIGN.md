@@ -52,6 +52,7 @@ agent-duo start <f> --pushback  # Start with pushback phase (task improvement)
 agent-duo start <f> --plan      # Start with plan phase (implementation planning)
 agent-duo start <f> --auto-run  # Start and run orchestrator immediately
 agent-duo start --followup <PR#> # Generate task from PR comments and start session
+agent-duo start --followup <PR#> --followup-msg "<message>" # Add a prepended line in generated follow-up task
 agent-duo start <f> --auto-finish # Auto-merge last remaining PR
 agent-duo run [options]         # Run orchestrator loop (from orchestrator worktree)
 agent-duo stop                  # Stop ttyd servers, keep worktrees

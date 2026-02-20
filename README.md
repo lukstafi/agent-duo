@@ -88,6 +88,9 @@ agent-duo start add-auth --auto-run --pushback   # Agents suggest task improveme
 # Follow up on PR feedback (generates task from PR comments):
 agent-duo start --followup 42 --auto-run
 
+# Add a custom first line to the generated follow-up task:
+agent-duo start --followup 42 --followup-msg "Address blocker comments first" --auto-run
+
 # Fully unattended (auto-merge after 30 min inactivity):
 agent-duo start add-auth --auto-run --auto-finish
 
@@ -114,6 +117,9 @@ agent-pair start add-auth --auto-run --gather
 
 # Follow up on PR feedback
 agent-pair start --followup 42 --auto-run
+
+# Add a custom first line to the generated follow-up task
+agent-pair start --followup 42 --followup-msg "Address blocker comments first" --auto-run
 ```
 
 ## Example Session
@@ -172,6 +178,7 @@ agent-duo start <feature>              # Start with ttyd web terminals (auto-all
 agent-duo start <feature> --port 8000  # Use fixed ports 8000, 8001, 8002 (fails if occupied)
 agent-duo start <feature> --auto-run   # Start and run orchestrator immediately
 agent-duo start --followup <PR#>       # Generate task from PR comments and start session
+agent-duo start --followup <PR#> --followup-msg "<message>"  # Prepend message line to generated follow-up task
 agent-duo start <feature> --clarify    # Enable clarify stage (agents propose approaches)
 agent-duo start <feature> --pushback   # Enable pushback stage (agents improve task)
 agent-duo start <feature> --plan       # Enable plan/review stage (agents write plans)
