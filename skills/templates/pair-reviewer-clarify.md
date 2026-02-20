@@ -1,73 +1,46 @@
 ---
 name: pair-reviewer-clarify
-description: Pair mode - reviewer clarify phase for reviewing coder's proposed approach
+description: Pair mode reviewer clarify phase for commenting on coder approach
 metadata:
   short-description: Review coder's approach and add comments
 ---
 
 # Agent Pair - Reviewer Clarify Phase
 
-**PHASE: CLARIFY** - Review the coder's proposed approach and add your own questions or comments.
+**PHASE: CLARIFY**
 
-You are the **REVIEWER** in a pair workflow.
+## Purpose
 
-## Your Environment
+Stress-test the coder's initial direction before implementation.
 
-- **Worktree**: Current directory
-- **Sync directory**: `$PEER_SYNC`
-- **Feature**: `$FEATURE`
+## Output
 
-## Your Task
+Write: `$PEER_SYNC/clarify-reviewer.md`
 
-The coder has proposed an approach. Review it and add your comments.
+Minimum sections:
+- Risks or concerns
+- Additional questions (if any)
 
 ## Steps
 
-### 1. Read the Task
+1. Read task and coder clarify note:
 
 ```bash
 cat "$FEATURE.md"
-```
-
-### 2. Read the Coder's Proposed Approach
-
-```bash
 cat "$PEER_SYNC/clarify-coder.md"
 ```
 
-### 3. Write Your Comments
+2. Optional delegation (if your agent supports sub-agents):
 
-Create your clarify file with comments on the approach and any additional questions:
+Use this activity brief:
 
-```bash
-cat > "$PEER_SYNC/clarify-reviewer.md" << 'EOF'
-# Reviewer's Comments
+- Critique coder approach for feasibility and risk
+- Suggest the most important clarifications to request
 
-## Comments on Coder's Approach
-
-[What do you think of the proposed approach? Any concerns, risks, or suggestions?]
-
-## Additional Questions for the User
-
-1. [Any additional questions not covered by the coder?]
-2. [Questions about edge cases or requirements?]
-
-EOF
-```
-
-Edit the file to fill in actual content (don't leave placeholders).
-
-### 4. Signal Completion
+3. Write reviewer clarify file and signal completion:
 
 ```bash
 agent-pair signal reviewer clarify-done "comments submitted"
 ```
 
-Then **STOP and wait**. The user will review both the coder's approach and your comments, then respond.
-
-## Guidelines
-
-- **Be constructive**: Offer helpful feedback on the approach
-- **Identify risks**: Point out potential issues early
-- **Ask relevant questions**: Help clarify requirements before implementation starts
-- **Don't be prescriptive**: The coder will make implementation decisions
+Then stop and wait.

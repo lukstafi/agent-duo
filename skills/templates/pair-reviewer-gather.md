@@ -1,90 +1,49 @@
 ---
 name: pair-reviewer-gather
-description: Pair mode - reviewer gather phase for collecting task context
+description: Pair mode reviewer gather phase for collecting implementation context
 metadata:
   short-description: Gather codebase context for the coder
 ---
 
 # Agent Pair - Reviewer Gather Phase
 
-**PHASE: GATHER** - Collect relevant context from the codebase to help the coder.
+**PHASE: GATHER**
 
-You are the **REVIEWER** in a pair workflow.
+## Purpose
 
-## Your Environment
+Provide the coder with high-signal context before implementation starts.
 
-- **Worktree**: Current directory
-- **Sync directory**: `$PEER_SYNC`
-- **Feature**: `$FEATURE`
+## Output
 
-## Your Task
+Write: `$PEER_SYNC/task-context.md`
 
-Before the coder starts implementing, you will gather relevant context from the codebase to help them understand what files and code sections are relevant to this task.
+Minimum sections:
+- Relevant files (with line references when useful)
+- Related tests/docs
+- Gotchas/dependencies
 
 ## Steps
 
-### 1. Read the Task
+1. Read task:
 
 ```bash
 cat "$FEATURE.md"
 ```
 
-### 2. Explore the Codebase
+2. Explore codebase for likely touchpoints.
 
-Search for relevant files and code sections:
-- Source files that will need to be modified or help in understanding relevant concepts
-- Documentation explaining relevant systems
-- Tests demonstrating expected or related behavior
-- Dependencies the implementation must integrate with
+3. Optional delegation (if your agent supports sub-agents):
 
-Use tools like grep, find, or the agent's search capabilities to locate relevant code.
+Use this activity brief:
 
-### 3. Write the Task Context
+- Find candidate source files, tests, docs, and integration points
+- Provide short relevance notes for each
+- Highlight risky areas and dependency constraints
 
-Create a context file with your findings:
-
-```bash
-cat > "$PEER_SYNC/task-context.md" << 'EOF'
-# Task Context
-
-## Relevant Source Files
-
-- [path/to/file.ext:line-range](path/to/file.ext) - Brief note on why this is relevant
-- [path/to/another.ext:42-60](path/to/another.ext) - What this code does and why it matters
-
-## Documentation
-
-- [docs/relevant.md](docs/relevant.md) - Description of relevant documentation
-
-## Tests
-
-- [tests/relevant_test.ext](tests/relevant_test.ext) - Tests that demonstrate expected behavior
-
-## Key Dependencies
-
-- [path/to/dependency.ext](path/to/dependency.ext) - How this relates to the task
-
-## Notes
-
-[Any additional context, gotchas, or suggestions for the coder]
-
-EOF
-```
-
-Edit the file to fill in actual content based on your exploration. Use specific file:line references.
-
-### 4. Signal Completion
+4. Write `task-context.md` and signal completion:
 
 ```bash
 agent-pair signal reviewer gather-done "task context collected"
 ```
 
-Then **STOP and wait**. The coder will read your context file before starting work.
-
-## Guidelines
-
-- **Be thorough**: The coder will rely on this context to understand the codebase
-- **Use specific references**: Include file paths with line numbers/ranges
-- **Explain relevance**: Brief notes help the coder understand why each file matters
-- **Include gotchas**: Warn about tricky areas or non-obvious dependencies
-- **Don't implement**: Your job is to gather context, not to write code
+Then stop and wait.

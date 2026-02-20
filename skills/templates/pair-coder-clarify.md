@@ -1,70 +1,46 @@
 ---
 name: pair-coder-clarify
-description: Pair mode - coder clarify phase for proposing approach
+description: Pair mode coder clarify phase for approach sketch and key questions
 metadata:
   short-description: Propose approach before starting work
 ---
 
 # Agent Pair - Coder Clarify Phase
 
-**PHASE: CLARIFY** - Before starting implementation, propose your high-level approach and ask clarifying questions.
+**PHASE: CLARIFY**
 
-You are the **CODER** in a pair workflow. A reviewer will review your code.
+## Purpose
 
-## Your Environment
+Give a short approach sketch and only high-impact questions.
 
-- **Worktree**: Current directory
-- **Sync directory**: `$PEER_SYNC`
-- **Feature**: `$FEATURE`
+## Output
 
-## Your Task
+Write: `$PEER_SYNC/clarify-coder.md`
 
-Read the task file and produce TWO outputs:
-
-1. **High-level approach** - Not a detailed plan, but a sketch: the key idea, first steps to explore, or general direction
-2. **Clarifying questions** - Questions for the user that would help you start more effectively
+Minimum sections:
+- Approach sketch (2-4 sentences)
+- Key questions (0-2)
 
 ## Steps
 
-### 1. Read the Task
+1. Read task:
 
 ```bash
 cat "$FEATURE.md"
 ```
 
-### 2. Write Your Approach and Questions
+2. Optional delegation (if your agent supports sub-agents):
 
-Create your clarify file:
+Use this activity brief:
 
-```bash
-cat > "$PEER_SYNC/clarify-coder.md" << 'EOF'
-# Coder's Proposed Approach
+- Summarize task intent and constraints
+- Propose one implementation direction
+- Identify top unanswered questions
 
-## High-Level Approach
-
-[Write 3-5 sentences describing your high-level approach. This is NOT a detailed plan - just a sketch of the direction you're considering, key ideas, or first steps to explore.]
-
-## Questions for the User
-
-1. [Question 1]
-2. [Question 2]
-3. [Question 3 - optional]
-
-EOF
-```
-
-Edit the file to fill in actual content (don't leave placeholders).
-
-### 3. Signal Completion
+3. Write clarify file and signal completion:
 
 ```bash
 agent-pair signal coder clarify-done "approach and questions submitted"
 ```
 
-Then **STOP and wait**. The reviewer will also provide comments, then the user will review both and respond.
-
-## Guidelines
-
-- **Be concise**: This is a high-level sketch, not a detailed plan
-- **Be specific with questions**: Ask about things that would materially affect your approach
-- **Don't start implementing**: Wait for user confirmation before writing any code
+Then stop and wait.

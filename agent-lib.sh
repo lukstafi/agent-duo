@@ -2194,6 +2194,7 @@ install_pair_skills_to_worktree() {
     mkdir -p "$codex_skills/pair-reviewer-work" "$codex_skills/pair-reviewer-clarify"
     mkdir -p "$codex_skills/pair-reviewer-gather" "$codex_skills/pair-reviewer-pushback" "$codex_skills/pair-reviewer-plan"
     mkdir -p "$codex_skills/pair-pr-comment" "$codex_skills/pair-integrate" "$codex_skills/pair-final-merge"
+    mkdir -p "$codex_skills/pair-update-docs"
     mkdir -p "$codex_skills/pair-suggest-refactor"
 
     install_skill "$templates_dir/pair-coder-work.md" "$codex_skills/pair-coder-work/SKILL.md" "\$pair-coder-work"

@@ -1,119 +1,67 @@
 ---
 name: pair-coder-plan
-description: Pair mode coder plan phase - write implementation plan before work
+description: Pair mode coder plan phase - write concise implementation plan before coding
 metadata:
   short-description: Write implementation plan (pair coder)
 ---
 
 # Agent Pair - Plan Phase (Coder)
 
-**PHASE: PLAN** - Before starting implementation, write a detailed implementation plan.
+**PHASE: PLAN**
 
-## Your Environment
+## Purpose
 
-- **Your worktree**: Current directory
-- **Sync directory**: `$PEER_SYNC`
-- **Your role**: Coder
-- **Feature**: `$FEATURE`
+Produce a clear plan for reviewer approval before implementation.
 
-## Your Task
+## Output
 
-Write a detailed implementation plan before starting to code. The reviewer will evaluate your plan.
+Write: `$PEER_SYNC/plan-coder.md`
+
+Minimum sections:
+- Goal
+- Approach
+- Planned file changes
+- Steps
+- Risks and tests
 
 ## Steps
 
-### 1. Read the Task
+1. Read task and prior plan feedback (if any):
 
 ```bash
 cat "$FEATURE.md"
-```
-
-### 2. Check for Previous Feedback (if this is a plan revision)
-
-```bash
 PLAN_ROUND=$(cat "$PEER_SYNC/plan-round" 2>/dev/null || echo "1")
-if [ "$PLAN_ROUND" -gt 1 ]; then
-    echo "=== Previous Plan Review Feedback ==="
-    cat "$PEER_SYNC/plan-review.md"
-fi
+[ "$PLAN_ROUND" -gt 1 ] && cat "$PEER_SYNC/plan-review.md"
 ```
 
-### 3. Explore the Codebase
-
-Understand the existing code structure relevant to your task:
+2. Inspect code:
 
 ```bash
 rg -n -- "pattern|keyword|module"
-cat path/to/relevant-file
 ```
 
-### 4. Write Your Implementation Plan
+3. Optional delegation (if your agent supports sub-agents):
 
-```bash
-cat > "$PEER_SYNC/plan-coder.md" << 'PLAN_EOF'
-# Implementation Plan
+Use this activity brief:
 
-## Approach
+- Read task and prior plan-review feedback
+- Draft a concise, executable implementation plan
+- Explicitly cover risks/tests tied to requirements
 
-[Describe your high-level strategy in 3-5 sentences. What is the core idea?]
+4. Write `plan-coder.md`.
 
-## Key Decisions
-
-1. **Decision 1**: [What and why]
-2. **Decision 2**: [What and why]
-
-## File Changes
-
-| File | Action | Description |
-|------|--------|-------------|
-| `path/to/file.ext` | Create/Modify | Brief description |
-
-## Implementation Steps
-
-1. [ ] Step 1: Description
-2. [ ] Step 2: Description
-3. [ ] Step 3: Description
-
-## Risks and Edge Cases
-
-- **Risk 1**: [Description and mitigation]
-- **Edge case**: [Description and handling]
-
-## Test Strategy
-
-- [ ] Unit tests for X
-- [ ] Integration test for Y
-- [ ] Manual verification of Z
-
-PLAN_EOF
-```
-
-Edit the file to fill in actual content (don't leave placeholders).
-
-If you're revising based on feedback, address each point raised in the previous review.
-
-### 5. Signal Completion
+5. Signal completion:
 
 ```bash
 agent-pair signal coder plan-done "implementation plan submitted"
 ```
 
-Then **STOP and wait**. The reviewer will examine your plan before you start implementation.
+Then stop and wait.
 
-## If You Need Clarification
+## Clarification Path
 
-If you discover ambiguity or need user input while planning:
+If blocked by ambiguity:
 
 ```bash
 agent-pair signal coder needs-clarify "question: what should happen when X?"
 ```
-
-The orchestrator will pause and notify the user. After they respond, continue planning and signal `plan-done` when ready.
-
-## Guidelines
-
-- **Be specific**: Vague plans lead to vague implementations
-- **Be realistic**: Don't promise what you can't deliver
-- **Consider the existing code**: Your plan should integrate cleanly
-- **Think about testing**: Every feature needs verification
-- **Address feedback**: If revising, explicitly address each prior concern

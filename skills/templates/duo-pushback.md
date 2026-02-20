@@ -1,88 +1,47 @@
 ---
 name: duo-pushback
-description: Agent-duo pushback stage - propose improvements to the task before implementing
+description: Agent-duo pushback stage - propose improvements to task framing before coding
 metadata:
   short-description: Propose task improvements before starting work
 ---
 
 # Agent Duo - Pushback Stage
 
-**STAGE: PUSHBACK** - Before starting implementation, you may propose improvements to the task specification to improve the quality of the solution.
-
-## Your Environment
-
-- **Your worktree**: Current directory
-- **Peer's worktree**: `$PEER_WORKTREE` (read-only - peer is also pushing back)
-- **Sync directory**: `$PEER_SYNC`
-- **Your name**: `$MY_NAME`
-- **Peer's name**: `$PEER_NAME`
-- **Feature**: `$FEATURE`
+**STAGE: PUSHBACK**
 
 ## Purpose
 
-The task file may specify both a goal and a plan. Sometimes the plan is suboptimal or could be improved. This is your opportunity to suggest modifications to the task that would lead to a better solution.
+Improve the task spec when it is ambiguous, over-constrained, or missing critical requirements.
 
-## Your Task
+## Output
 
-Read the task file carefully and consider:
+Write: `$PEER_SYNC/pushback-${MY_NAME}.md`
 
-1. **Is the stated plan the best approach to achieve the core goal?**
-2. **Are there better alternatives or optimizations?**
-3. **Are there missing requirements or edge cases?**
-4. **Could the scope be refined to deliver more value?**
+Minimum sections:
+- Proposed changes (or "No changes")
+- Rationale
 
 ## Steps
 
-### 1. Read the Task
+1. Read task:
 
 ```bash
 cat "$FEATURE.md"
 ```
 
-### 2. Modify the Task File Directly
+2. Optional delegation (if your agent supports sub-agents):
 
-If you believe the task could be improved, edit `$FEATURE.md` directly in your worktree. The user will compare your version with the peer's using diff3.
+Use this activity brief:
 
-If the task is well-specified and needs no changes, skip to step 3.
+- Critique task framing for ambiguity, missing edge cases, and unnecessary constraints
+- Suggest minimal edits that improve implementation quality
 
-### 3. Write Your Rationale
+3. If needed, edit `$FEATURE.md` directly.
 
-Create a pushback file explaining your changes (or lack thereof):
-
-```bash
-cat > "$PEER_SYNC/pushback-${MY_NAME}.md" << 'EOF'
-# Pushback from [MY_NAME]
-
-## Summary of Proposed Changes
-
-[1-3 sentences explaining what you changed and why, or "No changes proposed - the task is well-specified."]
-
-## Reasoning
-
-[Explain why your changes would improve the solution quality, or why the original is already good]
-
-EOF
-```
-
-Edit the file to fill in actual content.
-
-### 4. Signal Completion
+4. Write pushback rationale and signal completion:
 
 ```bash
 agent-duo signal "$MY_NAME" pushback-done "proposed task modifications submitted"
 ```
 
-Then **STOP and wait**. The user will review both agents' task file changes (via diff3) and rationales, then decide:
-- **Reject** - revert to the original task
-- **Accept** - use one agent's modified task file
-- **Modify** - make their own adjustments based on the feedback
-
-Do NOT start implementing until the work phase begins.
-
-## Guidelines
-
-- **Focus on the goal, not just the plan**: The core objective matters more than the specific approach
-- **Be constructive**: Explain why your changes would improve outcomes
-- **Be specific**: Point to concrete issues or opportunities
-- **It's OK to have no changes**: If the task is well-specified, say so
-- **Diverge from peer**: If you see the peer's pushback, consider different angles
+Then stop and wait for user decision.

@@ -1,96 +1,69 @@
 ---
 name: duo-merge-debate
-description: Agent-duo merge phase - debate when votes disagree
+description: Agent-duo merge phase - debate and revise vote when votes differ
 metadata:
-  short-description: Review peer's vote and revise or defend position
+  short-description: Review peer vote and revise or defend position
 ---
 
 # Agent Duo - Merge Debate Phase
 
-**PHASE: MERGE DEBATE** - Your vote differs from your peer's. Review their reasoning and respond.
+**PHASE: MERGE DEBATE**
 
-## Your Environment
+## Purpose
 
-- **Working directory**: Main branch
-- **Sync directory**: `$PEER_SYNC`
-- **Your name**: `$MY_NAME`
-- **Peer's name**: `$PEER_NAME`
-- **Debate round**: Check `$PEER_SYNC/merge-round`
+Resolve disagreement by engaging with peer reasoning and either changing or defending your vote.
 
-## Context
+## Output
 
-You and your peer voted for different PRs. This debate phase allows you to:
-1. Understand your peer's reasoning
-2. Reconsider your position given new arguments
-3. Either change your vote or defend your original choice
+Write: `$PEER_SYNC/merge-votes/round-${ROUND}-${MY_NAME}-vote.md`
 
-## Your Task
+Required line for parser:
+- `## My Vote: claude` or `## My Vote: codex`
 
-### 1. Read Your Peer's Vote and Your Previous Vote
+## Steps
+
+1. Read previous-round votes:
 
 ```bash
 ROUND=$(cat "$PEER_SYNC/merge-round")
 PREV_ROUND=$((ROUND - 1))
-
-# Read your peer's vote from previous round (if exists)
-PEER_VOTE="$PEER_SYNC/merge-votes/round-${PREV_ROUND}-${PEER_NAME}-vote.md"
-[ -f "$PEER_VOTE" ] && cat "$PEER_VOTE" || echo "No previous peer vote found."
-
-# Read your previous vote (if exists)
-MY_VOTE="$PEER_SYNC/merge-votes/round-${PREV_ROUND}-${MY_NAME}-vote.md"
-[ -f "$MY_VOTE" ] && cat "$MY_VOTE" || echo "No previous vote from you found."
+cat "$PEER_SYNC/merge-votes/round-${PREV_ROUND}-${PEER_NAME}-vote.md" 2>/dev/null || true
+cat "$PEER_SYNC/merge-votes/round-${PREV_ROUND}-${MY_NAME}-vote.md" 2>/dev/null || true
 ```
 
-### 2. Consider the Arguments
+2. Optional delegation (if your agent supports sub-agents):
 
-Think carefully:
-- Did your peer identify strengths you missed?
-- Did they raise valid concerns about your choice?
-- Are their cherry-pick suggestions valuable regardless of which PR wins?
+Use this activity brief:
 
-### 3. Write Your Debate Response
+- Extract strongest arguments from both votes
+- Identify which concerns materially change winner selection
+- Draft a revised rationale and suggested cherry-picks
 
-Create a new vote file for this debate round:
+3. Write updated vote file:
 
 ```bash
 ROUND=$(cat "$PEER_SYNC/merge-round")
+cat > "$PEER_SYNC/merge-votes/round-${ROUND}-${MY_NAME}-vote.md" << EOF_VOTE
+# Merge Vote from ${MY_NAME} (Debate Round ${ROUND})
 
-cat > "$PEER_SYNC/merge-votes/round-${ROUND}-${MY_NAME}-vote.md" << 'EOF'
-# Merge Vote from [MY_NAME] (Debate Round [ROUND])
+## Response to Peer Arguments
 
-## Response to [PEER_NAME]'s Arguments
+## My Vote: claude
 
-[Address their key points. What do you agree with? What do you disagree with and why?]
+## Position: UNCHANGED
 
-## My Vote: [claude / codex]
+## Rationale
 
-### Position: [CHANGED / UNCHANGED]
-
-### Rationale
-
-[If changed: Explain what convinced you to switch]
-[If unchanged: Explain why peer's arguments don't outweigh your original reasoning]
-
-### Features to Cherry-Pick from Losing PR
-
-[Updated list based on both analyses - include valuable features mentioned by either side]
-
-EOF
+## Optional Features to Cherry-Pick from Losing PR
+EOF_VOTE
 ```
 
-Edit the file with actual content.
+Replace vote/position values as needed.
 
-### 4. Signal Completion
+4. Signal completion:
 
 ```bash
 agent-duo signal "$MY_NAME" debate-done "debate response submitted"
 ```
 
-Then **STOP and wait**. The orchestrator will check for consensus or continue to the next debate round (max 2 rounds).
-
-## Guidelines
-
-- **Be open-minded**: The goal is to find the best solution, not to "win"
-- **Engage with arguments**: Don't just repeat yourself - respond to peer's points
-- **Synthesize**: Sometimes the answer is "merge A, but definitely cherry-pick X and Y from B"
-- **Agree to disagree**: After 2 rounds, if you still disagree, the user will decide
+Then stop and wait.

@@ -7,56 +7,23 @@ metadata:
 
 # Agent Duo - Amend Phase
 
-**You have already created a PR.** Your peer is still iterating.
+You already have a PR and should stay responsive to peer review while they iterate.
 
-You continue participating in work/review cycles until your peer also has a PR. This ensures you can respond to their feedback on your solution.
-
-## Your PR
+## Preflight
 
 ```bash
 cat "$PEER_SYNC/${MY_NAME}.pr"
+"$HOME/.local/share/agent-duo/phase-preflight.sh" duo-amend
 ```
 
-## Check Peer Feedback
+## Steps
 
-Read your peer's most recent review of your work:
+1. Decide whether feedback requires changes.
+2. If yes, implement, commit, and push.
+3. If no, note that in your signal message.
+
+## Signal
 
 ```bash
-ROUND=$(cat "$PEER_SYNC/round")
-if [ "$ROUND" -gt 1 ]; then
-    PREV_ROUND=$((ROUND - 1))
-    REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-${PEER_NAME}-reviews-${MY_NAME}.md"
-    [ -f "$REVIEW" ] && cat "$REVIEW"
-else
-    echo "Round 1 — no previous review to read."
-fi
+agent-duo signal "$MY_NAME" done "reviewed feedback, amended PR or no changes needed"
 ```
-
-## Your Task
-
-1. **Consider the feedback**: Does your peer raise valid concerns?
-2. **Decide**: Amend your PR or acknowledge the feedback
-
-### If amendments are warranted:
-
-Make changes, then commit and push:
-
-```bash
-git add -A
-git commit -m "Address review feedback: <brief description>"
-git push
-```
-
-### If no changes needed:
-
-That's fine — just signal done.
-
-## Before You Stop
-
-Signal completion:
-
-```bash
-agent-duo signal "$MY_NAME" done "reviewed feedback, [amended PR / no changes needed]"
-```
-
-The orchestrator waits for your signal before proceeding.

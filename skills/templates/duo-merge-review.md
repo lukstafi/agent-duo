@@ -1,142 +1,82 @@
 ---
 name: duo-merge-review
-description: Agent-duo merge phase - review merge execution
+description: Agent-duo merge phase - review cherry-pick integration on winning branch
 metadata:
   short-description: Review peer's cherry-pick work on winning PR
 ---
 
 # Agent Duo - Merge Review Phase
 
-**PHASE: MERGE REVIEW** - Your ancestor's PR won. Your peer has cherry-picked features from the losing PR into your branch. Review their work.
+**PHASE: MERGE REVIEW**
 
-## Your Environment
+## Purpose
 
-- **Your worktree**: `$MY_WORKTREE` (winning PR's branch, where cherry-picks were made)
-- **Peer's worktree**: `$PEER_WORKTREE` (losing PR's code, for reference)
-- **Sync directory**: `$PEER_SYNC`
-- **Your name**: `$MY_NAME`
-- **Peer's name**: `$PEER_NAME`
-- **Feature**: `$FEATURE`
+Verify cherry-picked work is correct, complete, and safe to merge.
 
-## Context
+## Output
 
-Since your "ancestor" (the agent whose name matches yours from the original duo session) had the winning PR, you are the reviewer for this merge phase. Your peer cherry-picked features from the losing PR into your branch.
+Write: `$PEER_SYNC/merge-review-${MY_NAME}.md`
 
-Your job is to verify the cherry-picks were done correctly and the features are properly integrated.
+Required marker:
+- Include `APPROVED` to pass
+- Include `CHANGES REQUESTED` to request another amend round
 
-**IMPORTANT**: The cherry-pick work was done in your worktree (`$MY_WORKTREE`). You can also reference the losing agent's original worktree (`$PEER_WORKTREE`) to verify correct incorporation.
+## Steps
 
-## Your Task
-
-### 1. Go to Your Worktree and Pull Latest Changes
+1. Move to winning worktree and update:
 
 ```bash
 cd "$MY_WORKTREE"
 git pull origin
 ```
 
-### 2. Review What Was Cherry-Picked
+2. Review recent integration changes:
 
 ```bash
-# See recent commits (cherry-picks should be visible)
 git log --oneline -10
-
-# See the cherry-pick details
 git show HEAD
-
-# Review the changes made
-git diff HEAD~3..HEAD  # Adjust number based on commits
 ```
 
-### 3. Compare with Original Implementation
-
-Reference the losing agent's worktree to verify correct incorporation:
+3. Check against recommendations:
 
 ```bash
-# View the original implementation
-ls "$PEER_WORKTREE/src/"
-cat "$PEER_WORKTREE/path/to/relevant/file"
-
-# Compare how a feature was adapted
-diff "$PEER_WORKTREE/src/feature.ts" "$MY_WORKTREE/src/feature.ts"
-```
-
-### 4. Verify Integration
-
-```bash
-# Check the code compiles/lints
-# (use project-specific commands)
-
-# Run tests
-# (use project-specific test command)
-```
-
-### 5. Check Cherry-Pick Completeness
-
-Compare against what was recommended:
-
-```bash
-# Read the final round of votes to see cherry-pick recommendations
 FINAL_ROUND=$(cat "$PEER_SYNC/merge-round")
 cat "$PEER_SYNC/merge-votes/round-${FINAL_ROUND}-claude-vote.md"
 cat "$PEER_SYNC/merge-votes/round-${FINAL_ROUND}-codex-vote.md"
 ```
 
-Were all recommended features cherry-picked? If not, is the omission justified?
+4. Run relevant tests/lint for this repo.
 
-### 6. Write Your Review
+5. Optional delegation (if your agent supports sub-agents):
+
+Use this activity brief:
+
+- Compare integrated branch vs losing-worktree intent
+- Confirm cherry-pick completeness and highlight regressions
+- Draft concise approval/change-request review
+
+6. Write review file with explicit outcome:
 
 ```bash
-cat > "$PEER_SYNC/merge-review-${MY_NAME}.md" << 'EOF'
-# Merge Review from [MY_NAME]
+cat > "$PEER_SYNC/merge-review-${MY_NAME}.md" << EOF_REVIEW
+# Merge Review from ${MY_NAME}
 
 ## Cherry-Pick Review: APPROVED
 
-(Change to "CHANGES REQUESTED" if issues need fixing)
+## Findings
 
-## Verification Checklist
+## Verification Run
 
-- [ ] Recommended cherry-picks were incorporated
-- [ ] Code integrates cleanly with winning PR
-- [ ] Tests pass
-- [ ] Code quality is maintained
-- [ ] No regressions introduced
-
-## Cherry-Pick Assessment
-
-[Were the right features picked? Anything missing or unnecessary?]
-
-## Issues Found (if any)
-
-[List any problems that need to be addressed]
-
-## Overall Assessment
-
-[1-2 sentences summarizing the cherry-pick quality]
-
-EOF
+## Follow-ups (if any)
+EOF_REVIEW
 ```
 
-Edit the file with actual content.
+Use `CHANGES REQUESTED` instead of `APPROVED` when needed.
 
-### 7. Signal Completion
+7. Signal completion:
 
-If approved:
 ```bash
-agent-duo signal "$MY_NAME" merge-review-done "cherry-picks approved"
+agent-duo signal "$MY_NAME" merge-review-done "merge review submitted"
 ```
 
-If changes are needed:
-```bash
-agent-duo signal "$MY_NAME" merge-review-done "changes requested - see review"
-```
-
-Then **STOP and wait**. If changes were requested, your peer will address them and another review cycle may occur. Once approved, the orchestrator will notify the user that the winning PR is ready for merge.
-
-## Guidelines
-
-- **Verify, don't rubber-stamp**: Actually run tests and review the code
-- **Reference both worktrees**: Your worktree has the merged result, peer's has the original
-- **Be constructive**: If something's wrong, explain what and how to fix it
-- **Acknowledge good work**: If the cherry-picks were well done, say so
-- **Focus on correctness**: The goal is a clean, consolidated PR ready for human merge
+Then stop and wait.

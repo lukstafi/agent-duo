@@ -1,93 +1,48 @@
 ---
 name: pair-reviewer-pushback
-description: Pair mode - reviewer pushback stage for proposing task improvements
+description: Pair mode reviewer pushback stage for improving task framing before coding
 metadata:
   short-description: Propose task improvements before coder starts work
 ---
 
 # Agent Pair - Reviewer Pushback Stage
 
-**STAGE: PUSHBACK** - Before the coder starts implementing, you may propose improvements to the task specification.
-
-You are the **REVIEWER** in a pair workflow.
-
-## Your Environment
-
-- **Worktree**: Current directory
-- **Sync directory**: `$PEER_SYNC`
-- **Feature**: `$FEATURE`
+**STAGE: PUSHBACK**
 
 ## Purpose
 
-The task file may specify both a goal and a plan. Sometimes the plan is suboptimal or could be improved. As the reviewer, you have an opportunity to suggest modifications that would lead to a better solution before coding begins.
+Improve task framing before coding starts.
 
-## Your Task
+## Output
 
-Read the task file carefully and consider:
+Write: `$PEER_SYNC/pushback-reviewer.md`
 
-1. **Is the stated plan the best approach to achieve the core goal?**
-2. **Are there better alternatives or optimizations?**
-3. **Are there missing requirements or edge cases?**
-4. **Could the scope be refined to deliver more value?**
+Minimum sections:
+- Proposed changes (or "No changes")
+- Rationale
 
 ## Steps
 
-### 1. Read the Task
+1. Read task and coder clarify file (if present):
 
 ```bash
 cat "$FEATURE.md"
+cat "$PEER_SYNC/clarify-coder.md" 2>/dev/null || true
 ```
 
-### 2. Read the Coder's Approach (if clarify stage was enabled)
+2. Optional delegation (if your agent supports sub-agents):
 
-```bash
-cat "$PEER_SYNC/clarify-coder.md" 2>/dev/null || echo "No clarify file found"
-```
+Use this activity brief:
 
-### 3. Modify the Task File Directly
+- Critique task for ambiguity, missing edge cases, and unnecessary constraints
+- Propose minimal edits with highest impact
 
-If you believe the task could be improved, edit `$FEATURE.md` directly. The user will compare your version with the original using diff.
+3. If needed, edit `$FEATURE.md` directly.
 
-If the task is well-specified and needs no changes, skip to step 4.
-
-### 4. Write Your Rationale
-
-Create a pushback file explaining your changes (or lack thereof):
-
-```bash
-cat > "$PEER_SYNC/pushback-reviewer.md" << 'EOF'
-# Pushback from Reviewer
-
-## Summary of Proposed Changes
-
-[1-3 sentences explaining what you changed and why, or "No changes proposed - the task is well-specified."]
-
-## Reasoning
-
-[Explain why your changes would improve the solution quality, or why the original is already good]
-
-EOF
-```
-
-Edit the file to fill in actual content.
-
-### 5. Signal Completion
+4. Write pushback rationale and signal completion:
 
 ```bash
 agent-pair signal reviewer pushback-done "proposed task modifications submitted"
 ```
 
-Then **STOP and wait**. The user will review your task file changes (via diff) and rationale, then decide:
-- **Reject** - revert to the original task
-- **Accept** - keep your modified task file
-- **Modify** - make their own adjustments based on your feedback
-
-Do NOT provide implementation guidance yet - wait for the work phase.
-
-## Guidelines
-
-- **Focus on the goal, not just the plan**: The core objective matters more than the specific approach
-- **Be constructive**: Explain why your changes would improve outcomes
-- **Be specific**: Point to concrete issues or opportunities
-- **It's OK to have no changes**: If the task is well-specified, say so
-- **Consider the coder's perspective**: Your changes will affect how the coder implements
+Then stop and wait for user decision.

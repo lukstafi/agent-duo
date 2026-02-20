@@ -1,73 +1,61 @@
 ---
 name: duo-work
-description: Agent-duo work phase instructions for continuing development in round 2+
+description: Agent-duo work phase instructions for continuing implementation
 metadata:
   short-description: Continue work in duo collaboration
 ---
 
 # Agent Duo - Work Phase (Round 2+)
 
-**PHASE CHANGE: You are now in the WORK phase, not review.**
+**PHASE: WORK**
 
-Stop any review activity. Your task is to continue developing your implementation.
+## Purpose
 
-## First Things First
+Continue implementing your solution while incorporating valid peer feedback.
 
-1. Check peer feedback from the previous round (if any):
-   ```bash
-   ROUND=$(cat "$PEER_SYNC/round")
-   if [ "$ROUND" -gt 1 ]; then
-       PREV_ROUND=$((ROUND - 1))
-       REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-${PEER_NAME}-reviews-${MY_NAME}.md"
-       [ -f "$REVIEW" ] && cat "$REVIEW"
-   else
-       echo "Round 1 — no previous review to read."
-   fi
-   ```
+## Preflight
 
-2. Check peer's current status:
-   ```bash
-   agent-duo peer-status
-   ```
+Run the shared preflight helper:
 
-## Guidelines
+```bash
+"$HOME/.local/share/agent-duo/phase-preflight.sh" duo-work
+```
 
-- **Diverge to explore the search space**: Maintain your *alternative* approach
-- **Consider peer feedback**: Address valid concerns while keeping your distinct solution
-- **Stay goal focused**: Convergence is fine if it arises organically from a confident consensus
-- **Annotate the task spec**: Record design decisions and rationale directly in `$FEATURE.md` as you work — this serves as a living design doc and helps you recover after context compaction
+If unavailable, manually read the previous round review and peer status.
 
-## Checking Peer's Progress
+## Steps
+
+1. Implement the next highest-impact change.
+2. Keep your approach distinct unless feedback reveals a clear defect.
+3. Record key decisions in `$FEATURE.md` to aid recovery after compaction.
+4. Check peer progress when useful:
 
 ```bash
 git -C "$PEER_WORKTREE" diff
 ```
 
-## If You Discover a Blocking Issue
+## Optional Delegation
 
-If you find ambiguity, inconsistency, or evidence the task is misguided — escalate:
+If your agent supports sub-agents, delegate preflight/context gathering with this activity brief:
+
+- Collect previous review feedback addressed to me
+- Summarize peer status and recent peer diff
+- Return top 3 priorities for this round
+
+## Escalation
+
+If blocked by ambiguity/inconsistency/misguided task framing:
+
 ```bash
 agent-duo escalate ambiguity "requirements unclear: what should happen when X?"
 agent-duo escalate inconsistency "docs say X but code does Y"
 agent-duo escalate misguided "this feature already exists in module Z"
 ```
-This notifies the user without interrupting your work. Continue with your best interpretation.
 
-## If Your Context Was Compacted
+## Signal
 
-If you notice your context was compacted mid-work, re-orient using commit history:
-
-```bash
-git log --oneline main..HEAD   # Round-by-round progression and decisions
-git diff --stat                # Files modified (uncommitted changes)
-git diff main..HEAD --stat     # All files changed across rounds
-```
-
-## When Done
-
-Signal completion and **STOP**:
 ```bash
 agent-duo signal "$MY_NAME" done "brief summary of what you did"
 ```
 
-Note: You'll be asked to capture learnings before PR creation.
+Then stop.

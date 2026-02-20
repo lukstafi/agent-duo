@@ -1,124 +1,79 @@
 ---
 name: duo-review
-description: Agent-duo review phase instructions for examining peer's work
+description: Agent-duo review phase instructions for reviewing peer work
 metadata:
   short-description: Review peer's work in duo collaboration
 ---
 
 # Agent Duo - Review Phase
 
-**PHASE CHANGE: You are now in the REVIEW phase, not work.**
+**PHASE: REVIEW**
 
-Stop any implementation work. Your task is to review your peer's solution.
+## Purpose
 
-## Your Environment
+Review peer changes, focusing on deltas since last round and high-impact feedback.
 
-- **Your worktree**: Current directory
-- **Peer's worktree**: `$PEER_WORKTREE` (read their changes)
-- **Sync directory**: `$PEER_SYNC`
-- **Your name**: `$MY_NAME`
-- **Peer's name**: `$PEER_NAME`
-- **Current round**: Check `$PEER_SYNC/round`
+## Output
 
-## Current Phase: REVIEW
+Write: `$PEER_SYNC/reviews/round-${ROUND}-${MY_NAME}-reviews-${PEER_NAME}.md`
 
-Your peer has also completed their work phase. Now you review each other's work **in parallel**.
+Minimum sections:
+- Delta since last round
+- Strengths
+- Risks or questions
 
-**Note**: You participate in reviews even if you already have a PR. This ensures your peer gets feedback on their evolving work, and you can see their review of your PR.
+## Steps
 
-### First Things First
-
-Signal that you're reviewing:
+1. Signal start:
 
 ```bash
 agent-duo signal "$MY_NAME" reviewing "examining peer's work"
 ```
 
-### Your Tasks
+2. Run preflight:
 
-1. **Examine peer's worktree**: Look at `$PEER_WORKTREE` to see their changes
+```bash
+"$HOME/.local/share/agent-duo/phase-preflight.sh" duo-review
+```
 
-   ```bash
-   # See commits on the feature branch
-   git -C "$PEER_WORKTREE" log --oneline main..HEAD
+3. Inspect peer changes:
 
-   # See the full feature diff (all rounds combined)
-   git -C "$PEER_WORKTREE" diff main...HEAD
+```bash
+git -C "$PEER_WORKTREE" log --oneline main..HEAD
+git -C "$PEER_WORKTREE" diff main...HEAD
+git -C "$PEER_WORKTREE" diff HEAD~1
+```
 
-   # See just the latest round's changes
-   git -C "$PEER_WORKTREE" diff HEAD~1
+4. Optional delegation (if your agent supports sub-agents):
 
-   # Explore specific files
-   cat "$PEER_WORKTREE/path/to/interesting/file"
-   ```
+Use this activity brief:
 
-2. **Read your previous review** (round 2+ only, to avoid repeating feedback):
+- Compare peer changes vs previous-round review
+- Identify resolved issues and remaining high-risk gaps
+- Draft a concise review focused on actionable deltas
 
-   ```bash
-   ROUND=$(cat "$PEER_SYNC/round")
-   if [ "$ROUND" -gt 1 ]; then
-       PREV_ROUND=$((ROUND - 1))
-       MY_PREV_REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-${MY_NAME}-reviews-${PEER_NAME}.md"
-       [ -f "$MY_PREV_REVIEW" ] && cat "$MY_PREV_REVIEW"
-   fi
-   ```
+5. Write your review file:
 
-   Focus on what changed since your last review. Only re-raise prior issues if still unaddressed.
+```bash
+ROUND=$(cat "$PEER_SYNC/round")
+mkdir -p "$PEER_SYNC/reviews"
+cat > "$PEER_SYNC/reviews/round-${ROUND}-${MY_NAME}-reviews-${PEER_NAME}.md" << EOF_REVIEW
+# Review of ${PEER_NAME}'s Approach (Round ${ROUND})
 
-3. **Write your review**: Create a review file analyzing their approach
+## Delta Since Last Round
 
-   ```bash
-   ROUND=$(cat "$PEER_SYNC/round")
-   mkdir -p "$PEER_SYNC/reviews"
+## Strengths
 
-   cat > "$PEER_SYNC/reviews/round-${ROUND}-${MY_NAME}-reviews-${PEER_NAME}.md" << 'EOF'
-   # Review of [PEER_NAME]'s Approach (Round [ROUND])
+## Risks / Questions
 
-   ## Summary
-   [What did they build? What approach did they take?]
+## Optional Suggestions
+EOF_REVIEW
+```
 
-   ## Strengths
-   [What's good about their approach?]
-
-   ## Different Tradeoffs
-   [How does their approach differ from yours? What did they trade off?]
-
-   ## Ideas Worth Noting
-   [Anything interesting you might learn from - while staying on your own path?]
-
-   ## Questions
-   [Anything unclear about their approach?]
-   EOF
-   ```
-
-   Edit the file to fill in actual observations (don't leave placeholders).
-
-4. **Read their review of you** (round 2+ only):
-
-   ```bash
-   ROUND=$(cat "$PEER_SYNC/round")
-   if [ "$ROUND" -gt 1 ]; then
-       PREV_ROUND=$((ROUND - 1))
-       THEIR_REVIEW="$PEER_SYNC/reviews/round-${PREV_ROUND}-${PEER_NAME}-reviews-${MY_NAME}.md"
-       [ -f "$THEIR_REVIEW" ] && cat "$THEIR_REVIEW"
-   fi
-   ```
-
-### Review Philosophy
-
-- **Analyze, don't prescribe**: Describe their approach objectively
-- **Appreciate divergence**: Different isn't wrong
-- **Note tradeoffs, not defects**: "They chose X which trades off Y for Z"
-- **Stay on your path**: You're reviewing to understand, not to adopt their approach wholesale
-
-### If You Discover a Blocking Issue
-
-If blocked by ambiguity or inconsistency, use: `agent-duo escalate <type> "<message>"` (types: ambiguity, inconsistency, misguided). Continue with your best interpretation.
-
-### When Done
-
-Signal completion and **STOP**:
+6. Signal completion:
 
 ```bash
 agent-duo signal "$MY_NAME" review-done "review written"
 ```
+
+Then stop.

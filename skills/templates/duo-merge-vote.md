@@ -1,121 +1,76 @@
 ---
 name: duo-merge-vote
-description: Agent-duo merge phase - vote on which PR to merge
+description: Agent-duo merge phase - evaluate both PRs and cast a merge vote
 metadata:
   short-description: Analyze both PRs and vote on merge decision
 ---
 
 # Agent Duo - Merge Vote Phase
 
-**PHASE: MERGE VOTE** - Both PRs are created. You must analyze them and vote on which one to merge.
+**PHASE: MERGE VOTE**
 
-## Your Environment
+## Purpose
 
-- **Working directory**: Main branch (not a worktree)
-- **Sync directory**: `$PEER_SYNC`
-- **Your name**: `$MY_NAME`
-- **Peer's name**: `$PEER_NAME`
-- **Feature**: `$FEATURE`
+Evaluate both PRs objectively and cast a clear vote.
 
-## Context
+## Output
 
-This is a **fresh session** - you are not the agent who created either PR. Your job is to objectively evaluate both solutions and vote on which one should be merged.
+Write: `$PEER_SYNC/merge-votes/round-${ROUND}-${MY_NAME}-vote.md`
 
-## Your Task
+Required line for parser:
+- `## My Vote: claude` or `## My Vote: codex`
 
-### 1. Get PR Information
+## Steps
+
+1. Load PR ids and task:
 
 ```bash
 CLAUDE_PR="$(cat "$PEER_SYNC/claude.pr")"
 CODEX_PR="$(cat "$PEER_SYNC/codex.pr")"
-echo "Claude's PR: $CLAUDE_PR"
-echo "Codex's PR:  $CODEX_PR"
-```
-
-### 2. Read the Original Task
-
-```bash
 cat "$FEATURE.md"
 ```
 
-### 3. Analyze Both PRs
-
-For each PR, examine:
+2. Inspect both PRs:
 
 ```bash
-# View PR details and discussion
-gh pr view "$CLAUDE_PR" --json title,body,state,commits,files,reviews,comments
-gh pr view "$CODEX_PR" --json title,body,state,commits,files,reviews,comments
-
-# Compare code changes
+gh pr view "$CLAUDE_PR" --json title,body,commits,files,reviews,comments
+gh pr view "$CODEX_PR" --json title,body,commits,files,reviews,comments
 gh pr diff "$CLAUDE_PR"
 gh pr diff "$CODEX_PR"
 ```
 
-### 4. Read Previous Reviews (if available)
+3. Optional delegation (if your agent supports sub-agents):
 
-```bash
-ls "$PEER_SYNC/reviews/" 2>/dev/null && cat "$PEER_SYNC/reviews/"*.md
-```
+Use this activity brief:
 
-### 5. Write Your Vote
+- Build side-by-side comparison of both PRs
+- Score requirement coverage, correctness, tests, maintainability
+- Recommend one winner and optional cherry-picks from the other PR
 
-Create your vote file with analysis and decision:
+4. Write vote file:
 
 ```bash
 ROUND=$(cat "$PEER_SYNC/merge-round")
 mkdir -p "$PEER_SYNC/merge-votes"
+cat > "$PEER_SYNC/merge-votes/round-${ROUND}-${MY_NAME}-vote.md" << EOF_VOTE
+# Merge Vote from ${MY_NAME} (Round ${ROUND})
 
-cat > "$PEER_SYNC/merge-votes/round-${ROUND}-${MY_NAME}-vote.md" << 'EOF'
-# Merge Vote from [MY_NAME] (Round [ROUND])
+## My Vote: claude
 
-## Summary of Claude's PR
+## Why This PR Wins
 
-[2-3 sentences: What approach did Claude take? Key design decisions?]
+## Main Risks in Chosen PR
 
-## Summary of Codex's PR
-
-[2-3 sentences: What approach did Codex take? Key design decisions?]
-
-## Comparison
-
-| Aspect | Claude's PR | Codex's PR |
-|--------|-------------|------------|
-| Code quality | | |
-| Test coverage | | |
-| Alignment with task | | |
-| Maintainability | | |
-
-## My Vote: [claude / codex]
-
-### Rationale
-
-[3-5 sentences explaining why this PR better serves the task requirements. Consider:
-- Which solution better addresses the core requirements?
-- Which is more maintainable long-term?
-- Which has better test coverage?
-- Are there valuable features in the losing PR that should be cherry-picked?]
-
-### Features Worth Preserving from Other PR (Optional)
-
-[If applicable, note specific features from the non-chosen PR worth cherry-picking later.]
-
-EOF
+## Optional Features Worth Preserving from Other PR
+EOF_VOTE
 ```
 
-Edit the file to fill in actual analysis (don't leave placeholders).
+Replace `claude` with your actual vote.
 
-### 6. Signal Completion
+5. Signal completion:
 
 ```bash
 agent-duo signal "$MY_NAME" vote-done "merge vote submitted"
 ```
 
-Then **STOP and wait**. The orchestrator will check if both agents agree, or trigger a debate round if votes differ.
-
-## Guidelines
-
-- **Be objective**: You didn't write either solution - evaluate them fairly
-- **Focus on requirements**: Which solution better addresses the actual task?
-- **Consider cherry-picking**: The losing PR may have valuable features worth preserving
-- **Be specific**: Vague rationale helps no one
+Then stop and wait.
