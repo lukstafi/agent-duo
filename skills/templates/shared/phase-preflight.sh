@@ -29,6 +29,47 @@ print_if_exists() {
     fi
 }
 
+print_main_diff_stat() {
+    echo "=== Current change footprint (git diff --stat main...HEAD) ==="
+
+    if ! command -v git >/dev/null 2>&1; then
+        echo "git is not available."
+        echo
+        return 0
+    fi
+
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "Not in a git worktree."
+        echo
+        return 0
+    fi
+
+    local base_ref=""
+    if git rev-parse --verify --quiet main >/dev/null 2>&1; then
+        base_ref="main"
+    elif git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null 2>&1; then
+        base_ref="origin/main"
+    fi
+
+    if [ -z "$base_ref" ]; then
+        echo "main branch not found (looked for main and origin/main)."
+        echo
+        return 0
+    fi
+
+    local diff_stat
+    if diff_stat="$(git diff --stat "$base_ref...HEAD" 2>/dev/null)"; then
+        if [ -n "$diff_stat" ]; then
+            echo "$diff_stat"
+        else
+            echo "(No changes between $base_ref and HEAD.)"
+        fi
+    else
+        echo "Could not compute diff stat for $base_ref...HEAD."
+    fi
+    echo
+}
+
 round="$(read_round)"
 
 case "$mode" in
@@ -39,6 +80,7 @@ case "$mode" in
         else
             echo "Round 1 - no previous peer review."
         fi
+        print_main_diff_stat
         if command -v agent-duo >/dev/null 2>&1; then
             echo "=== Peer status ==="
             agent-duo peer-status || true
@@ -61,6 +103,7 @@ case "$mode" in
         else
             echo "Round 1 - no previous peer review."
         fi
+        print_main_diff_stat
         ;;
     pair-coder-work)
         if [ "$round" -gt 1 ]; then
@@ -69,6 +112,7 @@ case "$mode" in
         else
             echo "Round 1 - no previous reviewer feedback."
         fi
+        print_main_diff_stat
         if command -v agent-pair >/dev/null 2>&1; then
             echo "=== Current phase ==="
             agent-pair phase || true
