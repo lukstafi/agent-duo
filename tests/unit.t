@@ -296,6 +296,47 @@ else
 fi
 
 #------------------------------------------------------------------------------
+# Test: Task file commit-on-start helper
+#------------------------------------------------------------------------------
+
+echo ""
+echo "--- Task File Commit Helper ---"
+
+TASK_GIT_REPO="$TEST_DIR/task-git"
+mkdir -p "$TASK_GIT_REPO"
+git -C "$TASK_GIT_REPO" init -q
+git -C "$TASK_GIT_REPO" config user.name "Unit Test"
+git -C "$TASK_GIT_REPO" config user.email "unit@example.com"
+echo "seed" > "$TASK_GIT_REPO/README.md"
+git -C "$TASK_GIT_REPO" add README.md
+git -C "$TASK_GIT_REPO" commit -q -m "seed"
+
+test_start "ensure_task_file_committed commits untracked root task file"
+echo "# Root Task" > "$TASK_GIT_REPO/root-task.md"
+ensure_task_file_committed "$TASK_GIT_REPO" "root-task" "duo" >/dev/null
+LAST_MSG="$(git -C "$TASK_GIT_REPO" log -1 --pretty=%s)"
+if [ "$LAST_MSG" = "root-task.md: agent-duo" ] && \
+   git -C "$TASK_GIT_REPO" ls-files --error-unmatch root-task.md >/dev/null 2>&1; then
+    test_pass
+else
+    test_fail "task file was not committed with expected message"
+fi
+
+test_start "ensure_task_file_committed normalizes docs task file and commits for pair"
+mkdir -p "$TASK_GIT_REPO/docs"
+echo "# Docs Task" > "$TASK_GIT_REPO/docs/docs-task.md"
+ensure_task_file_committed "$TASK_GIT_REPO" "docs-task" "pair" >/dev/null
+LAST_MSG="$(git -C "$TASK_GIT_REPO" log -1 --pretty=%s)"
+if [ "$LAST_MSG" = "docs-task.md: agent-pair" ] && \
+   [ -f "$TASK_GIT_REPO/docs-task.md" ] && \
+   git -C "$TASK_GIT_REPO" ls-files --error-unmatch docs/docs-task.md >/dev/null 2>&1 && \
+   git -C "$TASK_GIT_REPO" ls-files --error-unmatch docs-task.md >/dev/null 2>&1; then
+    test_pass
+else
+    test_fail "docs task was not normalized/committed as expected"
+fi
+
+#------------------------------------------------------------------------------
 # Test: Follow-up task generation
 #------------------------------------------------------------------------------
 
