@@ -5087,7 +5087,7 @@ cmd_interrupt() {
 #------------------------------------------------------------------------------
 
 cmd_help() {
-    cat << 'EOF'
+    cat << EOF
 Agent Duo - Coordinate two AI coding agents
 
 USAGE
@@ -5107,11 +5107,11 @@ SESSION COMMANDS
           --pushback               Enable pushback stage (after clarify if both enabled)
           --plan                   Enable plan stage (after pushback if both enabled)
           --skip-docs-update       Skip update-docs phase before PR creation
-          --work-timeout <secs>    Work phase timeout (default: 1200, with --auto-run)
-          --review-timeout <secs>  Review phase timeout (default: 600, with --auto-run)
-          --clarify-timeout <secs> Clarify stage timeout (default: 600, with --clarify)
-          --pushback-timeout <secs> Pushback stage timeout (default: 600, with --pushback)
-          --plan-timeout <secs>    Plan phase timeout (default: 600, with --plan)
+          --work-timeout <secs>    Work phase timeout (default: ${DEFAULT_WORK_TIMEOUT}, with --auto-run)
+          --review-timeout <secs>  Review phase timeout (default: ${DEFAULT_REVIEW_TIMEOUT}, with --auto-run)
+          --clarify-timeout <secs> Clarify stage timeout (default: ${DEFAULT_CLARIFY_TIMEOUT}, with --clarify)
+          --pushback-timeout <secs> Pushback stage timeout (default: ${DEFAULT_PUSHBACK_TIMEOUT}, with --pushback)
+          --plan-timeout <secs>    Plan phase timeout (default: ${DEFAULT_PLAN_TIMEOUT}, with --plan)
           --max-rounds <n>         Maximum rounds (default: 10, with --auto-run)
           --codex-thinking <level> Codex reasoning effort: low, medium, high (default: high)
           --codex-model <model>    GPT model for Codex (e.g., o3, gpt-4.1)
@@ -5146,12 +5146,12 @@ SESSION COMMANDS
           --clarify                Enable clarify stage before work starts
           --pushback               Enable pushback stage (after clarify if both enabled)
           --plan                   Enable plan stage (after pushback if both enabled)
-          --work-timeout <secs>    Work phase timeout (default: 1200)
-          --review-timeout <secs>  Review phase timeout (default: 600)
-          --clarify-timeout <secs> Clarify stage timeout (default: 600)
-          --pushback-timeout <secs> Pushback stage timeout (default: 600)
-          --plan-timeout <secs>    Plan phase timeout (default: 600)
-          --poll <secs>            Status poll interval (default: 10)
+          --work-timeout <secs>    Work phase timeout (default: ${DEFAULT_WORK_TIMEOUT})
+          --review-timeout <secs>  Review phase timeout (default: ${DEFAULT_REVIEW_TIMEOUT})
+          --clarify-timeout <secs> Clarify stage timeout (default: ${DEFAULT_CLARIFY_TIMEOUT})
+          --pushback-timeout <secs> Pushback stage timeout (default: ${DEFAULT_PUSHBACK_TIMEOUT})
+          --plan-timeout <secs>    Plan phase timeout (default: ${DEFAULT_PLAN_TIMEOUT})
+          --poll <secs>            Status poll interval (default: ${DEFAULT_POLL_INTERVAL})
           --max-rounds <n>         Maximum rounds (default: 10)
           --auto-start             Auto-launch agent CLIs and send task
 
@@ -5169,8 +5169,8 @@ SESSION COMMANDS
         Options:
           --auto-run               Also restart the orchestrator loop
           --no-ttyd                Force tmux-only mode (override recorded setting)
-          --work-timeout <secs>    Work phase timeout (default: 1200)
-          --review-timeout <secs>  Review phase timeout (default: 600)
+          --work-timeout <secs>    Work phase timeout (default: ${DEFAULT_WORK_TIMEOUT})
+          --review-timeout <secs>  Review phase timeout (default: ${DEFAULT_REVIEW_TIMEOUT})
           --max-rounds <n>         Maximum rounds (default: 10)
 
     status
