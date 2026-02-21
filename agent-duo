@@ -2502,6 +2502,9 @@ trigger_final_merge() {
 
         if [ "$elapsed" -ge "$merge_timeout" ]; then
             warn "Final merge timeout (${merge_timeout}s)"
+            if [[ ! "$status" =~ ^(final-merge-done|done)$ ]]; then
+                interrupt_agent "$agent" "$session" "$peer_sync"
+            fi
             break
         fi
 
@@ -2935,6 +2938,9 @@ SYNTH_EOF
 
         if [ "$elapsed" -ge "$merge_timeout" ]; then
             warn "Merge execution timeout (${merge_timeout}s)"
+            if [ "$executor_status" != "merge-done" ]; then
+                interrupt_agent "$executor" "$executor_session" "$peer_sync"
+            fi
             break
         fi
 
@@ -2982,6 +2988,9 @@ SYNTH_EOF
 
             if [ "$elapsed" -ge "$review_timeout" ]; then
                 warn "Merge review timeout (${review_timeout}s)"
+                if [ "$reviewer_status" != "merge-review-done" ]; then
+                    interrupt_agent "$reviewer" "$reviewer_session" "$peer_sync"
+                fi
                 break
             fi
 
@@ -3047,6 +3056,9 @@ SYNTH_EOF
 
                 if [ "$elapsed" -ge "$amend_timeout" ]; then
                     warn "Merge amend timeout (${amend_timeout}s)"
+                    if [ "$executor_status" != "merge-done" ]; then
+                        interrupt_agent "$executor" "$executor_session" "$peer_sync"
+                    fi
                     break
                 fi
 
@@ -4046,6 +4058,14 @@ cmd_run() {
             # Check timeout
             if [ "$elapsed" -ge "$pushback_timeout" ]; then
                 warn "Pushback stage timeout (${pushback_timeout}s)"
+                if ! $claude_pushback_done; then
+                    interrupt_agent "claude" "$claude_session" "$peer_sync"
+                    claude_pushback_done=true
+                fi
+                if ! $codex_pushback_done; then
+                    interrupt_agent "codex" "$codex_session" "$peer_sync"
+                    codex_pushback_done=true
+                fi
                 break
             fi
 
@@ -4201,6 +4221,14 @@ cmd_run() {
 
             if [ "$elapsed" -ge "$plan_timeout" ]; then
                 warn "Plan phase timeout (${plan_timeout}s)"
+                if ! $claude_plan_done; then
+                    interrupt_agent "claude" "$claude_session" "$peer_sync"
+                    claude_plan_done=true
+                fi
+                if ! $codex_plan_done; then
+                    interrupt_agent "codex" "$codex_session" "$peer_sync"
+                    codex_plan_done=true
+                fi
                 break
             fi
 
@@ -4291,6 +4319,14 @@ cmd_run() {
 
             if [ "$elapsed" -ge "$plan_timeout" ]; then
                 warn "Plan-review phase timeout (${plan_timeout}s)"
+                if ! $claude_review_done; then
+                    interrupt_agent "claude" "$claude_session" "$peer_sync"
+                    claude_review_done=true
+                fi
+                if ! $codex_review_done; then
+                    interrupt_agent "codex" "$codex_session" "$peer_sync"
+                    codex_review_done=true
+                fi
                 break
             fi
 
@@ -4791,6 +4827,14 @@ cmd_run() {
                             # Check timeout
                             if [ "$elapsed" -ge "$DEFAULT_INTEGRATE_TIMEOUT" ]; then
                                 warn "Integration timeout (${DEFAULT_INTEGRATE_TIMEOUT}s)"
+                                if ! $claude_integrated && $claude_open; then
+                                    interrupt_agent "claude" "$claude_session" "$peer_sync"
+                                    claude_integrated=true
+                                fi
+                                if ! $codex_integrated && $codex_open; then
+                                    interrupt_agent "codex" "$codex_session" "$peer_sync"
+                                    codex_integrated=true
+                                fi
                                 break
                             fi
 
@@ -4932,6 +4976,14 @@ cmd_run() {
                         # Check timeout
                         if [ "$elapsed" -ge "$DEFAULT_PR_WATCH_TIMEOUT" ]; then
                             warn "PR comment response timeout (${DEFAULT_PR_WATCH_TIMEOUT}s)"
+                            if ! $claude_done; then
+                                interrupt_agent "claude" "$claude_session" "$peer_sync"
+                                claude_done=true
+                            fi
+                            if ! $codex_done; then
+                                interrupt_agent "codex" "$codex_session" "$peer_sync"
+                                codex_done=true
+                            fi
                             break
                         fi
 

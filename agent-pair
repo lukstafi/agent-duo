@@ -1679,6 +1679,9 @@ trigger_pair_final_merge() {
 
         if [ "$elapsed" -ge "$merge_timeout" ]; then
             warn "Final merge timeout (${merge_timeout}s)"
+            if [[ ! "$status" =~ ^(final-merge-done|done)$ ]]; then
+                interrupt_agent "coder" "$session" "$peer_sync"
+            fi
             break
         fi
 
@@ -1849,6 +1852,9 @@ cmd_run() {
 
             if [ "$elapsed" -ge "$gather_timeout" ]; then
                 warn "Reviewer gather timeout (${gather_timeout}s)"
+                if [ "$reviewer_status" != "gather-done" ]; then
+                    interrupt_agent "reviewer" "$reviewer_session" "$peer_sync"
+                fi
                 break
             fi
 
@@ -2069,6 +2075,10 @@ cmd_run() {
             # Check timeout
             if [ "$elapsed" -ge "$pushback_timeout" ]; then
                 warn "Pushback stage timeout (${pushback_timeout}s)"
+                if ! $reviewer_pushback_done; then
+                    interrupt_agent "reviewer" "$reviewer_session" "$peer_sync"
+                    reviewer_pushback_done=true
+                fi
                 break
             fi
 
@@ -2186,6 +2196,10 @@ cmd_run() {
 
                 if [ "$elapsed" -ge "$plan_timeout" ]; then
                     warn "Plan phase timeout (${plan_timeout}s)"
+                    if ! $coder_plan_done; then
+                        interrupt_agent "coder" "$coder_session" "$peer_sync"
+                        coder_plan_done=true
+                    fi
                     break
                 fi
 
@@ -2243,6 +2257,10 @@ cmd_run() {
 
                 if [ "$elapsed" -ge "$plan_timeout" ]; then
                     warn "Plan-review phase timeout (${plan_timeout}s)"
+                    if ! $reviewer_review_done; then
+                        interrupt_agent "reviewer" "$reviewer_session" "$peer_sync"
+                        reviewer_review_done=true
+                    fi
                     break
                 fi
 
@@ -2590,6 +2608,9 @@ cmd_run() {
                             # Check timeout
                             if [ "$elapsed" -ge "$DEFAULT_INTEGRATE_TIMEOUT" ]; then
                                 warn "Integration timeout (${DEFAULT_INTEGRATE_TIMEOUT}s)"
+                                if [[ ! "$coder_status" =~ ^(integrate-done|done)$ ]]; then
+                                    interrupt_agent "coder" "$coder_session" "$peer_sync"
+                                fi
                                 break
                             fi
 
@@ -2666,6 +2687,9 @@ cmd_run() {
                         # Check timeout
                         if [ "$elapsed" -ge "$DEFAULT_PR_WATCH_TIMEOUT" ]; then
                             warn "PR comment response timeout (${DEFAULT_PR_WATCH_TIMEOUT}s)"
+                            if [[ ! "$coder_status" =~ ^(done|pr-created)$ ]]; then
+                                interrupt_agent "coder" "$coder_session" "$peer_sync"
+                            fi
                             break
                         fi
 

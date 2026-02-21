@@ -3101,6 +3101,9 @@ lib_ensure_docs_update() {
         local elapsed=$((SECONDS - start))
         if [ "$elapsed" -ge "$timeout" ]; then
             warn "Docs update timeout (${timeout}s)"
+            if [ "$status" != "docs-update-done" ]; then
+                interrupt_agent "$agent" "$target" "$peer_sync"
+            fi
             [ -n "$previous_phase" ] && set_phase_state "$peer_sync" "$previous_phase"
             return 1
         fi
@@ -3352,6 +3355,14 @@ run_suggest_refactor_duo() {
 
         if [ "$elapsed" -ge "$sr_timeout" ]; then
             warn "Suggest-refactor timeout (${sr_timeout}s)"
+            if ! $claude_done; then
+                interrupt_agent "claude" "$claude_session" "$peer_sync"
+                claude_done=true
+            fi
+            if ! $codex_done; then
+                interrupt_agent "codex" "$codex_session" "$peer_sync"
+                codex_done=true
+            fi
             break
         fi
 
@@ -3413,6 +3424,9 @@ run_suggest_refactor_pair() {
 
         if [ "$elapsed" -ge "$sr_timeout" ]; then
             warn "Suggest-refactor timeout (${sr_timeout}s)"
+            if [ "$status" != "suggest-refactor-done" ]; then
+                interrupt_agent "coder" "$coder_session" "$peer_sync"
+            fi
             break
         fi
 
