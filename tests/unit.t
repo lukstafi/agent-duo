@@ -167,6 +167,22 @@ else
     test_fail "got: $STATUS"
 fi
 
+test_start "get_agent_status_epoch parses epoch correctly"
+EPOCH=$(get_agent_status_epoch "claude" "$MOCK_PEER_SYNC")
+if assert_eq "$EPOCH" "1234567890"; then
+    test_pass
+else
+    test_fail "got: $EPOCH"
+fi
+
+test_start "get_agent_status_epoch returns 0 for missing file"
+EPOCH=$(get_agent_status_epoch "nonexistent" "$MOCK_PEER_SYNC")
+if assert_eq "$EPOCH" "0"; then
+    test_pass
+else
+    test_fail "got: $EPOCH"
+fi
+
 #------------------------------------------------------------------------------
 # Test: Phase token/state helper
 #------------------------------------------------------------------------------

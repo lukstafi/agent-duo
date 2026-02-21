@@ -154,12 +154,13 @@ Max rounds:     10
 
 === Round 1: Work Phase ===
   Waiting... claude=working codex=working (120s/1200s)
-  Waiting... claude=working codex=done (180s/1200s)
-  Waiting... claude=done codex=done (240s/1200s)
+  Waiting... claude=working codex=done 180s (180s/1200s)
+  Waiting... claude=done 240s codex=done 180s (240s/1200s)
 
 === Round 1: Review Phase ===
   Waiting... claude=reviewing codex=reviewing (30s/600s)
-  Waiting... claude=review-done codex=review-done (90s/600s)
+  Waiting... claude=review-done 85s codex=reviewing (90s/600s)
+  Waiting... claude=review-done 85s codex=review-done 90s (90s/600s)
 
 === Round 2: Work Phase ===
   ...

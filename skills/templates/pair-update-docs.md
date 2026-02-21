@@ -23,6 +23,7 @@ Suggested commands:
 
 ```bash
 DATE=$(date +%F)
+ROLE="coder"
 STAGING="AGENTS_STAGING.md"
 
 # Create the staging file if it doesn't exist
@@ -36,7 +37,7 @@ STAGING_EOF
 fi
 
 cat >> "$STAGING" << ENTRY_EOF
-<!-- Entry: ${FEATURE}-${MY_NAME} | ${DATE} -->
+<!-- Entry: ${FEATURE}-${ROLE} | ${DATE} -->
 ### [Short title]
 
 [What should future agents know? Keep it concise and actionable.]
@@ -53,10 +54,11 @@ Write workflow feedback to the sync directory so it can be collected later:
 
 ```bash
 DATE=$(date +%F)
-FEEDBACK_FILE="$PEER_SYNC/workflow-feedback-${MY_NAME}.md"
+ROLE="coder"
+FEEDBACK_FILE="$PEER_SYNC/workflow-feedback-${ROLE}.md"
 
 cat > "$FEEDBACK_FILE" << FEEDBACK_EOF
-# Workflow feedback (${MY_NAME}) - ${FEATURE} - ${DATE}
+# Workflow feedback (${ROLE}) - ${FEATURE} - ${DATE}
 
 - [Actionable feedback about agent-pair workflow/skills/tooling]
 - [Another specific, actionable point]
@@ -68,7 +70,7 @@ Keep feedback actionable (avoid generic complaints). Include missing commands, u
 ## 3) Signal completion
 
 ```bash
-agent-pair signal "$MY_NAME" docs-update-done "learnings captured"
+agent-pair signal coder docs-update-done "learnings captured"
 ```
 
 The orchestrator will handle PR creation after docs are updated.
