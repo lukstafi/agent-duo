@@ -480,9 +480,12 @@ Sent: $(date)"
     # --- Hook Configuration ---
     echo "=== Hook Configuration ==="
 
-    local notify_script="$HOME/.local/bin/agent-duo-notify"
+    local notify_script="$HOME/.local/bin/agent-duo-and-pair-notify"
+    local legacy_notify_script="$HOME/.local/bin/agent-duo-notify"
     if [ -x "$notify_script" ]; then
         success "Notify script: $notify_script"
+    elif [ -x "$legacy_notify_script" ]; then
+        success "Notify script (legacy): $legacy_notify_script"
     else
         warn "Notify script: NOT FOUND or not executable"
         warn "  Run: agent-duo setup"
@@ -492,7 +495,7 @@ Sent: $(date)"
     # Check Claude hooks
     local claude_settings="$HOME/.claude/settings.json"
     if [ -f "$claude_settings" ]; then
-        if grep -q "agent-duo-notify" "$claude_settings" 2>/dev/null; then
+        if grep -q "agent-duo-and-pair-notify\\|agent-duo-notify" "$claude_settings" 2>/dev/null; then
             success "Claude hooks: configured"
         else
             warn "Claude hooks: not configured for agent-duo"
@@ -505,7 +508,7 @@ Sent: $(date)"
     # Check Codex hooks
     local codex_config="$HOME/.codex/config.toml"
     if [ -f "$codex_config" ]; then
-        if grep -q "agent-duo-notify" "$codex_config" 2>/dev/null; then
+        if grep -q "agent-duo-and-pair-notify\\|agent-duo-notify" "$codex_config" 2>/dev/null; then
             success "Codex hooks: configured"
         else
             warn "Codex hooks: not configured for agent-duo"
@@ -996,7 +999,8 @@ start_single_session() {
             "$clarify_mode" "$clarify_timeout" "$pushback_mode" "$pushback_timeout" \
             "$plan_mode" "$plan_timeout" "$early_pr"
     else
-        start_tmux_mode "$feature" "$root_worktree" "$worktree_claude" "$worktree_codex" "$peer_sync" "$codex_thinking" "$clarify_mode" "$pushback_mode" "$plan_mode"
+        start_tmux_mode "$feature" "$root_worktree" "$worktree_claude" "$worktree_codex" "$peer_sync" "$codex_thinking" "$clarify_mode" "$pushback_mode" "$plan_mode" \
+            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" "$early_pr"
     fi
 }
 
@@ -1010,6 +1014,14 @@ start_tmux_mode() {
     local clarify_mode="${7:-false}"
     local pushback_mode="${8:-false}"
     local plan_mode="${9:-false}"
+    local auto_run="${10:-false}"
+    local work_timeout="${11:-$DEFAULT_WORK_TIMEOUT}"
+    local review_timeout="${12:-$DEFAULT_REVIEW_TIMEOUT}"
+    local max_rounds="${13:-10}"
+    local clarify_timeout="${14:-$DEFAULT_CLARIFY_TIMEOUT}"
+    local pushback_timeout="${15:-$DEFAULT_PUSHBACK_TIMEOUT}"
+    local plan_timeout="${16:-$DEFAULT_PLAN_TIMEOUT}"
+    local early_pr="${17:-false}"
 
     local session_name="duo-${feature}"
 
@@ -1062,6 +1074,29 @@ start_tmux_mode() {
     echo "To start agents, in each window run their CLI:"
     echo "  claude window: $(get_agent_cmd claude)"
     echo "  codex window:  $(get_agent_cmd codex "$codex_thinking")"
+
+    if [ "$auto_run" = "true" ]; then
+        info "Starting orchestrator with --auto-start..."
+        local run_cmd="agent-duo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
+        if [ "$clarify_mode" = "true" ]; then
+            run_cmd="$run_cmd --clarify-timeout $clarify_timeout"
+        fi
+        if [ "$pushback_mode" = "true" ]; then
+            run_cmd="$run_cmd --pushback-timeout $pushback_timeout"
+        fi
+        if [ "$plan_mode" = "true" ]; then
+            run_cmd="$run_cmd --plan-timeout $plan_timeout"
+        fi
+        if [ "$early_pr" = "true" ]; then
+            run_cmd="$run_cmd --early-pr"
+        fi
+        tmux send-keys -t "$session_name:orchestrator" "$run_cmd"
+        tmux send-keys -t "$session_name:orchestrator" C-m
+    else
+        echo "Start orchestrator with: agent-duo run --auto-start"
+    fi
+    echo "Stop with: agent-duo stop"
+
     if [ "$clarify_mode" = "true" ]; then
         echo ""
         echo "Clarify stage enabled. After agents submit their approaches:"

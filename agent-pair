@@ -98,6 +98,40 @@ REVIEWER_PORT=$reviewer_port
 EOF
 }
 
+# Parse pair-mode verdict files robustly.
+# Accepts explicit verdict markers and avoids substring false positives
+# (for example, narrative text containing "approved" or "approve").
+# Usage: parse_pair_verdict <file>
+# Output: APPROVE | REQUEST_CHANGES (stdout), non-zero if unknown.
+parse_pair_verdict() {
+    local file="$1"
+    [ -f "$file" ] || return 1
+
+    # Prefer explicit verdict lines first.
+    if grep -Eiq '^[[:space:]]*`?REQUEST_CHANGES`?[[:space:]]*$' "$file" || \
+       grep -Eiq '^[[:space:]]*verdict[[:space:]]*:[[:space:]]*`?REQUEST_CHANGES`?[[:space:]]*$' "$file"; then
+        echo "REQUEST_CHANGES"
+        return 0
+    fi
+    if grep -Eiq '^[[:space:]]*`?APPROVE`?[[:space:]]*$' "$file" || \
+       grep -Eiq '^[[:space:]]*verdict[[:space:]]*:[[:space:]]*`?APPROVE`?[[:space:]]*$' "$file"; then
+        echo "APPROVE"
+        return 0
+    fi
+
+    # Backward-compatible fallback: whole-token matches only.
+    if grep -Eiq '(^|[^[:alnum:]_])REQUEST_CHANGES([^[:alnum:]_]|$)' "$file"; then
+        echo "REQUEST_CHANGES"
+        return 0
+    fi
+    if grep -Eiq '(^|[^[:alnum:]_])APPROVE([^[:alnum:]_]|$)' "$file"; then
+        echo "APPROVE"
+        return 0
+    fi
+
+    return 1
+}
+
 #------------------------------------------------------------------------------
 # Command: setup
 #------------------------------------------------------------------------------
@@ -491,7 +525,8 @@ start_single_pair_session() {
         start_ttyd_mode_pair "$feature" "$worktree" "$worktree" "$peer_sync" \
             "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$codex_thinking" "$clarify_mode" "$clarify_timeout" "$coder" "$reviewer" "$pushback_mode" "$pushback_timeout" "$gather_mode" "$gather_timeout" "$plan_mode" "$plan_timeout" "$early_pr"
     else
-        start_tmux_mode_pair "$feature" "$worktree" "$worktree" "$peer_sync" "$codex_thinking" "$clarify_mode" "$coder" "$reviewer" "$pushback_mode" "$gather_mode" "$plan_mode"
+        start_tmux_mode_pair "$feature" "$worktree" "$worktree" "$peer_sync" "$codex_thinking" "$clarify_mode" "$coder" "$reviewer" "$pushback_mode" "$gather_mode" "$plan_mode" \
+            "$auto_run" "$work_timeout" "$review_timeout" "$max_rounds" "$gather_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" "$early_pr"
     fi
 }
 
@@ -507,6 +542,15 @@ start_tmux_mode_pair() {
     local pushback_mode="${9:-false}"
     local gather_mode="${10:-false}"
     local plan_mode="${11:-false}"
+    local auto_run="${12:-false}"
+    local work_timeout="${13:-$DEFAULT_WORK_TIMEOUT}"
+    local review_timeout="${14:-$DEFAULT_REVIEW_TIMEOUT}"
+    local max_rounds="${15:-10}"
+    local gather_timeout="${16:-$DEFAULT_GATHER_TIMEOUT}"
+    local clarify_timeout="${17:-$DEFAULT_CLARIFY_TIMEOUT}"
+    local pushback_timeout="${18:-$DEFAULT_PUSHBACK_TIMEOUT}"
+    local plan_timeout="${19:-$DEFAULT_PLAN_TIMEOUT}"
+    local early_pr="${20:-false}"
 
     local session_name="pair-${feature}"
 
@@ -559,6 +603,32 @@ start_tmux_mode_pair() {
     echo "To start agents, in each window run their CLI:"
     echo "  coder window:    $(get_agent_cmd "$coder" "$codex_thinking")"
     echo "  reviewer window: $(get_agent_cmd "$reviewer" "$codex_thinking")"
+
+    if [ "$auto_run" = "true" ]; then
+        info "Starting orchestrator with --auto-start..."
+        local run_cmd="agent-pair run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
+        if [ "$gather_mode" = "true" ]; then
+            run_cmd="$run_cmd --gather-timeout $gather_timeout"
+        fi
+        if [ "$clarify_mode" = "true" ]; then
+            run_cmd="$run_cmd --clarify-timeout $clarify_timeout"
+        fi
+        if [ "$pushback_mode" = "true" ]; then
+            run_cmd="$run_cmd --pushback-timeout $pushback_timeout"
+        fi
+        if [ "$plan_mode" = "true" ]; then
+            run_cmd="$run_cmd --plan-timeout $plan_timeout"
+        fi
+        if [ "$early_pr" = "true" ]; then
+            run_cmd="$run_cmd --early-pr"
+        fi
+        tmux send-keys -t "$session_name:orchestrator" "$run_cmd"
+        tmux send-keys -t "$session_name:orchestrator" C-m
+    else
+        echo "Start orchestrator with: agent-pair run --auto-start"
+    fi
+    echo "Stop with: agent-pair stop"
+
     if [ "$gather_mode" = "true" ]; then
         echo ""
         echo "Gather stage enabled. The reviewer will first:"
@@ -2283,20 +2353,16 @@ cmd_run() {
             fi
 
             local verdict=""
-            if [ -f "$peer_sync/plan-review.md" ]; then
-                if grep -qi "APPROVE" "$peer_sync/plan-review.md"; then
-                    verdict="APPROVE"
-                elif grep -qi "REQUEST_CHANGES" "$peer_sync/plan-review.md"; then
-                    verdict="REQUEST_CHANGES"
-                fi
-            fi
+            verdict="$(parse_pair_verdict "$peer_sync/plan-review.md" 2>/dev/null || true)"
 
             local reviewer_msg
             reviewer_msg="$(cut -d'|' -f3- < "$peer_sync/reviewer.status" 2>/dev/null)" || reviewer_msg=""
-            if echo "$reviewer_msg" | grep -qi "approve"; then
-                verdict="APPROVE"
-            elif echo "$reviewer_msg" | grep -qi "request[ _-]*changes"; then
-                verdict="REQUEST_CHANGES"
+            if [ -z "$verdict" ]; then
+                if echo "$reviewer_msg" | grep -Eiq '(^|[^[:alnum:]_])REQUEST[ _-]*CHANGES([^[:alnum:]_]|$)'; then
+                    verdict="REQUEST_CHANGES"
+                elif echo "$reviewer_msg" | grep -Eiq '(^|[^[:alnum:]_])APPROVE([^[:alnum:]_]|$)'; then
+                    verdict="APPROVE"
+                fi
             fi
 
             if [ "$verdict" = "APPROVE" ]; then
@@ -2352,7 +2418,9 @@ cmd_run() {
 
         # Check if review from a previous run was already approved
         local prev_review="$peer_sync/reviews/round-${round}-review.md"
-        if [ -f "$prev_review" ] && grep -qi "APPROVE" "$prev_review" 2>/dev/null; then
+        local prev_verdict=""
+        prev_verdict="$(parse_pair_verdict "$prev_review" 2>/dev/null || true)"
+        if [ "$prev_verdict" = "APPROVE" ]; then
             success "Found approved review (round $round). Creating PR..."
             lib_commit_round "$worktree" "$round" "$peer_sync" "coder" >/dev/null
             if ( lib_create_pr "$feature" "coder" "$worktree" "$root" "$peer_sync" "$feature" "pair" "Solution for $feature" \
@@ -2504,22 +2572,22 @@ cmd_run() {
 
         # Check review verdict
         local review_file="$peer_sync/reviews/round-${round}-review.md"
-        if [ -f "$review_file" ]; then
-            if grep -qi "APPROVE" "$review_file" 2>/dev/null; then
-                success "Reviewer approved! Creating PR..."
-                # Commit any last changes before creating PR
-                lib_commit_round "$worktree" "$round" "$peer_sync" "coder" >/dev/null
-                if ( lib_create_pr "$feature" "coder" "$worktree" "$root" "$peer_sync" "$feature" "pair" "Solution for $feature" \
-                     && persist_workflow_feedback "$peer_sync" "$feature" "pair" \
-                     && echo "complete" > "$peer_sync/session" ); then
-                    success "PR created!"
-                else
-                    warn "PR creation failed — create manually with: agent-pair pr"
-                fi
-                break
+        local review_verdict=""
+        review_verdict="$(parse_pair_verdict "$review_file" 2>/dev/null || true)"
+        if [ "$review_verdict" = "APPROVE" ]; then
+            success "Reviewer approved! Creating PR..."
+            # Commit any last changes before creating PR
+            lib_commit_round "$worktree" "$round" "$peer_sync" "coder" >/dev/null
+            if ( lib_create_pr "$feature" "coder" "$worktree" "$root" "$peer_sync" "$feature" "pair" "Solution for $feature" \
+                 && persist_workflow_feedback "$peer_sync" "$feature" "pair" \
+                 && echo "complete" > "$peer_sync/session" ); then
+                success "PR created!"
             else
-                info "Reviewer requested changes. Proceeding to next round."
+                warn "PR creation failed — create manually with: agent-pair pr"
             fi
+            break
+        elif [ "$review_verdict" = "REQUEST_CHANGES" ]; then
+            info "Reviewer requested changes. Proceeding to next round."
         fi
 
         # Check for escalations before transitioning to next work round
@@ -3112,8 +3180,10 @@ SESSION COMMANDS
         Creates one shared worktree, two tmux sessions (coder + reviewer), and ttyd web terminals.
 
         Options:
-          --coder <agent>        Agent for coding (default: claude)
-          --reviewer <agent>     Agent for reviewing (default: codex)
+          --claude               Shorthand: coder=claude, reviewer=codex
+          --codex                Shorthand: coder=codex, reviewer=claude
+          --coder <agent>        Agent for coding (use with --reviewer)
+          --reviewer <agent>     Agent for reviewing (use with --coder)
           --auto-run             Start orchestrator immediately
           --no-ttyd              Use single tmux session instead of web terminals
           --gather               Enable gather stage (reviewer collects task context)
