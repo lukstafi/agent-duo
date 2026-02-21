@@ -2522,6 +2522,9 @@ cmd_run() {
         fi
 
         round=$((round + 1))
+        # Persist next round so restarts continue from the next cycle
+        # instead of replaying the just-finished round.
+        echo "$round" > "$peer_sync/round"
     done
 
     if [ "$round" -gt "$max_rounds" ]; then
