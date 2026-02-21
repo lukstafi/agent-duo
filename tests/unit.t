@@ -168,6 +168,59 @@ else
 fi
 
 #------------------------------------------------------------------------------
+# Test: Phase token/state helper
+#------------------------------------------------------------------------------
+
+echo ""
+echo "--- Phase State ---"
+
+PHASE_SYNC="$TEST_DIR/phase-sync"
+mkdir -p "$PHASE_SYNC"
+
+test_start "set_phase_state writes phase and round-aware token"
+echo "3" > "$PHASE_SYNC/round"
+set_phase_state "$PHASE_SYNC" "review"
+PHASE="$(cat "$PHASE_SYNC/phase")"
+TOKEN="$(cat "$PHASE_SYNC/phase-token")"
+SEQ="$(cat "$PHASE_SYNC/phase-seq")"
+if [ "$PHASE" = "review" ] && [ "$TOKEN" = "review|r3|s1" ] && [ "$SEQ" = "1" ]; then
+    test_pass
+else
+    test_fail "phase=$PHASE token=$TOKEN seq=$SEQ"
+fi
+
+test_start "set_phase_state increments sequence for next phase"
+set_phase_state "$PHASE_SYNC" "work"
+TOKEN="$(cat "$PHASE_SYNC/phase-token")"
+SEQ="$(cat "$PHASE_SYNC/phase-seq")"
+if [ "$TOKEN" = "work|r3|s2" ] && [ "$SEQ" = "2" ]; then
+    test_pass
+else
+    test_fail "token=$TOKEN seq=$SEQ"
+fi
+
+test_start "set_phase_state supports explicit round override"
+set_phase_state "$PHASE_SYNC" "plan" "9"
+TOKEN="$(cat "$PHASE_SYNC/phase-token")"
+SEQ="$(cat "$PHASE_SYNC/phase-seq")"
+if [ "$TOKEN" = "plan|r9|s3" ] && [ "$SEQ" = "3" ]; then
+    test_pass
+else
+    test_fail "token=$TOKEN seq=$SEQ"
+fi
+
+test_start "set_phase_state falls back to round 0 for invalid round"
+echo "not-a-number" > "$PHASE_SYNC/round"
+set_phase_state "$PHASE_SYNC" "clarify"
+TOKEN="$(cat "$PHASE_SYNC/phase-token")"
+SEQ="$(cat "$PHASE_SYNC/phase-seq")"
+if [ "$TOKEN" = "clarify|r0|s4" ] && [ "$SEQ" = "4" ]; then
+    test_pass
+else
+    test_fail "token=$TOKEN seq=$SEQ"
+fi
+
+#------------------------------------------------------------------------------
 # Test: Agent command generation
 #------------------------------------------------------------------------------
 

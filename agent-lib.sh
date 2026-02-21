@@ -865,6 +865,34 @@ get_agent_status() {
     fi
 }
 
+# Set current phase and advance a round-aware phase token.
+# Usage: set_phase_state <peer_sync> <phase> [round_override]
+set_phase_state() {
+    local peer_sync="$1"
+    local phase="$2"
+    local round="${3:-}"
+    [ -z "$peer_sync" ] || [ -z "$phase" ] && return 1
+
+    if [ -z "$round" ]; then
+        round="$(cat "$peer_sync/round" 2>/dev/null)" || round="0"
+    fi
+    case "$round" in
+        ''|*[!0-9]*) round="0" ;;
+    esac
+
+    local seq_file="$peer_sync/phase-seq"
+    local seq
+    seq="$(cat "$seq_file" 2>/dev/null)" || seq="0"
+    case "$seq" in
+        ''|*[!0-9]*) seq="0" ;;
+    esac
+    seq=$((seq + 1))
+
+    atomic_write "$peer_sync/phase" "$phase"
+    atomic_write "$seq_file" "$seq"
+    atomic_write "$peer_sync/phase-token" "${phase}|r${round}|s${seq}"
+}
+
 # Check if agent has created a PR (from .pr file or by detecting on GitHub)
 has_pr() {
     local agent="$1"
@@ -2318,7 +2346,7 @@ install_notify_hook() {
 #!/usr/bin/env bash
 # Unified notify hook for both agent-duo and agent-pair modes
 # Called by agent hooks when they complete a turn
-# Signals the appropriate status based on current phase and mode
+# Suggests the appropriate status transition based on current phase and mode
 # Usage: agent-duo-and-pair-notify <agent-type>
 #   Agent type (claude or codex) is required as $1
 #   PEER_SYNC is discovered from $PWD/.peer-sync symlink
@@ -2379,29 +2407,35 @@ fi
 
 log_debug "resolved agent=$agent, signal_cmd=$signal_cmd"
 
-# Read current phase
+# Read current phase (and token/round for race-safe tracking)
 phase="$(cat "$PEER_SYNC/phase" 2>/dev/null)" || { log_debug "no phase file"; exit 0; }
+round="$(cat "$PEER_SYNC/round" 2>/dev/null)" || round="0"
+phase_token="$(cat "$PEER_SYNC/phase-token" 2>/dev/null)" || phase_token="${phase}|r${round}|s0"
 
 # Read current status and its epoch
 current_status="$(cut -d'|' -f1 < "$PEER_SYNC/${agent}.status" 2>/dev/null)"
 status_epoch="$(cut -d'|' -f2 < "$PEER_SYNC/${agent}.status" 2>/dev/null)"
-log_debug "phase=$phase status=$current_status epoch=$status_epoch"
+log_debug "phase=$phase token=$phase_token status=$current_status epoch=$status_epoch"
 
-# Guard against cross-phase race: if the phase changed since the last hook
-# firing, this is likely a stale hook from the previous phase's idle transition
-# executing after the orchestrator already advanced to the next phase.
-# A stale hook "acknowledges" the new phase (stores it), so the subsequent
-# legitimate hook (same phase) can proceed.
+# Guard against cross-phase race using phase token. Also clear old advice when
+# token changes so each token can produce at most one nudge.
 last_hook_file="$PEER_SYNC/${agent}.last-hook-phase"
 last_hook_phase="$(cat "$last_hook_file" 2>/dev/null)" || last_hook_phase=""
+last_hook_token_file="$PEER_SYNC/${agent}.last-hook-token"
+last_hook_token="$(cat "$last_hook_token_file" 2>/dev/null)" || last_hook_token=""
+advice_key_file="$PEER_SYNC/${agent}.last-advice-key"
+advice_file="$PEER_SYNC/${agent}.transition-advice"
 echo "$phase" > "$last_hook_file"
-if [ -n "$last_hook_phase" ] && [ "$phase" != "$last_hook_phase" ]; then
-    # Expected: hook fired after orchestrator already advanced the phase.
-    # The hook acknowledges the new phase and exits silently.
+echo "$phase_token" > "$last_hook_token_file"
+if [ -n "$last_hook_token" ] && [ "$phase_token" != "$last_hook_token" ]; then
+    rm -f "$advice_key_file" "$advice_file"
+    # Stale hook for a previous phase/round token: acknowledge and exit.
+    log_debug "stale hook detected (phase/token changed from $last_hook_phase/$last_hook_token)"
     exit 0
 fi
 
-# Determine what status to signal based on phase
+# Determine what status transition to advise based on phase
+target_transition=""
 case "$phase" in
     gather)
         # Don't override if already gather-done or beyond
@@ -2415,11 +2449,11 @@ case "$phase" in
         fi
         # Guard: require output file before signaling (cross-phase race protection)
         if [ ! -f "$PEER_SYNC/task-context.md" ]; then
-            log_debug "task-context.md not found yet, not signaling"
-            exit 0
+            log_debug "task-context.md not found yet, not advising"
+            target_transition=""
+        else
+            target_transition="gather-done"
         fi
-        log_debug "signaling gather-done"
-        $signal_cmd signal "$agent" gather-done "completed via hook"
         ;;
     clarify)
         # Don't override if already clarify-done or beyond
@@ -2428,11 +2462,11 @@ case "$phase" in
         esac
         # Guard: require output file before signaling (cross-phase race protection)
         if [ ! -f "$PEER_SYNC/clarify-${agent}.md" ]; then
-            log_debug "clarify-${agent}.md not found yet, not signaling"
-            exit 0
+            log_debug "clarify-${agent}.md not found yet, not advising"
+            target_transition=""
+        else
+            target_transition="clarify-done"
         fi
-        log_debug "signaling clarify-done"
-        $signal_cmd signal "$agent" clarify-done "completed via hook"
         ;;
     pushback)
         # Don't override if already pushback-done or beyond
@@ -2446,11 +2480,11 @@ case "$phase" in
         fi
         # Guard: require output file before signaling (cross-phase race protection)
         if [ ! -f "$PEER_SYNC/pushback-${agent}.md" ]; then
-            log_debug "pushback-${agent}.md not found yet, not signaling"
-            exit 0
+            log_debug "pushback-${agent}.md not found yet, not advising"
+            target_transition=""
+        else
+            target_transition="pushback-done"
         fi
-        log_debug "signaling pushback-done"
-        $signal_cmd signal "$agent" pushback-done "completed via hook"
         ;;
     work)
         # Don't override if already done or beyond
@@ -2462,8 +2496,7 @@ case "$phase" in
             log_debug "skipping (not coder in work phase)"
             exit 0
         fi
-        log_debug "signaling done"
-        $signal_cmd signal "$agent" done "completed via hook"
+        target_transition="done"
         ;;
     review)
         # Don't override if already review-done or beyond
@@ -2485,11 +2518,11 @@ case "$phase" in
             review_file="$PEER_SYNC/reviews/round-${review_round}-${agent}-reviews-${review_peer}.md"
         fi
         if [ ! -f "$review_file" ]; then
-            log_debug "review file not found yet ($review_file), not signaling"
-            exit 0
+            log_debug "review file not found yet ($review_file), not advising"
+            target_transition=""
+        else
+            target_transition="review-done"
         fi
-        log_debug "signaling review-done"
-        $signal_cmd signal "$agent" review-done "completed via hook"
         ;;
     plan)
         # Don't override if already plan-done or beyond
@@ -2503,11 +2536,11 @@ case "$phase" in
         fi
         # Guard: require output file before signaling (cross-phase race protection)
         if [ ! -f "$PEER_SYNC/plan-${agent}.md" ]; then
-            log_debug "plan-${agent}.md not found yet, not signaling"
-            exit 0
+            log_debug "plan-${agent}.md not found yet, not advising"
+            target_transition=""
+        else
+            target_transition="plan-done"
         fi
-        log_debug "signaling plan-done"
-        $signal_cmd signal "$agent" plan-done "completed via hook"
         ;;
     plan-review)
         # Don't override if already plan-review-done or beyond
@@ -2526,11 +2559,11 @@ case "$phase" in
             plan_review_file="$PEER_SYNC/plan-review-${agent}.md"
         fi
         if [ ! -f "$plan_review_file" ]; then
-            log_debug "plan-review file not found yet ($plan_review_file), not signaling"
-            exit 0
+            log_debug "plan-review file not found yet ($plan_review_file), not advising"
+            target_transition=""
+        else
+            target_transition="plan-review-done"
         fi
-        log_debug "signaling plan-review-done"
-        $signal_cmd signal "$agent" plan-review-done "completed via hook"
         ;;
     update-docs)
         # Don't override if already docs-update-done or beyond
@@ -2539,11 +2572,11 @@ case "$phase" in
         esac
         # Guard: require output file before signaling (cross-phase race protection)
         if [ ! -f "$PEER_SYNC/workflow-feedback-${agent}.md" ]; then
-            log_debug "workflow-feedback-${agent}.md not found yet, not signaling"
-            exit 0
+            log_debug "workflow-feedback-${agent}.md not found yet, not advising"
+            target_transition=""
+        else
+            target_transition="docs-update-done"
         fi
-        log_debug "signaling docs-update-done"
-        $signal_cmd signal "$agent" docs-update-done "completed via hook"
         ;;
     suggest-refactor)
         # Don't override if already suggest-refactor-done
@@ -2553,19 +2586,52 @@ case "$phase" in
         # Only signal if the agent has actually written the suggestion file
         suggest_file="$PEER_SYNC/suggest-refactor-${agent}.md"
         if [ ! -f "$suggest_file" ]; then
-            log_debug "suggest-refactor file not found yet ($suggest_file), not signaling"
-            exit 0
+            log_debug "suggest-refactor file not found yet ($suggest_file), not advising"
+            target_transition=""
+        else
+            target_transition="suggest-refactor-done"
         fi
-        log_debug "signaling suggest-refactor-done"
-        $signal_cmd signal "$agent" suggest-refactor-done "completed via hook"
         ;;
     pr-comments|merge|merge-review)
         # Phases where the hook has no role — exit silently
+        target_transition=""
         ;;
     *)
         log_debug "unknown phase: $phase"
+        target_transition=""
         ;;
 esac
+
+[ -z "$target_transition" ] && exit 0
+
+# Skip if transition was already signaled during the turn that just completed.
+if [ "$current_status" = "$target_transition" ]; then
+    log_debug "skipping advice (already transitioned to $target_transition)"
+    exit 0
+fi
+
+advice_key="${phase_token}|${target_transition}"
+last_advice_key="$(cat "$advice_key_file" 2>/dev/null)" || last_advice_key=""
+if [ "$advice_key" = "$last_advice_key" ]; then
+    log_debug "skipping duplicate advice for key=$advice_key"
+    exit 0
+fi
+
+cat > "$advice_file" << EOF
+transition=$target_transition
+phase=$phase
+token=$phase_token
+agent=$agent
+mode=$mode
+status=$current_status
+status_epoch=$status_epoch
+advice_epoch=$(date +%s)
+EOF
+echo "$advice_key" > "$advice_key_file"
+
+nudge_msg="If you are finished with $phase, run: $signal_cmd signal $agent $target_transition \"completed\""
+log_debug "advising transition=$target_transition and nudging agent"
+$signal_cmd nudge "$agent" "$nudge_msg" >/dev/null 2>&1 || true
 NOTIFY_EOF
     chmod +x "$notify_script"
     echo "$notify_script"
@@ -2582,7 +2648,7 @@ configure_codex_notify() {
     if [ -f "$codex_config" ]; then
         if grep -q "^notify" "$codex_config"; then
             warn "Codex config already has 'notify' setting - not overwriting"
-            warn "To enable auto-signaling, set: $notify_line"
+            warn "To enable transition advice nudges, set: $notify_line"
         else
             # Insert at top level (before first [section] or at start of file)
             local tmp_config
@@ -2626,7 +2692,7 @@ configure_claude_notify() {
         # Check if hooks already configured
         if grep -q '"hooks"' "$claude_settings"; then
             warn "Claude settings already has 'hooks' - not overwriting"
-            warn "To enable auto-signaling, add Stop hook: $notify_script claude"
+            warn "To enable transition advice nudges, add Stop hook: $notify_script claude"
         else
             # Add hooks to existing settings using jq
             local tmp_settings
@@ -2987,7 +3053,7 @@ lib_ensure_docs_update() {
     info "Docs update required before PR creation."
     local previous_phase
     previous_phase="$(cat "$peer_sync/phase" 2>/dev/null)"
-    echo "update-docs" > "$peer_sync/phase"
+    set_phase_state "$peer_sync" "update-docs"
     atomic_write "$peer_sync/${agent}.status" "updating-docs|$(date +%s)|capturing learnings"
 
     local session_name="${mode}-${feature}"
@@ -3012,7 +3078,7 @@ lib_ensure_docs_update() {
 
     if [ "$in_agent_session" = true ] || [ -z "$target" ]; then
         warn "Run the ${mode}-update-docs skill, then re-run: agent-${mode} pr $agent"
-        [ -n "$previous_phase" ] && echo "$previous_phase" > "$peer_sync/phase"
+        [ -n "$previous_phase" ] && set_phase_state "$peer_sync" "$previous_phase"
         return 1
     fi
 
@@ -3035,7 +3101,7 @@ lib_ensure_docs_update() {
         local elapsed=$((SECONDS - start))
         if [ "$elapsed" -ge "$timeout" ]; then
             warn "Docs update timeout (${timeout}s)"
-            [ -n "$previous_phase" ] && echo "$previous_phase" > "$peer_sync/phase"
+            [ -n "$previous_phase" ] && set_phase_state "$peer_sync" "$previous_phase"
             return 1
         fi
         printf "\r  Waiting for %s to finish update-docs... (%ds/%ds)  " "$agent" "$elapsed" "$timeout"
@@ -3043,7 +3109,7 @@ lib_ensure_docs_update() {
     done
     echo ""
     success "Docs update completed for $agent"
-    [ -n "$previous_phase" ] && echo "$previous_phase" > "$peer_sync/phase"
+    [ -n "$previous_phase" ] && set_phase_state "$peer_sync" "$previous_phase"
     return 0
 }
 
@@ -3253,7 +3319,7 @@ run_suggest_refactor_duo() {
     local feature="$4"
 
     info "=== Suggest-Refactor Phase ==="
-    echo "suggest-refactor" > "$peer_sync/phase"
+    set_phase_state "$peer_sync" "suggest-refactor"
 
     # Reset both agent statuses to working
     atomic_write "$peer_sync/claude.status" "working|$(date +%s)|writing refactoring suggestions"
@@ -3322,7 +3388,7 @@ run_suggest_refactor_pair() {
     local feature="$3"
 
     info "=== Suggest-Refactor Phase ==="
-    echo "suggest-refactor" > "$peer_sync/phase"
+    set_phase_state "$peer_sync" "suggest-refactor"
 
     # Reset coder status to working
     atomic_write "$peer_sync/coder.status" "working|$(date +%s)|writing refactoring suggestions"

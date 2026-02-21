@@ -415,26 +415,27 @@ start_single_pair_session() {
     echo "pair" > "$peer_sync/mode"
     echo "$coder" > "$peer_sync/coder-agent"
     echo "$reviewer" > "$peer_sync/reviewer-agent"
+    echo "1" > "$peer_sync/round"
     # Determine initial phase: gather -> clarify -> pushback -> plan -> work
     if [ "$gather_mode" = "true" ]; then
-        echo "gather" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "gather"
         echo "waiting|$(date +%s)|waiting for reviewer to gather context" > "$peer_sync/coder.status"
         echo "gathering|$(date +%s)|starting" > "$peer_sync/reviewer.status"
     elif [ "$clarify_mode" = "true" ]; then
-        echo "clarify" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "clarify"
         echo "clarifying|$(date +%s)|starting" > "$peer_sync/coder.status"
         echo "waiting|$(date +%s)|waiting for coder" > "$peer_sync/reviewer.status"
     elif [ "$pushback_mode" = "true" ]; then
-        echo "pushback" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "pushback"
         echo "waiting|$(date +%s)|waiting for reviewer pushback" > "$peer_sync/coder.status"
         echo "pushing-back|$(date +%s)|starting" > "$peer_sync/reviewer.status"
     elif [ "$plan_mode" = "true" ]; then
-        echo "plan" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "plan"
         echo "planning|$(date +%s)|starting" > "$peer_sync/coder.status"
         echo "waiting|$(date +%s)|waiting for coder plan" > "$peer_sync/reviewer.status"
         echo "1" > "$peer_sync/plan-round"
     else
-        echo "work" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "work"
         echo "working|$(date +%s)|starting" > "$peer_sync/coder.status"
         echo "waiting|$(date +%s)|waiting for coder" > "$peer_sync/reviewer.status"
     fi
@@ -446,7 +447,6 @@ start_single_pair_session() {
     echo "$auto_finish_timeout" > "$peer_sync/auto-finish-timeout"
     echo "$early_pr" > "$peer_sync/early-pr"
     echo "$docs_update_mode" > "$peer_sync/docs-update-mode"
-    echo "1" > "$peer_sync/round"
     echo "$feature" > "$peer_sync/feature"
     [ -n "$followup_pr" ] && echo "$followup_pr" > "$peer_sync/followup-pr"
     echo "$codex_thinking" > "$peer_sync/codex-thinking"
@@ -1127,7 +1127,7 @@ cmd_restart() {
         fi
         if [ "$auto_run" = "true" ]; then
             info "PR created. Transitioning to pr-comments phase for monitoring..."
-            echo "pr-comments" > "$peer_sync/phase"
+            set_phase_state "$peer_sync" "pr-comments"
             echo "active" > "$peer_sync/session"
             local run_cmd="agent-pair run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
             run_cmd="$run_cmd --clarify-timeout $clarify_timeout --pushback-timeout $pushback_timeout"
@@ -1653,7 +1653,7 @@ trigger_pair_final_merge() {
     local pr_url
     pr_url="$(cat "$peer_sync/coder.pr")"
 
-    echo "final-merge" > "$peer_sync/phase"
+    set_phase_state "$peer_sync" "final-merge"
     check_tui_health "$coder" "$session" "$peer_sync" "$tui_exit_behavior"
     atomic_write "$peer_sync/coder.status" "working|$(date +%s)|performing final merge"
 
@@ -1819,7 +1819,7 @@ cmd_run() {
     # Gather phase: reviewer collects context for the coder
     if [ "$gather_mode" = "true" ] && [ ! -f "$peer_sync/gather-confirmed" ]; then
         info "=== Gather Phase ==="
-        echo "gather" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "gather"
 
         # Read task content
         local task_content=""
@@ -1893,7 +1893,7 @@ cmd_run() {
     # Handle clarify phase if enabled and not already confirmed
     if [ "$clarify_mode" = "true" ] && [ ! -f "$peer_sync/clarify-confirmed" ]; then
         info "=== Clarify Phase ==="
-        echo "clarify" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "clarify"
 
         # Read task content
         local task_content=""
@@ -2031,7 +2031,7 @@ cmd_run() {
     # In pair mode, only the reviewer pushes back
     if [ "$pushback_mode" = "true" ] && [ ! -f "$peer_sync/pushback-confirmed" ]; then
         info "=== Pushback Stage ==="
-        echo "pushback" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "pushback"
 
         # Read task content
         local task_content=""
@@ -2123,7 +2123,7 @@ cmd_run() {
 
         # Mark pushback as confirmed
         echo "confirmed" > "$peer_sync/pushback-confirmed"
-        echo "work" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "work"
 
         success "Pushback stage complete!"
         echo ""
@@ -2146,7 +2146,7 @@ cmd_run() {
 
         while [ "$plan_round" -le "$max_plan_rounds" ]; do
             info "=== Plan Phase (Round $plan_round/$max_plan_rounds) ==="
-            echo "plan" > "$peer_sync/phase"
+            set_phase_state "$peer_sync" "plan"
             echo "$plan_round" > "$peer_sync/plan-round"
 
             check_tui_health "coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
@@ -2204,7 +2204,7 @@ cmd_run() {
             fi
 
             info "=== Plan-Review Phase (Round $plan_round/$max_plan_rounds) ==="
-            echo "plan-review" > "$peer_sync/phase"
+            set_phase_state "$peer_sync" "plan-review"
 
             check_tui_health "reviewer" "$reviewer_session" "$peer_sync" "$tui_exit_behavior"
             atomic_write "$peer_sync/reviewer.status" "plan-reviewing|$(date +%s)|plan-review phase round $plan_round"
@@ -2296,13 +2296,13 @@ cmd_run() {
             break
         done
 
-        echo "work" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "work"
         echo ""
     fi
 
     # Set phase to work if not already set
     if [ "$(cat "$peer_sync/phase" 2>/dev/null)" != "work" ]; then
-        echo "work" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "work"
     fi
 
     # Main loop: Sequential work/review
@@ -2344,7 +2344,7 @@ cmd_run() {
         echo ""
         info "=== Round $round: Coder Work Phase ==="
         echo "$round" > "$peer_sync/round"
-        echo "work" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "work"
 
         # Record pre-round HEAD for quiescence detection (detects in-phase commits)
         if [ -d "$worktree" ]; then
@@ -2443,7 +2443,7 @@ cmd_run() {
 
         # Review phase
         info "=== Round $round: Review Phase ==="
-        echo "review" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "review"
 
         atomic_write "$peer_sync/reviewer.status" "reviewing|$(date +%s)|round $round review phase"
         atomic_write "$peer_sync/coder.status" "waiting|$(date +%s)|waiting for review"
@@ -2523,7 +2523,7 @@ cmd_run() {
         else
             echo ""
             info "=== PR Comment Watch Phase ==="
-            echo "pr-comments" > "$peer_sync/phase"
+            set_phase_state "$peer_sync" "pr-comments"
 
             echo "Monitoring PR for new comments..."
             echo "  PR: $pr_url"
@@ -2566,7 +2566,7 @@ cmd_run() {
 
                     if branch_needs_rebase "$coder_branch" "$peer_sync"; then
                         info "Branch needs rebasing onto updated main"
-                        echo "integrate" > "$peer_sync/phase"
+                        set_phase_state "$peer_sync" "integrate"
 
                         # Trigger integrate skill for coder
                         check_tui_health "$coder" "$coder_session" "$peer_sync" "$tui_exit_behavior"
@@ -2602,7 +2602,7 @@ cmd_run() {
                         echo ""
 
                         # Resume pr-comments phase
-                        echo "pr-comments" > "$peer_sync/phase"
+                        set_phase_state "$peer_sync" "pr-comments"
                         info "Integration complete, resuming PR comment watch"
                         # Reset auto-finish timeout after integration activity
                         auto_finish_last_activity=$SECONDS
@@ -2905,7 +2905,7 @@ cmd_confirm() {
     fi
 
     echo "confirmed" > "$peer_sync/clarify-confirmed"
-    echo "work" > "$peer_sync/phase"
+    set_phase_state "$peer_sync" "work"
 
     success "Clarify phase confirmed! Transitioning to work phase."
     echo "Note: If orchestrator is waiting for input, press Enter there to continue."

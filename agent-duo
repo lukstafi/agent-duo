@@ -913,22 +913,23 @@ start_single_session() {
     mkdir -p "$peer_sync/pids"
 
     echo "active" > "$peer_sync/session"
+    echo "1" > "$peer_sync/round"
     # Determine initial phase: clarify -> pushback -> plan -> work
     if [ "$clarify_mode" = "true" ]; then
-        echo "clarify" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "clarify"
         echo "true" > "$peer_sync/clarify-mode"
         echo "clarifying|$(date +%s)|starting" > "$peer_sync/claude.status"
         echo "clarifying|$(date +%s)|starting" > "$peer_sync/codex.status"
     elif [ "$pushback_mode" = "true" ]; then
-        echo "pushback" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "pushback"
         echo "pushing-back|$(date +%s)|starting" > "$peer_sync/claude.status"
         echo "pushing-back|$(date +%s)|starting" > "$peer_sync/codex.status"
     elif [ "$plan_mode" = "true" ]; then
-        echo "plan" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "plan"
         echo "planning|$(date +%s)|starting" > "$peer_sync/claude.status"
         echo "planning|$(date +%s)|starting" > "$peer_sync/codex.status"
     else
-        echo "work" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "work"
         echo "working|$(date +%s)|starting" > "$peer_sync/claude.status"
         echo "working|$(date +%s)|starting" > "$peer_sync/codex.status"
     fi
@@ -939,7 +940,6 @@ start_single_session() {
     echo "$auto_finish" > "$peer_sync/auto-finish"
     echo "$auto_finish_timeout" > "$peer_sync/auto-finish-timeout"
     echo "$early_pr" > "$peer_sync/early-pr"
-    echo "1" > "$peer_sync/round"
     echo "$feature" > "$peer_sync/feature"
     [ -n "$followup_pr" ] && echo "$followup_pr" > "$peer_sync/followup-pr"
     echo "$codex_thinking" > "$peer_sync/codex-thinking"
@@ -1615,7 +1615,7 @@ cmd_restart() {
         fi
         if [ "$auto_run" = "true" ]; then
             info "PRs created. Transitioning to pr-comments phase for monitoring..."
-            echo "pr-comments" > "$peer_sync/phase"
+            set_phase_state "$peer_sync" "pr-comments"
             echo "active" > "$peer_sync/session"
             local run_cmd="agent-duo run --auto-start --work-timeout $work_timeout --review-timeout $review_timeout --max-rounds $max_rounds"
             [ -n "$auto_finish" ] && run_cmd+=" --auto-finish"
@@ -2476,7 +2476,7 @@ trigger_final_merge() {
     local pr_url
     pr_url="$(cat "$peer_sync/${agent}.pr")"
 
-    echo "final-merge" > "$peer_sync/phase"
+    set_phase_state "$peer_sync" "final-merge"
     check_tui_health "$agent" "$session" "$peer_sync" "$tui_exit_behavior"
     atomic_write "$peer_sync/${agent}.status" "working|$(date +%s)|performing final merge"
 
@@ -2552,7 +2552,7 @@ cmd_run_merge() {
     fi
 
     # Initialize merge phase state
-    echo "merge" > "$peer_sync/phase"
+    set_phase_state "$peer_sync" "merge"
     echo "0" > "$peer_sync/merge-round"
     rm -rf "$peer_sync/merge-votes"
     mkdir -p "$peer_sync/merge-votes"
@@ -3077,7 +3077,7 @@ SYNTH_EOF
         send_ntfy "PR ready for merge" "$decision's PR ($winning_pr) has cherry-picks incorporated and is ready for merge to main." "high" "white_check_mark,rocket" 2>/dev/null || true
 
         # Return to PR-comments phase for the winning PR only
-        echo "pr-comments" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "pr-comments"
         info "Returning to PR comment watch phase for final review..."
     else
         warn "Merge phase ended without approval. Manual intervention may be needed."
@@ -3406,7 +3406,7 @@ cmd_confirm() {
     echo "confirmed" > "$peer_sync/clarify-confirmed"
 
     # Transition to work phase
-    echo "work" > "$peer_sync/phase"
+    set_phase_state "$peer_sync" "work"
 
     success "Clarify phase confirmed! Transitioning to work phase."
     echo "Note: If orchestrator is waiting for input, press Enter there to continue."
@@ -3880,7 +3880,7 @@ cmd_run() {
     # Handle clarify phase if enabled and not already confirmed
     if [ "$clarify_mode" = "true" ] && [ ! -f "$peer_sync/clarify-confirmed" ]; then
         info "=== Clarify Phase ==="
-        echo "clarify" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "clarify"
 
         # Read task content
         local task_content=""
@@ -3992,7 +3992,7 @@ cmd_run() {
     # Handle pushback stage if enabled and not already confirmed
     if [ "$pushback_mode" = "true" ] && [ ! -f "$peer_sync/pushback-confirmed" ]; then
         info "=== Pushback Stage ==="
-        echo "pushback" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "pushback"
 
         # Read task content
         local task_content=""
@@ -4123,7 +4123,7 @@ cmd_run() {
 
         # Mark pushback as confirmed
         echo "confirmed" > "$peer_sync/pushback-confirmed"
-        echo "work" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "work"
 
         success "Pushback stage complete!"
         echo ""
@@ -4141,7 +4141,7 @@ cmd_run() {
     # Handle plan phase if enabled and not already confirmed
     if [ "$plan_mode" = "true" ] && [ ! -f "$peer_sync/plan-confirmed" ]; then
         info "=== Plan Phase ==="
-        echo "plan" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "plan"
 
         check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
         atomic_write "$peer_sync/claude.status" "planning|$(date +%s)|plan phase"
@@ -4232,7 +4232,7 @@ cmd_run() {
 
         # Plan-review phase
         info "=== Plan-Review Phase ==="
-        echo "plan-review" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "plan-review"
 
         check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
         atomic_write "$peer_sync/claude.status" "plan-reviewing|$(date +%s)|plan-review phase"
@@ -4316,7 +4316,7 @@ cmd_run() {
         fi
 
         echo "confirmed" > "$peer_sync/plan-confirmed"
-        echo "work" > "$peer_sync/phase"
+        set_phase_state "$peer_sync" "work"
 
         success "Plan phase complete! Proceeding to work phase..."
         echo ""
@@ -4332,7 +4332,7 @@ cmd_run() {
     else
         # Set phase to work if not already set
         if [ "$(cat "$peer_sync/phase" 2>/dev/null)" != "work" ]; then
-            echo "work" > "$peer_sync/phase"
+            set_phase_state "$peer_sync" "work"
         fi
 
         # Resume from saved round or start at 1
@@ -4364,7 +4364,7 @@ cmd_run() {
             echo ""
             info "=== Round $round: Work Phase ==="
             echo "$round" > "$peer_sync/round"
-            echo "work" > "$peer_sync/phase"
+            set_phase_state "$peer_sync" "work"
 
             # Record pre-round HEAD for quiescence detection (detects in-phase commits)
             if ! $claude_converged && [ -d "$worktree_claude" ]; then
@@ -4560,7 +4560,7 @@ cmd_run() {
 
             if $claude_reviews || $codex_reviews; then
                 info "=== Round $round: Review Phase ==="
-                echo "review" > "$peer_sync/phase"
+                set_phase_state "$peer_sync" "review"
 
                 if $claude_reviews; then
                     check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
@@ -4674,7 +4674,7 @@ cmd_run() {
         else
             echo ""
             info "=== PR Comment Watch Phase ==="
-            echo "pr-comments" > "$peer_sync/phase"
+            set_phase_state "$peer_sync" "pr-comments"
 
             echo "Monitoring PRs for new comments..."
             echo "  Claude: $claude_pr"
@@ -4737,7 +4737,7 @@ cmd_run() {
 
                     if $needs_integrate; then
                         info "Branches need rebasing onto updated main"
-                        echo "integrate" > "$peer_sync/phase"
+                        set_phase_state "$peer_sync" "integrate"
 
                         # Trigger integrate skill for agents with open PRs
                         if $claude_open; then
@@ -4800,7 +4800,7 @@ cmd_run() {
                         echo ""
 
                         # Resume pr-comments phase
-                        echo "pr-comments" > "$peer_sync/phase"
+                        set_phase_state "$peer_sync" "pr-comments"
                         info "Integration complete, resuming PR comment watch"
                         # Reset auto-finish timeout after integration activity
                         auto_finish_last_activity=$SECONDS
