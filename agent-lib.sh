@@ -360,6 +360,58 @@ find_task_file() {
     return 1
 }
 
+# Ensure a feature task file is committed before starting sessions.
+# - Normalizes task location to <project_root>/<feature>.md when discovered elsewhere.
+# - Commits untracked or modified task file changes with message: "<feature>.md: agent-<mode>".
+# Returns canonical task file path on stdout when found.
+ensure_task_file_committed() {
+    local project_root="$1"
+    local feature="$2"
+    local mode="${3:-duo}"
+
+    local discovered_task_file
+    if ! discovered_task_file="$(find_task_file "$project_root" "$feature")"; then
+        return 1
+    fi
+
+    local canonical_task_file="$project_root/${feature}.md"
+    local commit_paths=("$discovered_task_file")
+
+    if [ "$discovered_task_file" != "$canonical_task_file" ]; then
+        info "Normalizing task file to ${feature}.md for agent-${mode}"
+        cp "$discovered_task_file" "$canonical_task_file"
+        commit_paths+=("$canonical_task_file")
+    fi
+
+    local needs_commit=false
+    local path rel_path
+    for path in "${commit_paths[@]}"; do
+        rel_path="${path#$project_root/}"
+        if [ -n "$(git -C "$project_root" status --porcelain -- "$rel_path")" ]; then
+            needs_commit=true
+            break
+        fi
+    done
+
+    if [ "$needs_commit" = "true" ]; then
+        local rel_commit_paths=()
+        for path in "${commit_paths[@]}"; do
+            rel_path="${path#$project_root/}"
+            git -C "$project_root" add -- "$rel_path"
+            rel_commit_paths+=("$rel_path")
+        done
+
+        if ! git -C "$project_root" diff --cached --quiet -- "${rel_commit_paths[@]}"; then
+            info "Committing task file changes for $feature"
+            git -C "$project_root" commit -m "${feature}.md: agent-${mode}" -- "${rel_commit_paths[@]}" >/dev/null \
+                || die "Failed to commit task file changes for $feature"
+            success "Committed ${feature}.md for agent-${mode}"
+        fi
+    fi
+
+    echo "$canonical_task_file"
+}
+
 # Read task file content for a feature, suitable for pasting into an agent prompt.
 # If the file is small enough, outputs the content directly.
 # If the file exceeds the threshold, outputs a instruction to read the file instead.
@@ -3227,51 +3279,7 @@ lib_create_pr() {
         return 1
     fi
 
-    # Check if feature file should be removed from the PR
-    # Only remove if: (1) it was copied into the worktree by the session (not on main),
-    # and (2) the agent didn't modify it. Files already in the repo stay regardless.
-    local feature_file="$worktree/${feature}.md"
-    if [ -f "$feature_file" ]; then
-        local main_branch
-        main_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')" || true
-        if [ -z "$main_branch" ]; then
-            for candidate in main master; do
-                if git rev-parse --verify "$candidate" >/dev/null 2>&1; then
-                    main_branch="$candidate"
-                    break
-                fi
-            done
-        fi
-        if [ -z "$main_branch" ]; then
-            main_branch="HEAD~1"
-        fi
-
-        # If the file exists on main, leave it alone — it's part of the repo
-        if git show "${main_branch}:${feature}.md" >/dev/null 2>&1; then
-            : # File exists on main, keep it (even if unmodified)
-        else
-            # File was added by session setup — remove if agent didn't modify it
-            local file_modified=false
-            local original_task_file
-            if original_task_file="$(find_task_file "$root" "$feature")"; then
-                if ! diff -q "$feature_file" "$original_task_file" >/dev/null 2>&1; then
-                    file_modified=true
-                fi
-            fi
-
-            if [ "$file_modified" = "false" ]; then
-                info "Feature file ${feature}.md was not modified - removing it"
-                if git ls-files --error-unmatch "${feature}.md" >/dev/null 2>&1; then
-                    git rm "${feature}.md"
-                    git commit -m "Remove unmodified feature file ${feature}.md"
-                else
-                    rm -f "${feature}.md"
-                fi
-            fi
-        fi
-    fi
-
-    # Commit only leftover changes (docs-update, feature-file cleanup)
+    # Commit only leftover changes (typically docs-update artifacts)
     if [ -n "$(git status --porcelain)" ]; then
         git add -A
         git commit -m "Pre-PR cleanup for $feature" || true
