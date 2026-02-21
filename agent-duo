@@ -4492,6 +4492,7 @@ cmd_run() {
                 has_pr "codex" "$peer_sync" && codex_done=true
 
                 if $claude_done && $codex_done; then
+                    printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$work_timeout"
                     break
                 fi
 
@@ -4643,6 +4644,7 @@ cmd_run() {
                     has_pr "codex" "$peer_sync" && codex_done=true
 
                     if $claude_done && $codex_done; then
+                        printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$review_timeout"
                         break
                     fi
 
@@ -4971,6 +4973,7 @@ cmd_run() {
                         fi
 
                         if $claude_done && $codex_done; then
+                            printf "\r  Waiting... claude=%s codex=%s (%ds)  " "$claude_status" "$codex_status" "$elapsed"
                             break
                         fi
 
