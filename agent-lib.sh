@@ -741,6 +741,12 @@ agent_tui_is_running() {
     esac
 }
 
+# Validate Codex resume key format (strict UUID)
+is_valid_codex_resume_key() {
+    local key="$1"
+    [[ "$key" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
+}
+
 # Extract Codex resume key from tmux pane buffer
 # Returns the resume key if found, empty string otherwise
 get_codex_resume_key() {
@@ -750,11 +756,16 @@ get_codex_resume_key() {
     local buffer
     buffer="$(tmux capture-pane -t "$session" -p -S -50 2>/dev/null)" || return 1
 
-    # Look for "codex resume <key>" pattern
+    # Look for "codex resume <key>" pattern with strict UUID-shaped keys only.
     # Codex outputs: "To continue this session, run codex resume <uuid>"
-    # UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
     local resume_key
-    resume_key="$(echo "$buffer" | grep -oE 'codex resume [a-zA-Z0-9-]+' | tail -1 | awk '{print $3}')"
+    resume_key="$(echo "$buffer" | \
+        grep -oE 'codex resume [0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | \
+        tail -1 | awk '{print $3}')"
+
+    if ! is_valid_codex_resume_key "$resume_key"; then
+        return 1
+    fi
 
     echo "$resume_key"
 }

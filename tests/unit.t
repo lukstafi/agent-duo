@@ -259,6 +259,20 @@ else
     test_fail "got: $CMD"
 fi
 
+test_start "is_valid_codex_resume_key accepts UUID-shaped key"
+if is_valid_codex_resume_key "123e4567-e89b-12d3-a456-426614174000"; then
+    test_pass
+else
+    test_fail "valid UUID-shaped resume key rejected"
+fi
+
+test_start "is_valid_codex_resume_key rejects non-UUID key"
+if is_valid_codex_resume_key "not-a-real-resume-key" >/dev/null 2>&1; then
+    test_fail "non-UUID resume key accepted"
+else
+    test_pass
+fi
+
 #------------------------------------------------------------------------------
 # Test: Task file discovery
 #------------------------------------------------------------------------------

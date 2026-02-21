@@ -121,7 +121,9 @@ persist_codex_resume_key() {
 
     local resume_key
     resume_key="$(get_codex_resume_key "$tmux_name" 2>/dev/null || true)"
-    [ -n "$resume_key" ] || return 1
+    if ! is_valid_codex_resume_key "$resume_key"; then
+        return 1
+    fi
 
     upsert_session_field "$session_file" "resume_key" "$resume_key"
     echo "$resume_key"
@@ -396,7 +398,11 @@ cmd_start() {
     # This gives restart a deterministic key instead of relying on latest-session heuristics.
     local resume_key=""
     if [ "$AGENT_TYPE" = "codex" ] && [ "$use_branch" = false ]; then
-        resume_key="$(get_codex_resume_key "$tmux_name" 2>/dev/null || true)"
+        local discovered_resume_key
+        discovered_resume_key="$(get_codex_resume_key "$tmux_name" 2>/dev/null || true)"
+        if is_valid_codex_resume_key "$discovered_resume_key"; then
+            resume_key="$discovered_resume_key"
+        fi
     fi
 
     # Mode-specific setup
@@ -629,6 +635,9 @@ cmd_restart() {
     workdir="$(read_session_field "$session_file" workdir)"
     worktree="$(read_session_field "$session_file" worktree)"
     resume_key="$(read_session_field "$session_file" resume_key)"
+    if ! is_valid_codex_resume_key "$resume_key"; then
+        resume_key=""
+    fi
     ttyd_port="$(read_session_field "$session_file" ttyd_port)"
     ttyd_pid="$(read_session_field "$session_file" ttyd_pid)"
     saved_extra_args="$(read_session_field "$session_file" extra_args)"
