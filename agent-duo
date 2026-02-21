@@ -1613,14 +1613,18 @@ cmd_restart() {
     echo ""
     info "Checking agent TUIs..."
 
-    # Check claude TUI (thinking effort not used for claude)
-    if ! restart_agent_tui "claude" "$claude_target"; then
-        errors=$((errors + 1))
+    # Check claude TUI (resume first, then fall back to fresh launch)
+    if ! resume_agent_tui "claude" "$claude_target"; then
+        if ! restart_agent_tui "claude" "$claude_target"; then
+            errors=$((errors + 1))
+        fi
     fi
 
-    # Check codex TUI (pass thinking effort)
-    if ! restart_agent_tui "codex" "$codex_target" "$codex_thinking"; then
-        errors=$((errors + 1))
+    # Check codex TUI (resume first, then fall back to fresh launch)
+    if ! resume_agent_tui "codex" "$codex_target" "$codex_thinking"; then
+        if ! restart_agent_tui "codex" "$codex_target" "$codex_thinking"; then
+            errors=$((errors + 1))
+        fi
     fi
 
     #---------------------------------------------------------------------------
@@ -3916,13 +3920,11 @@ cmd_run() {
     # Optionally auto-start agents (only if not already running)
     if $auto_start; then
         info "Starting agents..."
-        if ! agent_tui_is_running "$claude_session" "claude"; then
-            tmux send-keys -t "$claude_session" "$(get_agent_cmd claude)"
-            tmux send-keys -t "$claude_session" C-m
+        if ! resume_agent_tui "claude" "$claude_session"; then
+            restart_agent_tui "claude" "$claude_session"
         fi
-        if ! agent_tui_is_running "$codex_session" "codex"; then
-            tmux send-keys -t "$codex_session" "$(get_agent_cmd codex "$codex_thinking")"
-            tmux send-keys -t "$codex_session" C-m
+        if ! resume_agent_tui "codex" "$codex_session" "$codex_thinking"; then
+            restart_agent_tui "codex" "$codex_session" "$codex_thinking"
         fi
         sleep 3
         # Task will be sent as augmented round 1 message or clarify message below

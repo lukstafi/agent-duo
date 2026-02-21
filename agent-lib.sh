@@ -741,62 +741,103 @@ agent_tui_is_running() {
     esac
 }
 
-# Validate Codex resume key format (strict UUID)
-is_valid_codex_resume_key() {
+# Validate resume key format (strict UUID)
+is_valid_resume_key() {
     local key="$1"
     [[ "$key" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
 }
 
-# Extract Codex resume key from tmux pane buffer
+# Backward compatibility wrapper.
+is_valid_codex_resume_key() {
+    is_valid_resume_key "$1"
+}
+
+# Extract resume key for a specific agent from tmux pane buffer
+# Usage: get_agent_resume_key <agent> <session>
 # Returns the resume key if found, empty string otherwise
-get_codex_resume_key() {
-    local session="$1"
+get_agent_resume_key() {
+    local agent="$1"
+    local session="$2"
 
     # Capture recent lines from the tmux pane (last 50 lines should be enough)
     local buffer
     buffer="$(tmux capture-pane -t "$session" -p -S -50 2>/dev/null)" || return 1
 
-    # Look for "codex resume <key>" pattern with strict UUID-shaped keys only.
-    # Codex outputs: "To continue this session, run codex resume <uuid>"
     local resume_key
-    resume_key="$(echo "$buffer" | \
-        grep -oE 'codex resume [0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | \
-        tail -1 | awk '{print $3}')"
+    case "$agent" in
+        codex)
+            # Codex outputs: "To continue this session, run codex resume <uuid>"
+            resume_key="$(echo "$buffer" | \
+                grep -oE 'codex resume [0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | \
+                tail -1 | awk '{print $3}')"
+            ;;
+        claude)
+            # Claude outputs: "Resume this session with: claude --resume <uuid>"
+            resume_key="$(echo "$buffer" | \
+                grep -oE 'claude --resume [0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | \
+                tail -1 | awk '{print $3}')"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 
-    if ! is_valid_codex_resume_key "$resume_key"; then
+    if ! is_valid_resume_key "$resume_key"; then
         return 1
     fi
 
     echo "$resume_key"
 }
 
-# Attempt to resume Codex session using the resume key from terminal output
-# Returns 0 if resume was attempted, 1 if no resume key found
-attempt_codex_resume() {
-    local session="$1"
-    local peer_sync="$2"
+# Backward compatibility wrapper.
+get_codex_resume_key() {
+    get_agent_resume_key "codex" "$1"
+}
+
+# Backward compatibility wrapper.
+get_claude_resume_key() {
+    get_agent_resume_key "claude" "$1"
+}
+
+# Attempt to resume an agent session using the resume key from terminal output.
+# Returns 0 if resume was attempted, 1 if no resume key found.
+attempt_agent_resume() {
+    local agent="$1"
+    local session="$2"
+    local peer_sync="$3"
 
     local resume_key
-    resume_key="$(get_codex_resume_key "$session")"
+    resume_key="$(get_agent_resume_key "$agent" "$session")"
 
     if [ -z "$resume_key" ]; then
         return 1
     fi
 
-    info "Found Codex resume key: $resume_key"
-    info "Attempting to resume Codex session..."
+    info "Found ${agent} resume key: $resume_key"
+    info "Attempting to resume ${agent} session..."
 
     # Save the resume key for reference
-    echo "$resume_key" > "$peer_sync/codex-resume-key"
+    echo "$resume_key" > "$peer_sync/${agent}-resume-key"
 
-    # Send the resume command to the tmux session (with --yolo for cross-worktree access)
-    tmux send-keys -t "$session" "codex resume --yolo $resume_key"
+    # Send the resume command to the tmux session.
+    local resume_cmd=""
+    case "$agent" in
+        codex) resume_cmd="$(get_agent_cmd "codex" "" "resume --yolo $resume_key")" ;;
+        claude) resume_cmd="$(get_agent_cmd "claude" "" "--resume $resume_key")" ;;
+        *) return 1 ;;
+    esac
+    tmux send-keys -t "$session" -l "$resume_cmd"
     tmux send-keys -t "$session" C-m
 
     # Wait a moment for it to start
     sleep 2
 
     return 0
+}
+
+# Backward compatibility wrapper.
+attempt_codex_resume() {
+    attempt_agent_resume "codex" "$1" "$2"
 }
 
 # Restart ttyd for a specific session
@@ -840,6 +881,54 @@ restart_ttyd_for_session() {
         warn "Failed to start ttyd for $name"
         return 1
     fi
+}
+
+# Restart an agent TUI in its tmux session
+# Usage: resume_agent_tui <agent> <session> [thinking_effort] [display_name]
+# agent: agent name like "claude" or "codex"
+# session: tmux session name
+# thinking_effort: optional, for codex reasoning effort (low/medium/high)
+# display_name: optional, for display purposes (e.g., "coder (claude)")
+resume_agent_tui() {
+    local agent="$1"
+    local session="$2"
+    local thinking="${3:-$DEFAULT_CODEX_THINKING}"
+    local display_name="${4:-$agent}"
+
+    if ! tmux_session_exists "$session"; then
+        warn "tmux session $session does not exist"
+        return 1
+    fi
+
+    if agent_tui_is_running "$session" "$agent"; then
+        info "$display_name TUI already running"
+        return 0
+    fi
+
+    local resume_cmd=""
+    case "$agent" in
+        claude) resume_cmd="$(get_agent_cmd "claude" "" "-c")" ;;
+        codex) resume_cmd="$(get_agent_cmd "codex" "$thinking" "resume -l")" ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    info "Resuming $display_name TUI..."
+    tmux send-keys -t "$session" C-c
+    tmux send-keys -t "$session" C-u
+    sleep 0.2
+    tmux send-keys -t "$session" -l "$resume_cmd"
+    tmux send-keys -t "$session" Enter
+    sleep 2
+
+    if agent_tui_is_running "$session" "$agent"; then
+        success "Resumed $display_name TUI"
+        return 0
+    fi
+
+    warn "Resume failed for $display_name TUI"
+    return 1
 }
 
 # Restart an agent TUI in its tmux session
@@ -1075,20 +1164,20 @@ check_tui_health() {
     # TUI has exited
     warn "Agent $agent TUI has exited unexpectedly!"
 
-    # For Codex, try to auto-resume using the resume key from terminal output
-    if [ "$agent" = "codex" ]; then
-        if attempt_codex_resume "$session" "$peer_sync"; then
+    # For Claude/Codex, try to auto-resume using the resume key from terminal output.
+    if [ "$agent" = "codex" ] || [ "$agent" = "claude" ]; then
+        if attempt_agent_resume "$agent" "$session" "$peer_sync"; then
             # Wait and check if resume worked
             sleep 3
             if agent_tui_is_running "$session" "$agent"; then
-                success "Codex session resumed successfully!"
+                success "${agent} session resumed successfully!"
                 atomic_write "$peer_sync/${agent}.status" "working|$(date +%s)|resumed from exit"
                 return 0
             else
-                warn "Codex resume attempted but TUI still not running"
+                warn "${agent} resume attempted but TUI still not running"
             fi
         else
-            warn "No Codex resume key found in terminal output"
+            warn "No ${agent} resume key found in terminal output"
         fi
     fi
 
@@ -1118,8 +1207,8 @@ check_tui_health() {
             # Send ntfy notification so user knows intervention is needed
             local feature="${FEATURE:-unknown}"
             local resume_info=""
-            if [ "$agent" = "codex" ] && [ -f "$peer_sync/codex-resume-key" ]; then
-                resume_info=$'\n'"Resume key: $(cat "$peer_sync/codex-resume-key")"
+            if [ -f "$peer_sync/${agent}-resume-key" ]; then
+                resume_info=$'\n'"Resume key: $(cat "$peer_sync/${agent}-resume-key")"
             fi
             send_ntfy \
                 "[agent-duo] $agent TUI exited - intervention needed" \
@@ -1134,7 +1223,7 @@ Run 'agent-duo restart' to recover.$resume_info" \
             echo "  2. Press Enter to continue waiting (will timeout eventually)"
             echo "  3. Press Ctrl-C to stop the orchestrator"
             if [ -n "$resume_info" ]; then
-                echo "  4. Resume key saved: $(cat "$peer_sync/codex-resume-key")"
+                echo "  4. Resume key saved: $(cat "$peer_sync/${agent}-resume-key")"
             fi
             echo ""
             read -r -p "Press Enter to continue or Ctrl-C to stop: " || true
