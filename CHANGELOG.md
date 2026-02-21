@@ -4,6 +4,24 @@ All notable changes to agent-duo will be documented in this file.
 
 ## [Unreleased]
 
+## [v0.7] - 2026-02-21
+
+### Added
+- **`--followup-msg` support in follow-up starts**: `agent-duo start --followup <PR#> --followup-msg "<message>"` and `agent-pair` equivalent now prepend a custom line to generated follow-up tasks
+- **Shared phase preflight context helper**: work/review/amend skills now run a common preflight step that surfaces latest peer review context, peer status, and `git diff --stat main...HEAD`
+
+### Changed
+- **Keep feature spec docs committed on start**: `agent-duo`/`agent-pair` now normalize and commit `<feature>.md` before spawning worktrees, and no longer delete the spec copy during session startup
+- **Phase transitions now emit coordination tokens**: orchestrator writes `phase`, `phase-seq`, and `phase-token` so hooks can deduplicate stale transitions
+- **Notify hook is now advisory and race-safe**: unified duo/pair notify flow records transition advice and nudges agents with the recommended `agent-* signal` command instead of mutating status directly
+- **Round transitions are restart-safe**: orchestrator persists next-round state immediately after a completed cycle so restart resumes cleanly at the next round
+
+### Fixed
+- **Non-clarify timeout paths now interrupt explicitly**: pushback/plan/plan-review/work/review/docs-update/pr-comments/merge/final-merge timeout paths issue interrupts instead of drifting
+- **Phase completion logs final wait status before exit**: round loops now print final wait state before breaking, improving timeout/debug visibility
+- **Codex resume-key persistence is validated**: launcher stores Codex resume keys only when they match expected UUID format
+- **Agent restart path reuses launch defaults**: restarted sessions now preserve the same launch defaults used by fresh sessions
+
 ## [v0.6] - 2026-02-19
 
 ### Added

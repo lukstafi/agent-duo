@@ -75,6 +75,10 @@ agent-duo escalate-resolve      # Review and resolve pending escalations
 agent-duo feedback              # View/manage accumulated workflow feedback
 ```
 
+Startup behavior notes:
+- `agent-duo start` and `agent-pair start` commit the referenced `<feature>.md` before creating worktrees so the task spec remains tracked in git for the whole session.
+- Follow-up starts support `--followup-msg "<message>"`, which prepends a custom line at the top of the generated follow-up task file.
+
 ### Model Selection Options
 
 ```bash
@@ -126,6 +130,8 @@ Given project directory `myapp` and feature `auth`:
 .peer-sync/
 ├── session           # "active" or "complete"
 ├── phase             # "gather", "clarify", "pushback", "plan", "plan-review", "work", "review", "update-docs", "pr-comments", "merge", or "final-merge"
+├── phase-seq         # Monotonic counter incremented on each phase transition
+├── phase-token       # "<phase>|r<round>|s<seq>" token used to dedupe stale hook events
 ├── round             # Current round number (1, 2, 3...)
 ├── feature           # Feature name for this session
 ├── followup-pr       # PR number this session follows up on (if started with --followup)
@@ -155,6 +161,14 @@ Given project directory `myapp` and feature `auth`:
 ├── codex-thinking    # Codex reasoning effort level
 ├── claude.status     # Agent status: "working|1705847123|implementing API"
 ├── codex.status      # Format: status|epoch|message
+├── claude.transition-advice # Hook-generated suggested next signal/transition
+├── codex.transition-advice  # Hook-generated suggested next signal/transition
+├── claude.last-hook-phase   # Last phase seen by Claude notify hook
+├── codex.last-hook-phase    # Last phase seen by Codex notify hook
+├── claude.last-hook-token   # Last phase-token seen by Claude notify hook
+├── codex.last-hook-token    # Last phase-token seen by Codex notify hook
+├── claude.last-advice-key   # Last advice dedupe key emitted for Claude
+├── codex.last-advice-key    # Last advice dedupe key emitted for Codex
 ├── escalation-claude.md  # Escalation from claude (if any)
 ├── escalation-codex.md   # Escalation from codex (if any)
 ├── escalation-resolved   # Present when escalations have been resolved
@@ -406,9 +420,11 @@ Given project directory `myapp` and feature `auth`:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+Before each work/review/amend pass, the agent skills run the shared `phase-preflight.sh` helper to show the previous round's review context, current peer status, and `git diff --stat main...HEAD`. After each completed cycle, the orchestrator writes the next round value to `.peer-sync/round` so restart continues from the correct round.
+
 ### Recoverable Interrupts
 
-When an agent takes too long, the orchestrator can interrupt rather than fail:
+When an agent takes too long, the orchestrator interrupts rather than failing the session:
 
 1. Orchestrator sends interrupt (writes to `.peer-sync/<agent>.interrupt`)
 2. Agent detects interrupt, saves state, sets status to `interrupted`
@@ -416,7 +432,7 @@ When an agent takes too long, the orchestrator can interrupt rather than fail:
 4. Next work phase, agent continues with peer feedback
 5. Skills explain: "If interrupted, review feedback and continue"
 
-This allows graceful handling of slow agents without losing progress.
+Timeout paths outside clarify now always use this pattern, including pushback, plan, plan-review, work/review, docs-update, pr-comments, merge, and final-merge waits. Clarify intentionally remains fail-open.
 
 ### Escalation
 
@@ -580,20 +596,22 @@ Key skill behaviors:
 - **Final Merge phase**: Rebase onto main, run tests, merge PR via squash, delete branch, signal `final-merge-done` (auto-finish mode)
 - **Divergence**: Maintain distinct approach from peer
 - **Interrupts**: If interrupted, gracefully yield and continue next round
+- **Preflight context**: Work/review/amend templates run `phase-preflight.sh` first to print previous review notes, peer status, and `main...HEAD` diff stats before continuing
 
 ## Completion Hooks
 
 Agents don't reliably execute signaling commands from skill instructions. Instead, `agent-duo setup` configures completion hooks:
 
-- **Claude**: `Stop` hook in `~/.claude/settings.json` with command `agent-duo-notify claude`
-- **Codex**: `notify` hook in `~/.codex/config.toml` with args `["agent-duo-notify", "codex"]`
+- **Claude**: `Stop` hook in `~/.claude/settings.json` with command `agent-duo-and-pair-notify claude`
+- **Codex**: `notify` hook in `~/.codex/config.toml` with args `["agent-duo-and-pair-notify", "codex"]`
 
-Both hooks run `~/.local/bin/agent-duo-notify <agent-name>` which:
+Both hooks run `~/.local/bin/agent-duo-and-pair-notify <agent-name>` which:
 1. Receives agent name as `$1` (required - hooks don't inherit shell environment variables)
 2. Discovers `PEER_SYNC` from `$PWD/.peer-sync` symlink (present in worktrees)
-3. Reads the current phase from `$PEER_SYNC/phase`
-4. Signals appropriate status: `gather-done` (gather), `done` (work), `review-done` (review), `clarify-done` (clarify), `pushback-done` (pushback), `plan-done` (plan), `plan-review-done` (plan-review), `docs-update-done` (update-docs), `final-merge-done` (final-merge)
-5. Skips if already in a terminal state
+3. Reads `phase` and `phase-token` from `$PEER_SYNC` and exits if the token is stale
+4. Writes `<agent>.transition-advice` with the recommended status transition/signal command for the current phase
+5. Calls `agent-duo nudge <agent> ...` to suggest the transition in-terminal instead of mutating status directly
+6. Skips if already in a terminal state or if the advice key was already emitted
 
 ## Notifications
 
@@ -722,7 +740,7 @@ Agent-pair is an alternative mode where one agent codes and another reviews in a
 - Sequential rather than parallel work
 - Clear coder/reviewer roles (swappable with `--coder` and `--reviewer`)
 - Gather phase available (reviewer collects context for coder)
-- Skills: `pair-coder-{work,clarify,plan}.md`, `pair-reviewer-{work,clarify,gather,pushback,plan}.md`, `pair-pr-comment.md`, `pair-integrate.md`, `pair-final-merge.md`
+- Skills: `pair-coder-{work,clarify,plan}.md`, `pair-reviewer-{work,clarify,gather,pushback,plan}.md`, `pair-pr-comment.md`, `pair-update-docs.md`, `pair-integrate.md`, `pair-final-merge.md`
 
 ## Multi-Session Support (Parallel Task Execution)
 
