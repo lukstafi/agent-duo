@@ -3722,8 +3722,34 @@ EOF
 # Command: run (orchestrator)
 #------------------------------------------------------------------------------
 
-# Note: get_agent_status, has_pr, interrupt_agent, nudge_agent, and
-# trigger_skill are all provided by agent-lib.sh
+# Note: get_agent_status, get_agent_status_epoch, has_pr, interrupt_agent,
+# nudge_agent, and trigger_skill are all provided by agent-lib.sh
+
+# Get phase completion time for terminal statuses in the current phase.
+# Usage: get_phase_completion_time <status> <status_epoch> <phase_start_epoch>
+get_phase_completion_time() {
+    local status="$1"
+    local status_epoch="$2"
+    local phase_start_epoch="$3"
+
+    case "$status" in
+        done|review-done|updating-docs|docs-update-done|pr-created) ;;
+        *) return 0 ;;
+    esac
+
+    case "$status_epoch" in
+        ''|*[!0-9]*) return 0 ;;
+    esac
+    case "$phase_start_epoch" in
+        ''|*[!0-9]*) return 0 ;;
+    esac
+
+    if [ "$status_epoch" -lt "$phase_start_epoch" ]; then
+        return 0
+    fi
+
+    echo "$((status_epoch - phase_start_epoch))s"
+}
 
 # Generate augmented first-round message with full context
 # This replaces the need for /duo-work skill in round 1
@@ -4502,6 +4528,8 @@ cmd_run() {
 
             # Wait for work phase completion with timeout
             local work_start=$SECONDS
+            local work_start_epoch
+            work_start_epoch="$(date +%s)"
             local claude_done=false
             local codex_done=false
 
@@ -4517,6 +4545,18 @@ cmd_run() {
                 claude_status="$(get_agent_status "claude" "$peer_sync")"
                 local codex_status
                 codex_status="$(get_agent_status "codex" "$peer_sync")"
+                local claude_status_epoch
+                claude_status_epoch="$(get_agent_status_epoch "claude" "$peer_sync")"
+                local codex_status_epoch
+                codex_status_epoch="$(get_agent_status_epoch "codex" "$peer_sync")"
+
+                local claude_completion codex_completion
+                claude_completion="$(get_phase_completion_time "$claude_status" "$claude_status_epoch" "$work_start_epoch")"
+                codex_completion="$(get_phase_completion_time "$codex_status" "$codex_status_epoch" "$work_start_epoch")"
+                local claude_status_display="$claude_status"
+                local codex_status_display="$codex_status"
+                [ -n "$claude_completion" ] && claude_status_display="${claude_status} ${claude_completion}"
+                [ -n "$codex_completion" ] && codex_status_display="${codex_status} ${codex_completion}"
 
                 # Accept done, review-done (agent jumped ahead), or pr-created
                 [[ "$claude_status" =~ ^(done|review-done|updating-docs|docs-update-done|pr-created)$ ]] && claude_done=true
@@ -4527,7 +4567,7 @@ cmd_run() {
                 has_pr "codex" "$peer_sync" && codex_done=true
 
                 if $claude_done && $codex_done; then
-                    printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$work_timeout"
+                    printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status_display" "$codex_status_display" "$elapsed" "$work_timeout"
                     break
                 fi
 
@@ -4563,7 +4603,7 @@ cmd_run() {
                     break
                 fi
 
-                printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$work_timeout"
+                printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status_display" "$codex_status_display" "$elapsed" "$work_timeout"
                 sleep "$poll_interval"
             done
             echo ""
@@ -4594,7 +4634,8 @@ cmd_run() {
                     local _wt_var="worktree_${_agent}"
                     local _pr_name="${feature}-${_agent}"
                     info "Creating PR for converged agent $_agent..."
-                    lib_create_pr "$_pr_name" "$_agent" "${!_wt_var}" "$root" "$peer_sync" "$feature" "duo" "${_agent}'s solution for $feature" || true
+                    ( lib_create_pr "$_pr_name" "$_agent" "${!_wt_var}" "$root" "$peer_sync" "$feature" "duo" "${_agent}'s solution for $feature" ) || \
+                        warn "PR creation failed for converged agent $_agent — continuing without PR"
                 fi
             done
 
@@ -4607,7 +4648,8 @@ cmd_run() {
                         if [ -n "$(git -C "${!_wt_var}" log --oneline "${feature}..HEAD" 2>/dev/null)" ]; then
                             local _pr_name="${feature}-${_agent}"
                             info "Early PR: creating PR for $_agent..."
-                            lib_create_pr "$_pr_name" "$_agent" "${!_wt_var}" "$root" "$peer_sync" "$feature" "duo" "${_agent}'s solution for $feature" || true
+                            ( lib_create_pr "$_pr_name" "$_agent" "${!_wt_var}" "$root" "$peer_sync" "$feature" "duo" "${_agent}'s solution for $feature" ) || \
+                                warn "Early PR creation failed for $_agent — continuing"
                         fi
                     fi
                 done
@@ -4656,6 +4698,8 @@ cmd_run() {
 
                 # Wait for review phase completion with timeout
                 local review_start=$SECONDS
+                local review_start_epoch
+                review_start_epoch="$(date +%s)"
                 claude_done=false
                 codex_done=false
 
@@ -4670,6 +4714,18 @@ cmd_run() {
                     claude_status="$(get_agent_status "claude" "$peer_sync")"
                     local codex_status
                     codex_status="$(get_agent_status "codex" "$peer_sync")"
+                    local claude_status_epoch
+                    claude_status_epoch="$(get_agent_status_epoch "claude" "$peer_sync")"
+                    local codex_status_epoch
+                    codex_status_epoch="$(get_agent_status_epoch "codex" "$peer_sync")"
+
+                    local claude_completion codex_completion
+                    claude_completion="$(get_phase_completion_time "$claude_status" "$claude_status_epoch" "$review_start_epoch")"
+                    codex_completion="$(get_phase_completion_time "$codex_status" "$codex_status_epoch" "$review_start_epoch")"
+                    local claude_status_display="$claude_status"
+                    local codex_status_display="$codex_status"
+                    [ -n "$claude_completion" ] && claude_status_display="${claude_status} ${claude_completion}"
+                    [ -n "$codex_completion" ] && codex_status_display="${codex_status} ${codex_completion}"
 
                     # Accept review-done, done (agent skipped review), or pr-created
                     [[ "$claude_status" =~ ^(done|review-done|updating-docs|docs-update-done|pr-created)$ ]] && claude_done=true
@@ -4679,7 +4735,7 @@ cmd_run() {
                     has_pr "codex" "$peer_sync" && codex_done=true
 
                     if $claude_done && $codex_done; then
-                        printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$review_timeout"
+                        printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status_display" "$codex_status_display" "$elapsed" "$review_timeout"
                         break
                     fi
 
@@ -4708,7 +4764,7 @@ cmd_run() {
                         break
                     fi
 
-                    printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status" "$codex_status" "$elapsed" "$review_timeout"
+                    printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status_display" "$codex_status_display" "$elapsed" "$review_timeout"
                     sleep "$poll_interval"
                 done
                 echo ""

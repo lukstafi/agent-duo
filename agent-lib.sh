@@ -928,6 +928,19 @@ get_agent_status() {
     fi
 }
 
+# Get agent status timestamp epoch (middle field of status|epoch|message)
+get_agent_status_epoch() {
+    local agent="$1"
+    local peer_sync="$2"
+    local status_file="$peer_sync/${agent}.status"
+
+    if [ -f "$status_file" ]; then
+        cut -d'|' -f2 < "$status_file"
+    else
+        echo "0"
+    fi
+}
+
 # Set current phase and advance a round-aware phase token.
 # Usage: set_phase_state <peer_sync> <phase> [round_override]
 set_phase_state() {
