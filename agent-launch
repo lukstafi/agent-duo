@@ -98,6 +98,45 @@ read_session_field() {
     grep "^${key}=" "$file" 2>/dev/null | cut -d'=' -f2-
 }
 
+# Upsert a single key=value field in a session file
+# Usage: upsert_session_field <file> <key> <value>
+upsert_session_field() {
+    local file="$1" key="$2" value="$3"
+    local content
+    content="$(grep -v "^${key}=" "$file" 2>/dev/null || true)"
+    if [ -n "$content" ]; then
+        content="$content
+${key}=${value}"
+    else
+        content="${key}=${value}"
+    fi
+    locked_session_write "$file" "$content"
+}
+
+# Capture and persist Codex resume key from tmux pane output.
+# Echoes key on success; returns non-zero when no key is found.
+persist_codex_resume_key() {
+    local tmux_name="$1" session_file="$2"
+    [ "$AGENT_TYPE" = "codex" ] || return 1
+
+    local resume_key
+    resume_key="$(get_codex_resume_key "$tmux_name" 2>/dev/null || true)"
+    [ -n "$resume_key" ] || return 1
+
+    upsert_session_field "$session_file" "resume_key" "$resume_key"
+    echo "$resume_key"
+}
+
+# Send a command into a tmux session after clearing stale input.
+send_tmux_command() {
+    local tmux_name="$1" command="$2"
+    tmux send-keys -t "$tmux_name" C-c
+    tmux send-keys -t "$tmux_name" C-u
+    sleep 0.2
+    tmux send-keys -t "$tmux_name" -l "$command"
+    tmux send-keys -t "$tmux_name" Enter
+}
+
 # Acquire lock on .agent-sessions/.lock, with trap-based cleanup
 # Sets _LOCK_DIR to the acquired lock path for use by unlock helper
 _LOCK_DIR=""
@@ -172,6 +211,52 @@ wait_for_tui() {
     done
     warn "Agent TUI may still be initializing (waited ${timeout}s)"
     return 0
+}
+
+# Recover an agent TUI by preferring resume flows over a fresh start:
+# - branch sessions: claude -c / codex resume -l
+# - codex non-branch with saved key: codex resume --yolo <key>
+# - otherwise: fresh launch + /resume picker fallback
+# Usage: recover_agent_tui <task> <tmux_name> <worktree> <resume_key> [extra_args...]
+recover_agent_tui() {
+    local task="$1"
+    local tmux_name="$2"
+    local worktree="$3"
+    local resume_key="$4"
+    shift 4 2>/dev/null || shift $#
+    local restart_extra=("$@")
+
+    local resume_cmd=""
+    if [ -n "$worktree" ]; then
+        if [ "$AGENT_TYPE" = "claude" ]; then
+            resume_cmd="claude -c"
+        elif [ "$AGENT_TYPE" = "codex" ]; then
+            resume_cmd="codex resume -l"
+        fi
+    elif [ "$AGENT_TYPE" = "codex" ] && [ -n "$resume_key" ]; then
+        resume_cmd="codex resume --yolo $resume_key"
+    fi
+
+    if [ -n "$resume_cmd" ]; then
+        info "Resuming $AGENT_TYPE session for '$task'..."
+        send_tmux_command "$tmux_name" "$resume_cmd"
+        sleep 2
+        if agent_tui_is_running "$tmux_name" "$AGENT_TYPE"; then
+            return 0
+        fi
+        warn "Resume command did not start $AGENT_TYPE TUI; falling back to fresh launch"
+    fi
+
+    restart_agent_tui "$AGENT_TYPE" "$tmux_name" "" "" "${restart_extra[@]}"
+
+    # Without a branch-scoped worktree or a saved key, we cannot disambiguate
+    # sessions automatically. Open the in-TUI resume picker for manual choice.
+    if [ -z "$worktree" ] && [ -z "$resume_key" ]; then
+        wait_for_tui "$tmux_name" "$AGENT_TYPE" 30
+        info "Opening /resume picker so you can select the correct session..."
+        tmux send-keys -t "$tmux_name" "/resume"
+        tmux send-keys -t "$tmux_name" C-m
+    fi
 }
 
 #------------------------------------------------------------------------------
@@ -305,6 +390,13 @@ cmd_start() {
         tmux send-keys -t "$tmux_name" C-m
     fi
 
+    # Capture Codex resume key early for non-branch sessions when available.
+    # This gives restart a deterministic key instead of relying on latest-session heuristics.
+    local resume_key=""
+    if [ "$AGENT_TYPE" = "codex" ] && [ "$use_branch" = false ]; then
+        resume_key="$(get_codex_resume_key "$tmux_name" 2>/dev/null || true)"
+    fi
+
     # Mode-specific setup
     local ttyd_port="" ttyd_pid=""
 
@@ -348,6 +440,8 @@ worktree=$worktree_path"
 ttyd_port=$ttyd_port"
     [ -n "$ttyd_pid" ] && content="$content
 ttyd_pid=$ttyd_pid"
+    [ -n "$resume_key" ] && content="$content
+resume_key=$resume_key"
     [ ${#extra_args[@]} -gt 0 ] && content="$content
 extra_args=${extra_args[*]}"
     content="$content
@@ -527,29 +621,42 @@ cmd_restart() {
     session_file="$(session_file_path "$task")"
     [ -f "$session_file" ] || die "No session found for '$task'. Use '$INVOKED_AS $task --ttyd|--bare' to start."
 
-    local tmux_name mode workdir ttyd_port ttyd_pid saved_extra_args
+    local tmux_name mode workdir worktree resume_key ttyd_port ttyd_pid saved_extra_args
     tmux_name="$(read_session_field "$session_file" tmux)"
     mode="$(read_session_field "$session_file" mode)"
     workdir="$(read_session_field "$session_file" workdir)"
+    worktree="$(read_session_field "$session_file" worktree)"
+    resume_key="$(read_session_field "$session_file" resume_key)"
     ttyd_port="$(read_session_field "$session_file" ttyd_port)"
     ttyd_pid="$(read_session_field "$session_file" ttyd_pid)"
     saved_extra_args="$(read_session_field "$session_file" extra_args)"
     # shellcheck disable=SC2086
     local restart_extra=($saved_extra_args)
 
+    # Best effort: harvest resume key from historical tmux output before we mutate the pane.
+    if [ "$AGENT_TYPE" = "codex" ] && [ -z "$worktree" ] && [ -z "$resume_key" ] && tmux_session_exists "$tmux_name"; then
+        local captured_key
+        captured_key="$(persist_codex_resume_key "$tmux_name" "$session_file" 2>/dev/null || true)"
+        [ -n "$captured_key" ] && resume_key="$captured_key"
+    fi
+
     # Recreate tmux session if gone
     if ! tmux_session_exists "$tmux_name"; then
         info "Recreating tmux session: $tmux_name"
         tmux new-session -d -s "$tmux_name" -c "$workdir"
         tmux_set_title "$tmux_name" "${AGENT_TYPE}: ${task}"
-        restart_agent_tui "$AGENT_TYPE" "$tmux_name" "" "" "${restart_extra[@]}"
     fi
 
     # Mode-specific recovery
     case "$mode" in
         ttyd)
             if ! agent_tui_is_running "$tmux_name" "$AGENT_TYPE"; then
-                restart_agent_tui "$AGENT_TYPE" "$tmux_name" "" "" "${restart_extra[@]}"
+                recover_agent_tui "$task" "$tmux_name" "$worktree" "$resume_key" "${restart_extra[@]}"
+                if [ "$AGENT_TYPE" = "codex" ] && [ -z "$worktree" ]; then
+                    local refreshed_key
+                    refreshed_key="$(persist_codex_resume_key "$tmux_name" "$session_file" 2>/dev/null || true)"
+                    [ -n "$refreshed_key" ] && resume_key="$refreshed_key"
+                fi
             fi
 
             # Restart ttyd if not running
@@ -589,7 +696,12 @@ ttyd_pid=$ttyd_pid"
             ;;
         bare)
             if ! agent_tui_is_running "$tmux_name" "$AGENT_TYPE"; then
-                restart_agent_tui "$AGENT_TYPE" "$tmux_name" "" "" "${restart_extra[@]}"
+                recover_agent_tui "$task" "$tmux_name" "$worktree" "$resume_key" "${restart_extra[@]}"
+                if [ "$AGENT_TYPE" = "codex" ] && [ -z "$worktree" ]; then
+                    local refreshed_key
+                    refreshed_key="$(persist_codex_resume_key "$tmux_name" "$session_file" 2>/dev/null || true)"
+                    [ -n "$refreshed_key" ] && resume_key="$refreshed_key"
+                fi
             fi
             printf '\033]0;%s\007' "${AGENT_TYPE}: ${task}"
             exec tmux attach -t "$tmux_name"
