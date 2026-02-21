@@ -229,12 +229,14 @@ recover_agent_tui() {
     local resume_cmd=""
     if [ -n "$worktree" ]; then
         if [ "$AGENT_TYPE" = "claude" ]; then
-            resume_cmd="claude -c"
+            resume_cmd="$(get_agent_cmd "claude" "" "-c")"
         elif [ "$AGENT_TYPE" = "codex" ]; then
-            resume_cmd="codex resume -l"
+            resume_cmd="$(get_agent_cmd "codex" "" "resume -l")"
         fi
     elif [ "$AGENT_TYPE" = "codex" ] && [ -n "$resume_key" ]; then
-        resume_cmd="codex resume --yolo $resume_key"
+        # Keep historical "resume --yolo <key>" form, but prepend launcher defaults
+        # from get_agent_cmd (including check_for_update_on_startup=false).
+        resume_cmd="$(get_agent_cmd "codex" "" "resume --yolo $resume_key")"
     fi
 
     if [ -n "$resume_cmd" ]; then
