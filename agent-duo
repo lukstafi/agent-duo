@@ -9,14 +9,14 @@
 # Session Commands:
 #   start <feature> [<feature2> ...] [options]  Start session(s)
 #   run [options]        Run orchestrator loop with timeouts
-#                        --on-tui-exit=pause|quit|ignore  TUI exit behavior
-#   stop                 Stop ttyd servers, keep worktrees
-#   restart [--auto-run] Restart session after system restart/crash
-#   status               Show session state
+#                        --on-tui-exit <mode>   TUI exit behavior (pause|quit|ignore)
+#   stop [--feature <name>]                 Stop ttyd servers, keep worktrees
+#   restart [options]                        Restart session after system restart/crash
+#   status [--feature <name>]               Show session state
 #   confirm              Confirm clarify phase completion (proceed to work)
-#   pr <agent>           Create PR for agent's solution
+#   pr <agent> [--feature <name>]           Create PR for agent's solution
 #   feedback             View/manage accumulated workflow feedback
-#   cleanup [--full]     Remove session state (--full: also worktrees/branches)
+#   cleanup [--feature <name>] [--full]     Remove session state (--full: also worktrees/branches)
 #   setup                Install agent-duo to PATH and skills
 #   doctor [--send-email|--send-ntfy]  Check system health and configuration
 #   config <key> [value] Get/set configuration (e.g., ntfy_topic)
@@ -754,7 +754,7 @@ cmd_start() {
         features+=("$followup_feature")
     fi
 
-    [ ${#features[@]} -eq 0 ] && die "Usage: agent-duo start <feature> [feature2 ...] [--followup <PR-number>] [--followup-msg <message>] [--no-ttyd] [--auto-run] [--clarify] [--pushback] [--plan]"
+    [ ${#features[@]} -eq 0 ] && die "Usage: agent-duo start <feature> [feature2 ...] [options]"
 
     # Validate codex thinking effort
     case "$codex_thinking" in
@@ -849,7 +849,7 @@ start_single_session() {
     local sessions_dir="$main_project_root/.agent-sessions"
     if [ -L "$sessions_dir/duo-${feature}.session" ]; then
         warn "Session already exists for feature '$feature'."
-        warn "To continue: agent-duo run --feature $feature"
+        warn "To continue: agent-duo restart --feature $feature --auto-run"
         warn "To start fresh: agent-duo cleanup --feature $feature && agent-duo start $feature"
         return 1
     fi
@@ -5263,6 +5263,9 @@ SESSION COMMANDS
           --clarify                Enable clarify stage before work starts
           --pushback               Enable pushback stage (after clarify if both enabled)
           --plan                   Enable plan stage (after pushback if both enabled)
+          --auto-finish            Auto-merge after inactivity timeout
+          --auto-finish-timeout <secs> Inactivity timeout for auto-finish (default: ${DEFAULT_AUTO_FINISH_TIMEOUT})
+          --early-pr               Allow PR creation before final merge stage
           --skip-docs-update       Skip update-docs phase before PR creation
           --work-timeout <secs>    Work phase timeout (default: ${DEFAULT_WORK_TIMEOUT}, with --auto-run)
           --review-timeout <secs>  Review phase timeout (default: ${DEFAULT_REVIEW_TIMEOUT}, with --auto-run)
@@ -5308,12 +5311,17 @@ SESSION COMMANDS
           --clarify-timeout <secs> Clarify stage timeout (default: ${DEFAULT_CLARIFY_TIMEOUT})
           --pushback-timeout <secs> Pushback stage timeout (default: ${DEFAULT_PUSHBACK_TIMEOUT})
           --plan-timeout <secs>    Plan phase timeout (default: ${DEFAULT_PLAN_TIMEOUT})
+          --auto-finish            Auto-merge after inactivity timeout
+          --auto-finish-timeout <secs> Inactivity timeout for auto-finish (default: ${DEFAULT_AUTO_FINISH_TIMEOUT})
+          --early-pr               Allow PR creation before final merge stage
           --poll <secs>            Status poll interval (default: ${DEFAULT_POLL_INTERVAL})
           --max-rounds <n>         Maximum rounds (default: 10)
           --auto-start             Auto-launch agent CLIs and send task
+          --on-tui-exit <mode>     pause (default), quit, or ignore
 
-    stop
+    stop [--feature <name>]
         Stop ttyd servers and tmux sessions, keep worktrees.
+        Without --feature, stops all active duo sessions.
 
     restart [options]
         Restart a session after system restart or crash (DWIM behavior).
@@ -5326,11 +5334,14 @@ SESSION COMMANDS
         Options:
           --auto-run               Also restart the orchestrator loop
           --no-ttyd                Force tmux-only mode (override recorded setting)
+          --feature <name>         Restart a specific session
+          --auto-finish            Override session setting to enable auto-finish
+          --auto-finish-timeout <secs> Override auto-finish timeout
           --work-timeout <secs>    Work phase timeout (default: ${DEFAULT_WORK_TIMEOUT})
           --review-timeout <secs>  Review phase timeout (default: ${DEFAULT_REVIEW_TIMEOUT})
           --max-rounds <n>         Maximum rounds (default: 10)
 
-    status
+    status [--feature <name>]
         Show current session state, agent statuses, and PRs.
 
     confirm
@@ -5341,7 +5352,7 @@ SESSION COMMANDS
         Review and resolve pending escalations from agents.
         Escalations block phase transitions until resolved.
 
-    pr <agent>
+    pr <agent> [--feature <name>]
         Create a PR for the specified agent (claude or codex).
         Auto-commits uncommitted changes and pushes.
         Runs update-docs phase before PR creation (unless skipped).
@@ -5384,7 +5395,7 @@ SESSION COMMANDS
         then runs the vote → debate → execute → review flow.
         Requires both PRs to exist.
 
-    cleanup [--full]
+    cleanup [--feature <name>] [--full]
         Remove session state (.peer-sync). With --full, also removes
         worktrees and deletes the feature branches.
 
@@ -5405,9 +5416,13 @@ SESSION COMMANDS
         Without arguments, shows current configuration.
 
         Keys:
+          codex_model     GPT model for Codex (e.g., o3, gpt-4.1)
+          claude_model    Claude model (e.g., opus, sonnet)
           ntfy_topic      ntfy.sh topic name for push notifications
           ntfy_token      ntfy.sh access token (for reserved/private topics)
           ntfy_server     ntfy server URL (default: https://ntfy.sh)
+          feedback_repo   GitHub repo for feedback issues (owner/repo)
+          auto_digest     Auto-run feedback digest on session end (true/false)
 
         Examples:
           agent-duo config                       # Show all config
@@ -5428,18 +5443,18 @@ AGENT COMMANDS (used by AI agents)
         Signal a status change. Status values:
         clarifying, clarify-done, pushing-back, pushback-done, planning,
         plan-done, plan-reviewing, plan-review-done, needs-clarify, working,
-        done, reviewing, review-done, integrating, integrate-done, interrupted,
-        clarifying, clarify-done, pushing-back, pushback-done, working, done,
-        reviewing, review-done, updating-docs, docs-update-done, integrating, integrate-done, interrupted,
-        error, pr-created, escalated, voting, vote-done, debating, debate-done,
-        merging, merge-done, merge-reviewing, merge-review-done
+        done, reviewing, review-done, updating-docs, docs-update-done,
+        integrating, integrate-done, final-merging, final-merge-done,
+        suggest-refactor-done, interrupted, error, pr-created, escalated,
+        voting, vote-done, debating, debate-done, merging, merge-done,
+        merge-reviewing, merge-review-done
 
     peer-status
         Read peer's current status (requires PEER_NAME env var).
 
     phase
-        Read current phase (clarify, pushback, plan, plan-review, work, review, or merge).
-        Read current phase (clarify, pushback, work, review, update-docs, or merge).
+        Read current phase (clarify, pushback, plan, plan-review, work, review,
+        update-docs, integrate, pr-comments, suggest-refactor, final-merge, or merge).
 
     escalate <reason> [message]
         Escalate an issue requiring user input. Does not interrupt the agent.
