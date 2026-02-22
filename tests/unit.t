@@ -539,6 +539,61 @@ else
 fi
 
 #------------------------------------------------------------------------------
+# Test: Workflow feedback relevance normalization
+#------------------------------------------------------------------------------
+
+echo ""
+echo "--- Workflow Feedback Relevance ---"
+
+TEMPLATE_FEEDBACK="$TEST_DIR/workflow-template.md"
+cat > "$TEMPLATE_FEEDBACK" << 'EOF'
+# Workflow feedback (claude) - feature - 2026-02-21
+
+- [Actionable feedback about agent-duo workflow/skills/tooling]
+- [Another specific, actionable point]
+EOF
+
+ACTIONABLE_A="$TEST_DIR/workflow-actionable-a.md"
+cat > "$ACTIONABLE_A" << 'EOF'
+# Workflow feedback (codex) - feature - 2026-02-21
+
+- Improve phase handoff instructions for clarify -> work.
+- Add exact command examples for follow-up task generation.
+EOF
+
+ACTIONABLE_B="$TEST_DIR/workflow-actionable-b.md"
+cat > "$ACTIONABLE_B" << 'EOF'
+# Workflow feedback (coder) - other-feature - 2026-02-22
+
+* Improve phase handoff instructions for clarify -> work.
+* Add exact command examples for follow-up task generation.
+EOF
+
+test_start "normalize_workflow_feedback strips template placeholders"
+NORMALIZED="$(normalize_workflow_feedback "$TEMPLATE_FEEDBACK" || true)"
+if [ -z "$NORMALIZED" ]; then
+    test_pass
+else
+    test_fail "expected empty normalized template feedback, got: $NORMALIZED"
+fi
+
+test_start "workflow_feedback_hash rejects placeholder-only feedback"
+if workflow_feedback_hash "$TEMPLATE_FEEDBACK" >/dev/null 2>&1; then
+    test_fail "placeholder-only feedback should not produce a relevance hash"
+else
+    test_pass
+fi
+
+test_start "workflow_feedback_hash normalizes equivalent actionable content"
+HASH_A="$(workflow_feedback_hash "$ACTIONABLE_A" 2>/dev/null || true)"
+HASH_B="$(workflow_feedback_hash "$ACTIONABLE_B" 2>/dev/null || true)"
+if [ -n "$HASH_A" ] && [ "$HASH_A" = "$HASH_B" ]; then
+    test_pass
+else
+    test_fail "expected matching hashes, got A='$HASH_A' B='$HASH_B'"
+fi
+
+#------------------------------------------------------------------------------
 # Test: Escalation helpers
 #------------------------------------------------------------------------------
 

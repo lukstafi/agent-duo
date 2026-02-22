@@ -3130,6 +3130,41 @@ set_config_value() {
     fi
 }
 
+# Normalize workflow feedback to actionable content only.
+# Strips generated headings/placeholder bullets so we can detect real changes.
+normalize_workflow_feedback() {
+    local file="$1"
+    [ -f "$file" ] || return 1
+
+    sed -e 's/\r$//' \
+        -e '/^# Workflow feedback (/d' \
+        -e 's/^[[:space:]]*[-*][[:space:]]*//' \
+        -e 's/^[[:space:]]*//' \
+        -e 's/[[:space:]]*$//' \
+        -e '/^$/d' \
+        -e '/^\[Actionable feedback about agent-[a-z-][a-z-]* workflow\/skills\/tooling\]$/d' \
+        -e '/^\[Another specific, actionable point\]$/d' \
+        "$file"
+}
+
+# Hash normalized workflow feedback content.
+# Returns non-zero when the file has no actionable content.
+workflow_feedback_hash() {
+    local file="$1"
+    local normalized
+    normalized="$(normalize_workflow_feedback "$file" 2>/dev/null)" || return 1
+    [ -n "$normalized" ] || return 1
+
+    if command -v shasum >/dev/null 2>&1; then
+        printf '%s\n' "$normalized" | shasum -a 256 | awk '{print $1}'
+    elif command -v sha256sum >/dev/null 2>&1; then
+        printf '%s\n' "$normalized" | sha256sum | awk '{print $1}'
+    else
+        # Portable fallback: weaker hash but enough for duplicate suppression.
+        printf '%s\n' "$normalized" | cksum | awk '{print $1 ":" $2}'
+    fi
+}
+
 # Persist workflow feedback files to shared location
 # Args: peer_sync feature mode
 persist_workflow_feedback() {
@@ -3153,10 +3188,28 @@ persist_workflow_feedback() {
         agents=("claude" "codex")
     fi
 
+    # Baseline hashes from already persisted feedback.
+    local known_hashes=""
+    for existing in "$dest_dir"/*.md; do
+        [ -f "$existing" ] || break
+        local existing_hash=""
+        existing_hash="$(workflow_feedback_hash "$existing" 2>/dev/null)" || existing_hash=""
+        [ -z "$existing_hash" ] && continue
+        if [ -z "$known_hashes" ]; then
+            known_hashes="$existing_hash"
+        else
+            known_hashes="${known_hashes}"$'\n'"$existing_hash"
+        fi
+    done
+
     local copied_any=false
+    local relevant_any=false
     for agent in "${agents[@]}"; do
         local src="$peer_sync/workflow-feedback-${agent}.md"
         if [ -f "$src" ]; then
+            local src_hash=""
+            src_hash="$(workflow_feedback_hash "$src" 2>/dev/null)" || src_hash=""
+
             local dest="$dest_dir/${date_stamp}-${feature}-${agent}.md"
             if [ -f "$dest" ]; then
                 local i=2
@@ -3167,6 +3220,15 @@ persist_workflow_feedback() {
             fi
             cp "$src" "$dest"
             copied_any=true
+
+            if [ -n "$src_hash" ] && ! printf '%s\n' "$known_hashes" | grep -Fxq "$src_hash"; then
+                relevant_any=true
+                if [ -z "$known_hashes" ]; then
+                    known_hashes="$src_hash"
+                else
+                    known_hashes="${known_hashes}"$'\n'"$src_hash"
+                fi
+            fi
         fi
     done
 
@@ -3176,12 +3238,14 @@ persist_workflow_feedback() {
         # Auto-digest if configured
         local auto_digest
         auto_digest="$(get_config_value "auto_digest" 2>/dev/null)" || auto_digest=""
-        if [ "$auto_digest" = "true" ] && command -v ludics >/dev/null 2>&1; then
+        if [ "$auto_digest" = "true" ] && [ "$relevant_any" = true ] && command -v ludics >/dev/null 2>&1; then
             local repo
             repo="$(get_config_value "feedback_repo" 2>/dev/null)" || repo=""
             if [ -n "$repo" ]; then
                 ludics mag feedback-digest "$repo" &>/dev/null & disown
             fi
+        elif [ "$auto_digest" = "true" ] && [ "$relevant_any" != true ]; then
+            log_debug "Skipping auto-digest: no new relevant workflow feedback content"
         fi
     fi
 }
