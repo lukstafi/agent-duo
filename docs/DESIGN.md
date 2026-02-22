@@ -33,7 +33,8 @@ Agent Duo coordinates two AI coding agents working in parallel on the same task,
 ./agent-pair setup   # For pair mode (optional)
 
 # Installs to ~/.local/bin/ (add to PATH if needed)
-# Also installs skills to ~/.claude/commands/ and ~/.codex/skills/
+# Installs skill templates to ~/.local/bin/skills/templates
+# Session start then installs skills into each worktree's .claude/.codex dirs
 # Configures completion hooks for automatic phase signaling
 
 # Verify installation
@@ -545,7 +546,7 @@ This ensures:
 
 ## Terminal Modes
 
-### tmux mode (default)
+### tmux mode (`--no-ttyd`)
 
 ```bash
 agent-duo start myfeature
@@ -729,9 +730,9 @@ Agent-pair is an alternative mode where one agent codes and another reviews in a
 1. **Gather phase** (optional, `--gather`): Reviewer explores codebase and collects task context
 2. **Clarify phase** (optional, `--clarify`): Coder proposes approach, reviewer comments
 3. **Pushback phase** (optional, `--pushback`): Reviewer proposes task improvements
-4. **Plan phase** (optional, `--plan`): Coder writes plan, reviewer evaluates with verdict (APPROVE/REQUEST_CHANGES, up to 3 rounds)
+4. **Plan phase** (optional, `--plan`): Coder writes plan, reviewer evaluates with explicit verdict token (`APPROVE`/`REQUEST_CHANGES`, up to 3 rounds)
 5. **Coder** implements the solution (work phase)
-6. **Reviewer** examines code and writes review with verdict (APPROVE/REQUEST_CHANGES)
+6. **Reviewer** examines code and writes review with explicit verdict token (`APPROVE`/`REQUEST_CHANGES`)
 7. If approved: create PR. If changes requested: loop continues.
 8. After PR created: monitor for GitHub comments and address feedback
 
@@ -940,7 +941,7 @@ The escalation mechanism allows agents to flag issues discovered during work/rev
 The `restart` command is DWIM (Do What I Mean):
 - Recreates tmux sessions if they're missing
 - Restarts ttyd servers if they're down (skipped for `--no-ttyd` sessions)
-- Restarts agent TUIs if needed
+- Recovers agent TUIs if needed (resume-first, then fresh launch fallback)
 - With `--auto-run`: also restarts the orchestrator loop
 - With `--no-ttyd`: forces tmux-only mode regardless of how session was started
 
@@ -964,4 +965,4 @@ The plan phase enables agents to write and review implementation plans before co
 
 Auto-finish mode (`--auto-finish`) enables fully unattended sessions. During the PR-comments watch phase, if one PR is closed/merged and only one remains, the orchestrator triggers the `final-merge` phase where the remaining agent rebases onto main, runs tests, waits for CI, and squash-merges the PR.
 
-The `learn` and `workflow-feedback` commands let agents capture knowledge during sessions — project learnings go to `AGENTS_STAGING.md` in the worktree, while workflow feedback is accumulated to `~/.agent-duo/workflow-feedback/` for later review via `agent-duo feedback`.
+The `learn` and `workflow-feedback` commands let agents capture knowledge during sessions — project learnings go to `AGENTS_STAGING.md` in the worktree, while workflow feedback is accumulated to `~/.agent-duo/workflow-feedback/` for later review via `agent-duo feedback`. Feedback persistence deduplicates placeholder-only and repeated entries so digesting focuses on new actionable items.
