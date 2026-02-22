@@ -4564,10 +4564,6 @@ cmd_run() {
                 [[ "$claude_status" =~ ^(done|review-done|updating-docs|docs-update-done|pr-created)$ ]] && claude_done=true
                 [[ "$codex_status" =~ ^(done|review-done|updating-docs|docs-update-done|pr-created)$ ]] && codex_done=true
 
-                # Check for PRs created mid-phase
-                has_pr "claude" "$peer_sync" && claude_done=true
-                has_pr "codex" "$peer_sync" && codex_done=true
-
                 if $claude_done && $codex_done; then
                     printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status_display" "$codex_status_display" "$elapsed" "$work_timeout"
                     break
@@ -4732,9 +4728,6 @@ cmd_run() {
                     # Accept review-done, done (agent skipped review), or pr-created
                     [[ "$claude_status" =~ ^(done|review-done|updating-docs|docs-update-done|pr-created)$ ]] && claude_done=true
                     [[ "$codex_status" =~ ^(done|review-done|updating-docs|docs-update-done|pr-created)$ ]] && codex_done=true
-
-                    has_pr "claude" "$peer_sync" && claude_done=true
-                    has_pr "codex" "$peer_sync" && codex_done=true
 
                     if $claude_done && $codex_done; then
                         printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status_display" "$codex_status_display" "$elapsed" "$review_timeout"
