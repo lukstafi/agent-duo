@@ -236,6 +236,50 @@ else
     test_fail "token=$TOKEN seq=$SEQ"
 fi
 
+test_start "append_event writes structured JSON line"
+append_event "$PHASE_SYNC" "unit_test_event" "unit-test" "claude" "working" "hello event log"
+if assert_file_exists "$PHASE_SYNC/events.jsonl"; then
+    if command -v jq >/dev/null 2>&1; then
+        if jq -e '(.event_type == "unit_test_event") and (.source == "unit-test") and (.agent == "claude") and (.status == "working")' "$PHASE_SYNC/events.jsonl" >/dev/null 2>&1; then
+            test_pass
+        else
+            test_fail "events.jsonl does not contain expected structured payload"
+        fi
+    elif grep -q "unit_test_event" "$PHASE_SYNC/events.jsonl"; then
+        test_pass
+    else
+        test_fail "events.jsonl missing expected event content"
+    fi
+else
+    test_fail "events.jsonl not created"
+fi
+
+test_start "set_phase_state appends phase_transition event"
+set_phase_state "$PHASE_SYNC" "work"
+if command -v jq >/dev/null 2>&1; then
+    if tail -n 5 "$PHASE_SYNC/events.jsonl" | jq -e 'select(.event_type == "phase_transition" and .status == "work")' >/dev/null 2>&1; then
+        test_pass
+    else
+        test_fail "phase_transition event not found"
+    fi
+elif grep -q "phase_transition" "$PHASE_SYNC/events.jsonl"; then
+    test_pass
+else
+    test_fail "phase_transition event missing"
+fi
+
+test_start "append_event degrades gracefully when events lock is held"
+mkdir -p "$PHASE_SYNC/.events.lock"
+before_lines=$(wc -l < "$PHASE_SYNC/events.jsonl" 2>/dev/null || echo 0)
+EVENT_LOG_LOCK_TIMEOUT_MS=20 append_event "$PHASE_SYNC" "locked_event" "unit-test" "codex" "working" "should skip due to lock"
+after_lines=$(wc -l < "$PHASE_SYNC/events.jsonl" 2>/dev/null || echo 0)
+rmdir "$PHASE_SYNC/.events.lock" 2>/dev/null || true
+if [ "$before_lines" = "$after_lines" ]; then
+    test_pass
+else
+    test_fail "event appended despite held lock (before=$before_lines after=$after_lines)"
+fi
+
 #------------------------------------------------------------------------------
 # Test: Agent command generation
 #------------------------------------------------------------------------------

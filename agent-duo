@@ -3902,6 +3902,7 @@ cmd_run() {
     echo "Review timeout: ${review_timeout}s"
     echo "Max rounds:     $max_rounds"
     echo ""
+    append_event "$peer_sync" "orchestrator_run_started" "orchestrator" "" "running" "work_timeout=${work_timeout}s review_timeout=${review_timeout}s max_rounds=${max_rounds}"
 
     # Calculate worktree paths using main project root (not feature root worktree)
     local main_root
@@ -4843,10 +4844,12 @@ cmd_run() {
                     if is_pr_merged "$claude_pr" || is_pr_merged "$codex_pr"; then
                         success "PR accepted and merged to main. Session complete!"
                         echo "accepted" > "$peer_sync/session"
+                        append_event "$peer_sync" "session_completed" "orchestrator" "" "accepted" "all PRs closed with merge"
                         run_suggest_refactor_duo "$peer_sync" "$claude_session" "$codex_session" "$feature"
                     else
                         info "PRs closed without merging. Session complete."
                         echo "closed" > "$peer_sync/session"
+                        append_event "$peer_sync" "session_completed" "orchestrator" "" "closed" "all PRs closed without merge"
                     fi
                     break
                 fi
@@ -4855,6 +4858,7 @@ cmd_run() {
                 # and our branches need rebasing
                 if main_has_advanced "$peer_sync"; then
                     info "Main branch has advanced - checking if rebase needed..."
+                    append_event "$peer_sync" "main_advanced" "orchestrator" "" "integrate-check" "checking whether open branches need rebase"
 
                     local claude_branch codex_branch
                     claude_branch="${feature}-claude"
@@ -4870,6 +4874,7 @@ cmd_run() {
 
                     if $needs_integrate; then
                         info "Branches need rebasing onto updated main"
+                        append_event "$peer_sync" "integration_requested" "orchestrator" "" "integrate" "open PR branches are behind main"
                         set_phase_state "$peer_sync" "integrate"
 
                         # Trigger integrate skill for agents with open PRs
@@ -4942,6 +4947,7 @@ cmd_run() {
 
                         # Resume pr-comments phase
                         set_phase_state "$peer_sync" "pr-comments"
+                        append_event "$peer_sync" "integration_completed" "orchestrator" "" "pr-comments" "returned to PR comment watch after integration"
                         info "Integration complete, resuming PR comment watch"
                         # Reset auto-finish timeout after integration activity
                         auto_finish_last_activity=$SECONDS
@@ -4957,6 +4963,7 @@ cmd_run() {
                 if $merge_triggered; then
                     echo ""
                     success "Merge trigger detected ('Proceed to merge' comment found)!"
+                    append_event "$peer_sync" "merge_trigger_detected" "orchestrator" "" "merge" "detected 'Proceed to merge' comment"
                     echo ""
                     info "Transitioning to merge phase..."
                     cmd_run_merge
@@ -4993,11 +5000,13 @@ cmd_run() {
                         if [ -n "$claude_reviews" ] && [ "$claude_reviews" != "0" ]; then
                             claude_needs_attention=true
                             info "Claude's PR has $claude_reviews review(s) to process"
+                            append_event "$peer_sync" "pr_feedback_detected" "orchestrator" "claude" "pending-reviews" "first watch entry found ${claude_reviews} review(s)"
                         fi
                         claude_first_entry=false
                     elif pr_has_new_comments "claude" "$peer_sync"; then
                         claude_needs_attention=true
                         info "New comments on Claude's PR!"
+                        append_event "$peer_sync" "pr_feedback_detected" "orchestrator" "claude" "new-comments" "detected new PR comments/reviews"
                         send_pr_comment_notification "claude" "$feature" "$claude_pr" "duo"
                     fi
                 fi
@@ -5012,11 +5021,13 @@ cmd_run() {
                         if [ -n "$codex_reviews" ] && [ "$codex_reviews" != "0" ]; then
                             codex_needs_attention=true
                             info "Codex's PR has $codex_reviews review(s) to process"
+                            append_event "$peer_sync" "pr_feedback_detected" "orchestrator" "codex" "pending-reviews" "first watch entry found ${codex_reviews} review(s)"
                         fi
                         codex_first_entry=false
                     elif pr_has_new_comments "codex" "$peer_sync"; then
                         codex_needs_attention=true
                         info "New comments on Codex's PR!"
+                        append_event "$peer_sync" "pr_feedback_detected" "orchestrator" "codex" "new-comments" "detected new PR comments/reviews"
                         send_pr_comment_notification "codex" "$feature" "$codex_pr" "duo"
                     fi
                 fi
@@ -5025,6 +5036,7 @@ cmd_run() {
                 if $claude_needs_attention; then
                     check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
                     atomic_write "$peer_sync/claude.status" "working|$(date +%s)|addressing PR comments"
+                    append_event "$peer_sync" "pr_feedback_handler_started" "orchestrator" "claude" "working" "triggering duo-pr-comment"
                     info "Triggering duo-pr-comment for claude..."
                     send_to_agent "claude" "$claude_session" "$peer_sync" skill "duo-pr-comment"
                 fi
@@ -5032,6 +5044,7 @@ cmd_run() {
                 if $codex_needs_attention; then
                     check_tui_health "codex" "$codex_session" "$peer_sync" "$tui_exit_behavior"
                     atomic_write "$peer_sync/codex.status" "working|$(date +%s)|addressing PR comments"
+                    append_event "$peer_sync" "pr_feedback_handler_started" "orchestrator" "codex" "working" "triggering duo-pr-comment"
                     info "Triggering duo-pr-comment for codex..."
                     send_to_agent "codex" "$codex_session" "$peer_sync" skill "duo-pr-comment"
                 fi
