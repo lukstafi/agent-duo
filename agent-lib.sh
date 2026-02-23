@@ -1118,6 +1118,8 @@ DEFAULT_PUSHBACK_TIMEOUT=600 # 10 minutes
 DEFAULT_PLAN_TIMEOUT=600     # 10 minutes
 DEFAULT_INTEGRATE_TIMEOUT=600 # 10 minutes
 DEFAULT_DOCS_UPDATE_TIMEOUT=600 # 10 minutes
+DEFAULT_LEARNING_INTERVAL=3600 # 60 minutes between periodic learning checkpoints
+DEFAULT_LEARNING_PRODUCTIVE_ROUNDS_GAP=3 # minimum productive rounds between learning checkpoints
 DEFAULT_POLL_INTERVAL=10     # Check every 10 seconds
 DEFAULT_TUI_EXIT_BEHAVIOR="pause"  # What to do on TUI exit: pause, quit, or ignore
 DEFAULT_AUTO_FINISH_TIMEOUT=1800   # 30 minutes (auto-finish mode inactivity timeout)
@@ -3323,8 +3325,8 @@ persist_workflow_feedback() {
     dest_dir="$(workflow_feedback_dir)"
     mkdir -p "$dest_dir"
 
-    local date_stamp
-    date_stamp="$(date +%F)"
+    local timestamp_stamp
+    timestamp_stamp="$(date +%Y-%m-%d-%H%M%S)"
 
     local agents=()
     if [ "$mode" = "pair" ]; then
@@ -3355,13 +3357,13 @@ persist_workflow_feedback() {
             local src_hash=""
             src_hash="$(workflow_feedback_hash "$src" 2>/dev/null)" || src_hash=""
 
-            local dest="$dest_dir/${date_stamp}-${feature}-${agent}.md"
+            local dest="$dest_dir/${timestamp_stamp}-${feature}-${agent}.md"
             if [ -f "$dest" ]; then
                 local i=2
-                while [ -f "$dest_dir/${date_stamp}-${feature}-${agent}-${i}.md" ]; do
+                while [ -f "$dest_dir/${timestamp_stamp}-${feature}-${agent}-${i}.md" ]; do
                     i=$((i + 1))
                 done
-                dest="$dest_dir/${date_stamp}-${feature}-${agent}-${i}.md"
+                dest="$dest_dir/${timestamp_stamp}-${feature}-${agent}-${i}.md"
             fi
             cp "$src" "$dest"
             copied_any=true
@@ -3399,14 +3401,103 @@ persist_workflow_feedback() {
 # PR Creation (shared between duo and pair modes)
 #------------------------------------------------------------------------------
 
+# Read learning interval for docs-update throttling.
+# Echoes a non-negative integer on success.
+lib_get_learning_interval() {
+    local peer_sync="$1"
+    local learning_interval
+    learning_interval="$(cat "$peer_sync/learning-interval" 2>/dev/null)" || learning_interval="${DEFAULT_LEARNING_INTERVAL:-3600}"
+    case "$learning_interval" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    echo "$learning_interval"
+}
+
+# Read productive-round gap for learning checkpoints.
+# Echoes a non-negative integer on success.
+lib_get_learning_productive_round_gap() {
+    local peer_sync="$1"
+    local rounds_gap
+    rounds_gap="$(cat "$peer_sync/learning-productive-rounds-gap" 2>/dev/null)" || rounds_gap="${DEFAULT_LEARNING_PRODUCTIVE_ROUNDS_GAP:-3}"
+    case "$rounds_gap" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    echo "$rounds_gap"
+}
+
+# Check docs-update throttling constraints.
+# Return codes:
+#   0 => allowed now
+#   1 => throttled (same round or interval not elapsed)
+#   2 => invalid config
+lib_docs_update_throttle_allows() {
+    local peer_sync="$1"
+    local now="${2:-$(date +%s)}"
+    local round="${3:-}"
+
+    if [ -z "$round" ]; then
+        round="$(cat "$peer_sync/round" 2>/dev/null)" || round="0"
+    fi
+    case "$round" in
+        ''|*[!0-9]*) round="0" ;;
+    esac
+
+    local learning_interval
+    learning_interval="$(lib_get_learning_interval "$peer_sync")" || return 2
+
+    local last_round
+    last_round="$(cat "$peer_sync/docs-update-last-round" 2>/dev/null)" || last_round="-1"
+    case "$last_round" in
+        ''|*[!0-9]*) last_round="-1" ;;
+    esac
+    if [ "$last_round" -eq "$round" ]; then
+        return 1
+    fi
+
+    local last_epoch
+    last_epoch="$(cat "$peer_sync/docs-update-last-epoch" 2>/dev/null)" || last_epoch=""
+    case "$last_epoch" in
+        ''|*[!0-9]*) return 0 ;;
+    esac
+
+    if [ "$learning_interval" -gt 0 ]; then
+        [ "$now" -lt "$last_epoch" ] && return 1
+        local elapsed=$((now - last_epoch))
+        [ "$elapsed" -lt "$learning_interval" ] && return 1
+    fi
+
+    return 0
+}
+
+# Persist timestamp + round of the latest successful docs-update run.
+lib_mark_docs_update_run() {
+    local peer_sync="$1"
+    local now="${2:-$(date +%s)}"
+    local round
+    local productive_round_count
+    round="$(cat "$peer_sync/round" 2>/dev/null)" || round="0"
+    case "$round" in
+        ''|*[!0-9]*) round="0" ;;
+    esac
+    productive_round_count="$(cat "$peer_sync/productive-round-count" 2>/dev/null)" || productive_round_count="0"
+    case "$productive_round_count" in
+        ''|*[!0-9]*) productive_round_count="0" ;;
+    esac
+    atomic_write "$peer_sync/docs-update-last-epoch" "$now"
+    atomic_write "$peer_sync/docs-update-last-round" "$round"
+    atomic_write "$peer_sync/docs-update-last-productive-round-count" "$productive_round_count"
+}
+
 # Ensure docs update is complete before PR creation
-# Args: agent peer_sync feature mode
+# Args: agent peer_sync feature mode [force]
 # mode: "duo" or "pair"
+# force: reserved for compatibility; throttling rules still apply
 lib_ensure_docs_update() {
     local agent="$1"
     local peer_sync="$2"
     local feature="$3"
     local mode="${4:-duo}"
+    local force="${5:-false}"
 
     if [ ! -f "$peer_sync/docs-update-mode" ]; then
         return 0
@@ -3418,11 +3509,19 @@ lib_ensure_docs_update() {
         return 0
     fi
 
-    local current_status
-    current_status="$(get_agent_status "$agent" "$peer_sync")"
-    if [ -f "$peer_sync/docs-update-${agent}.done" ] || [ "$current_status" = "docs-update-done" ]; then
+    local now
+    now="$(date +%s)"
+    lib_docs_update_throttle_allows "$peer_sync" "$now"
+    local throttle_rc=$?
+    if [ "$throttle_rc" -eq 2 ]; then
+        warn "Invalid learning interval for docs-update throttling."
+        return 1
+    fi
+    if [ "$throttle_rc" -eq 1 ]; then
+        info "Skipping update-docs for $agent (throttled by round/interval)."
         return 0
     fi
+    rm -f "$peer_sync/docs-update-${agent}.done"
 
     info "Docs update required before PR creation."
     local previous_phase
@@ -3486,7 +3585,241 @@ lib_ensure_docs_update() {
     done
     echo ""
     success "Docs update completed for $agent"
+    lib_mark_docs_update_run "$peer_sync" "$now"
     [ -n "$previous_phase" ] && set_phase_state "$peer_sync" "$previous_phase"
+    return 0
+}
+
+# Ensure docs update for multiple agents in parallel.
+# Args: peer_sync feature mode agent...
+lib_ensure_docs_update_parallel() {
+    local peer_sync="$1"
+    local feature="$2"
+    local mode="${3:-duo}"
+    shift 3
+    local agents=("$@")
+
+    [ "${#agents[@]}" -eq 0 ] && return 0
+
+    local now
+    now="$(date +%s)"
+    lib_docs_update_throttle_allows "$peer_sync" "$now"
+    local throttle_rc=$?
+    if [ "$throttle_rc" -eq 2 ]; then
+        warn "Invalid learning interval for docs-update throttling."
+        return 1
+    fi
+    if [ "$throttle_rc" -eq 1 ]; then
+        info "Skipping update-docs (throttled by round/interval)."
+        return 0
+    fi
+
+    local previous_phase
+    previous_phase="$(cat "$peer_sync/phase" 2>/dev/null)"
+    set_phase_state "$peer_sync" "update-docs"
+
+    local session_name="${mode}-${feature}"
+    local current_session="" current_window=""
+    if [ -n "$TMUX" ]; then
+        current_session="$(tmux display-message -p '#S' 2>/dev/null)" || current_session=""
+        current_window="$(tmux display-message -p '#W' 2>/dev/null)" || current_window=""
+    fi
+
+    declare -A targets
+    declare -A done
+    local agent
+    for agent in "${agents[@]}"; do
+        local target=""
+        if tmux has-session -t "$session_name" 2>/dev/null; then
+            target="${session_name}:${agent}"
+        elif tmux has-session -t "${session_name}-${agent}" 2>/dev/null; then
+            target="${session_name}-${agent}"
+        fi
+
+        local in_agent_session=false
+        if [ -n "$TMUX" ]; then
+            if [ "$current_session" = "$session_name" ] && [ "$current_window" = "$agent" ]; then
+                in_agent_session=true
+            elif [ "$current_session" = "${session_name}-${agent}" ]; then
+                in_agent_session=true
+            fi
+        fi
+
+        if [ "$in_agent_session" = true ] || [ -z "$target" ]; then
+            warn "Run the ${mode}-update-docs skill, then re-run: agent-${mode} pr $agent"
+            [ -n "$previous_phase" ] && set_phase_state "$peer_sync" "$previous_phase"
+            return 1
+        fi
+
+        targets["$agent"]="$target"
+        done["$agent"]=false
+        rm -f "$peer_sync/docs-update-${agent}.done"
+        atomic_write "$peer_sync/${agent}.status" "updating-docs|$(date +%s)|capturing learnings"
+    done
+
+    for agent in "${agents[@]}"; do
+        info "Triggering ${mode}-update-docs for $agent..."
+        send_to_agent "$agent" "${targets[$agent]}" "$peer_sync" skill "${mode}-update-docs"
+    done
+
+    local timeout="${DEFAULT_DOCS_UPDATE_TIMEOUT:-600}"
+    local start=$SECONDS
+    while true; do
+        local all_done=true
+        for agent in "${agents[@]}"; do
+            if [ "${done[$agent]}" = true ]; then
+                continue
+            fi
+
+            local status
+            status="$(get_agent_status "$agent" "$peer_sync")"
+            if [ -f "$peer_sync/docs-update-${agent}.done" ] || [ "$status" = "docs-update-done" ]; then
+                done["$agent"]=true
+                success "Docs update completed for $agent"
+                continue
+            fi
+
+            all_done=false
+            check_and_retry_on_error "$agent" "${targets[$agent]}" "$peer_sync"
+        done
+
+        if [ "$all_done" = true ]; then
+            break
+        fi
+
+        local elapsed=$((SECONDS - start))
+        if [ "$elapsed" -ge "$timeout" ]; then
+            warn "Docs update timeout (${timeout}s)"
+            for agent in "${agents[@]}"; do
+                if [ "${done[$agent]}" = true ]; then
+                    continue
+                fi
+                local status
+                status="$(get_agent_status "$agent" "$peer_sync")"
+                if [ "$status" != "docs-update-done" ]; then
+                    interrupt_agent "$agent" "${targets[$agent]}" "$peer_sync"
+                fi
+            done
+            [ -n "$previous_phase" ] && set_phase_state "$peer_sync" "$previous_phase"
+            return 1
+        fi
+
+        printf "\r  Waiting for update-docs... (%ds/%ds)  " "$elapsed" "$timeout"
+        sleep 5
+    done
+    echo ""
+
+    lib_mark_docs_update_run "$peer_sync" "$now"
+    [ -n "$previous_phase" ] && set_phase_state "$peer_sync" "$previous_phase"
+    return 0
+}
+
+# Periodically trigger update-docs as a synchronous learning checkpoint.
+# Args: peer_sync feature mode
+# Uses productive-round and wallclock throttles to decide when a checkpoint is due.
+lib_maybe_run_learning_checkpoint() {
+    local peer_sync="$1"
+    local feature="$2"
+    local mode="${3:-duo}"
+
+    local docs_update_mode
+    docs_update_mode="$(cat "$peer_sync/docs-update-mode" 2>/dev/null)" || docs_update_mode="true"
+    if [ "$docs_update_mode" != "true" ]; then
+        return 0
+    fi
+
+    local learning_interval
+    learning_interval="$(lib_get_learning_interval "$peer_sync")" || {
+        warn "Invalid learning interval for docs-update throttling."
+        return 1
+    }
+    [ "$learning_interval" -le 0 ] && return 0
+
+    local rounds_gap
+    rounds_gap="$(lib_get_learning_productive_round_gap "$peer_sync")" || {
+        warn "Invalid productive-round gap for learning checkpoints."
+        return 1
+    }
+
+    local now session_start_epoch
+    now="$(date +%s)"
+    session_start_epoch="$(cat "$peer_sync/session-start-epoch" 2>/dev/null)" || session_start_epoch=""
+    case "$session_start_epoch" in
+        ''|*[!0-9]*)
+            session_start_epoch="$now"
+            atomic_write "$peer_sync/session-start-epoch" "$session_start_epoch"
+            ;;
+    esac
+    [ "$now" -lt "$session_start_epoch" ] && return 0
+
+    local productive_round_count
+    productive_round_count="$(cat "$peer_sync/productive-round-count" 2>/dev/null)" || productive_round_count="0"
+    case "$productive_round_count" in
+        ''|*[!0-9]*) productive_round_count="0" ;;
+    esac
+
+    if [ "$rounds_gap" -gt 0 ]; then
+        local last_docs_productive_round_count
+        last_docs_productive_round_count="$(cat "$peer_sync/docs-update-last-productive-round-count" 2>/dev/null)" || last_docs_productive_round_count=""
+        case "$last_docs_productive_round_count" in
+            ''|*[!0-9]*)
+                [ "$productive_round_count" -lt "$rounds_gap" ] && return 0
+                ;;
+            *)
+                [ "$productive_round_count" -lt "$last_docs_productive_round_count" ] && \
+                    last_docs_productive_round_count="$productive_round_count"
+                local productive_delta=$((productive_round_count - last_docs_productive_round_count))
+                [ "$productive_delta" -lt "$rounds_gap" ] && return 0
+                ;;
+        esac
+    fi
+
+    # Before the first docs-update run, use session start as baseline so
+    # periodic learning doesn't fire immediately on short sessions.
+    if [ ! -f "$peer_sync/docs-update-last-epoch" ]; then
+        [ "$now" -lt "$session_start_epoch" ] && return 0
+        local since_start=$((now - session_start_epoch))
+        [ "$since_start" -lt "$learning_interval" ] && return 0
+    fi
+
+    lib_docs_update_throttle_allows "$peer_sync" "$now"
+    local throttle_rc=$?
+    if [ "$throttle_rc" -eq 2 ]; then
+        warn "Invalid learning interval for docs-update throttling."
+        return 1
+    fi
+    [ "$throttle_rc" -eq 1 ] && return 0
+
+    info "Learning checkpoint due (${learning_interval}s cadence from session start)."
+
+    local pending_agents=()
+    local agent
+    for agent in claude codex; do
+        if has_pr "$agent" "$peer_sync"; then
+            continue
+        fi
+        pending_agents+=("$agent")
+        rm -f "$peer_sync/docs-update-${agent}.done"
+    done
+
+    [ "${#pending_agents[@]}" -eq 0 ] && return 0
+
+    if [ "${#pending_agents[@]}" -gt 1 ]; then
+        if ! lib_ensure_docs_update_parallel "$peer_sync" "$feature" "$mode" "${pending_agents[@]}"; then
+            warn "Learning checkpoint failed; will retry after next round."
+            return 1
+        fi
+    else
+        agent="${pending_agents[0]}"
+        if ! lib_ensure_docs_update "$agent" "$peer_sync" "$feature" "$mode"; then
+            warn "Learning checkpoint failed for $agent; will retry after next round."
+            return 1
+        fi
+    fi
+
+    atomic_write "$peer_sync/learning-last-epoch" "$now"
+    append_event "$peer_sync" "learning_checkpoint_completed" "orchestrator" "" "" "interval=${learning_interval}s"
+    success "Learning checkpoint complete."
     return 0
 }
 
@@ -3597,7 +3930,7 @@ lib_create_pr() {
 
     cd "$worktree"
 
-    if ! lib_ensure_docs_update "$agent" "$peer_sync" "$feature" "$mode"; then
+    if ! lib_ensure_docs_update "$agent" "$peer_sync" "$feature" "$mode" "true"; then
         return 1
     fi
 

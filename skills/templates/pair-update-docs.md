@@ -22,7 +22,7 @@ Guidelines:
 Suggested commands:
 
 ```bash
-DATE=$(date +%F)
+TIMESTAMP=$(date +%Y-%m-%dT%H:%M:%S%z)
 ROLE="coder"
 STAGING="AGENTS_STAGING.md"
 
@@ -37,7 +37,7 @@ STAGING_EOF
 fi
 
 cat >> "$STAGING" << ENTRY_EOF
-<!-- Entry: ${FEATURE}-${ROLE} | ${DATE} -->
+<!-- Entry: ${FEATURE}-${ROLE} | ${TIMESTAMP} -->
 ### [Short title]
 
 [What should future agents know? Keep it concise and actionable.]
@@ -53,12 +53,12 @@ Edit the new entry to replace the placeholder text with your actual learnings.
 Write workflow feedback to the sync directory so it can be collected later:
 
 ```bash
-DATE=$(date +%F)
+TIMESTAMP=$(date +%Y-%m-%dT%H:%M:%S%z)
 ROLE="coder"
 FEEDBACK_FILE="$PEER_SYNC/workflow-feedback-${ROLE}.md"
 
 cat > "$FEEDBACK_FILE" << FEEDBACK_EOF
-# Workflow feedback (${ROLE}) - ${FEATURE} - ${DATE}
+# Workflow feedback (${ROLE}) - ${FEATURE} - ${TIMESTAMP}
 
 - [Actionable feedback about agent-pair workflow/skills/tooling]
 - [Another specific, actionable point]

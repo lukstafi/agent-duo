@@ -184,6 +184,7 @@ agent-duo start <feature> --clarify    # Enable clarify stage (agents propose ap
 agent-duo start <feature> --pushback   # Enable pushback stage (agents improve task)
 agent-duo start <feature> --plan       # Enable plan/review stage (agents write plans)
 agent-duo start <feature> --skip-docs-update  # Skip update-docs phase before PR creation
+agent-duo start <feature> --learning-interval 3600  # Minimum 60m between update-docs runs (0 disables)
 agent-duo start <feature> --no-ttyd    # Start with single tmux session (no web terminals)
 agent-duo run [options]                # Run orchestrator loop (if not using --auto-run)
 agent-duo status                       # Show current state
@@ -204,6 +205,7 @@ agent-duo run \
   --pushback-timeout 600 \  # Seconds for pushback stage
   --plan-timeout 600 \      # Seconds for plan + plan-review stages
   --max-rounds 10 \         # Maximum work/review cycles
+  --learning-interval 3600 \ # Minimum wallclock seconds between update-docs runs (0 disables)
   --auto-start \            # Auto-launch agent CLIs
   --auto-finish \           # Auto-merge after inactivity timeout (for unattended runs)
   --auto-finish-timeout 1800  # Inactivity timeout in seconds (default: 1800 = 30 min)
@@ -279,7 +281,8 @@ agent-duo confirm            # Confirm clarify phase, proceed to work
 
 ## Task Learning (Update-Docs)
 
-Before PR creation, agents capture learnings in two places:
+Before PR creation, agents capture learnings in two places.
+Additionally, update-docs runs are throttled to at most once per round, by a minimum wallclock interval (default 3600s, configurable with `--learning-interval`), and by a productive-rounds gap (default 3 productive rounds). Periodic checkpoints run between rounds when all throttles allow:
 
 - **Project learnings** -> `AGENTS_STAGING.md` in the project root (later curated into `CLAUDE.md` / `AGENTS.md`)
 - **Workflow feedback** -> `.peer-sync/workflow-feedback-<agent>.md`, copied to `~/.agent-duo/workflow-feedback/` when the session completes
