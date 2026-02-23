@@ -3759,7 +3759,8 @@ get_phase_completion_time() {
 # over them with the in-place waiting line.
 # Usage:
 #   emit_phase_terminal_status_update <agent> <status> <status_epoch> \
-#       <phase_start_epoch> <peer_sync> <waiting_line_active_var> <last_logged_epoch_var>
+#       <phase_start_epoch> <peer_sync> <waiting_line_active_var> \
+#       <last_logged_status_var> <last_logged_epoch_var>
 emit_phase_terminal_status_update() {
     local agent="$1"
     local status="$2"
@@ -3767,7 +3768,9 @@ emit_phase_terminal_status_update() {
     local phase_start_epoch="$4"
     local peer_sync="$5"
     local waiting_line_active_var="$6"
-    local last_logged_epoch_var="$7"
+    local last_logged_status_var="$7"
+    local last_logged_epoch_var="$8"
+    local last_logged_status="${!last_logged_status_var}"
     local last_logged_epoch="${!last_logged_epoch_var}"
 
     case "$status" in
@@ -3783,7 +3786,7 @@ emit_phase_terminal_status_update() {
     if [ "$status_epoch" -lt "$phase_start_epoch" ]; then
         return 0
     fi
-    if [ "$status_epoch" = "$last_logged_epoch" ]; then
+    if [ "$status" = "$last_logged_status" ] && [ "$status_epoch" = "$last_logged_epoch" ]; then
         return 0
     fi
 
@@ -3800,6 +3803,7 @@ emit_phase_terminal_status_update() {
         info "  ${agent} ${status}"
     fi
 
+    printf -v "$last_logged_status_var" "%s" "$status"
     printf -v "$last_logged_epoch_var" "%s" "$status_epoch"
 }
 
@@ -4584,8 +4588,12 @@ cmd_run() {
             local claude_done=false
             local codex_done=false
             local waiting_line_active=false
+            local claude_terminal_logged_status
+            local codex_terminal_logged_status
             local claude_terminal_logged_epoch
             local codex_terminal_logged_epoch
+            claude_terminal_logged_status="$(get_agent_status "claude" "$peer_sync")"
+            codex_terminal_logged_status="$(get_agent_status "codex" "$peer_sync")"
             claude_terminal_logged_epoch="$(get_agent_status_epoch "claude" "$peer_sync")"
             codex_terminal_logged_epoch="$(get_agent_status_epoch "codex" "$peer_sync")"
 
@@ -4617,8 +4625,8 @@ cmd_run() {
                 # Accept done, review-done (agent jumped ahead), or pr-created
                 [[ "$claude_status" =~ ^(done|review-done|updating-docs|docs-update-done|pr-created)$ ]] && claude_done=true
                 [[ "$codex_status" =~ ^(done|review-done|updating-docs|docs-update-done|pr-created)$ ]] && codex_done=true
-                emit_phase_terminal_status_update "claude" "$claude_status" "$claude_status_epoch" "$work_start_epoch" "$peer_sync" "waiting_line_active" "claude_terminal_logged_epoch"
-                emit_phase_terminal_status_update "codex" "$codex_status" "$codex_status_epoch" "$work_start_epoch" "$peer_sync" "waiting_line_active" "codex_terminal_logged_epoch"
+                emit_phase_terminal_status_update "claude" "$claude_status" "$claude_status_epoch" "$work_start_epoch" "$peer_sync" "waiting_line_active" "claude_terminal_logged_status" "claude_terminal_logged_epoch"
+                emit_phase_terminal_status_update "codex" "$codex_status" "$codex_status_epoch" "$work_start_epoch" "$peer_sync" "waiting_line_active" "codex_terminal_logged_status" "codex_terminal_logged_epoch"
 
                 if $claude_done && $codex_done; then
                     printf "\r  Finished. claude=%s codex=%s (%ds/%ds)  " "$claude_status_display" "$codex_status_display" "$elapsed" "$work_timeout"
@@ -4758,6 +4766,8 @@ cmd_run() {
                 claude_done=false
                 codex_done=false
                 waiting_line_active=false
+                claude_terminal_logged_status="$(get_agent_status "claude" "$peer_sync")"
+                codex_terminal_logged_status="$(get_agent_status "codex" "$peer_sync")"
                 claude_terminal_logged_epoch="$(get_agent_status_epoch "claude" "$peer_sync")"
                 codex_terminal_logged_epoch="$(get_agent_status_epoch "codex" "$peer_sync")"
 
@@ -4788,8 +4798,8 @@ cmd_run() {
                     # Accept review-done, done (agent skipped review), or pr-created
                     [[ "$claude_status" =~ ^(done|review-done|updating-docs|docs-update-done|pr-created)$ ]] && claude_done=true
                     [[ "$codex_status" =~ ^(done|review-done|updating-docs|docs-update-done|pr-created)$ ]] && codex_done=true
-                    emit_phase_terminal_status_update "claude" "$claude_status" "$claude_status_epoch" "$review_start_epoch" "$peer_sync" "waiting_line_active" "claude_terminal_logged_epoch"
-                    emit_phase_terminal_status_update "codex" "$codex_status" "$codex_status_epoch" "$review_start_epoch" "$peer_sync" "waiting_line_active" "codex_terminal_logged_epoch"
+                    emit_phase_terminal_status_update "claude" "$claude_status" "$claude_status_epoch" "$review_start_epoch" "$peer_sync" "waiting_line_active" "claude_terminal_logged_status" "claude_terminal_logged_epoch"
+                    emit_phase_terminal_status_update "codex" "$codex_status" "$codex_status_epoch" "$review_start_epoch" "$peer_sync" "waiting_line_active" "codex_terminal_logged_status" "codex_terminal_logged_epoch"
 
                     if $claude_done && $codex_done; then
                         printf "\r  Finished. claude=%s codex=%s (%ds/%ds)  " "$claude_status_display" "$codex_status_display" "$elapsed" "$review_timeout"
