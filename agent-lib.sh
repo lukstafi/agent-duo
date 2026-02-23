@@ -3491,7 +3491,7 @@ lib_mark_docs_update_run() {
 # Ensure docs update is complete before PR creation
 # Args: agent peer_sync feature mode [force]
 # mode: "duo" or "pair"
-# force: reserved for compatibility; throttling rules still apply
+# force: "true" bypasses throttling (used by PR creation)
 lib_ensure_docs_update() {
     local agent="$1"
     local peer_sync="$2"
@@ -3511,15 +3511,17 @@ lib_ensure_docs_update() {
 
     local now
     now="$(date +%s)"
-    lib_docs_update_throttle_allows "$peer_sync" "$now"
-    local throttle_rc=$?
-    if [ "$throttle_rc" -eq 2 ]; then
-        warn "Invalid learning interval for docs-update throttling."
-        return 1
-    fi
-    if [ "$throttle_rc" -eq 1 ]; then
-        info "Skipping update-docs for $agent (throttled by round/interval)."
-        return 0
+    if [ "$force" != "true" ]; then
+        lib_docs_update_throttle_allows "$peer_sync" "$now"
+        local throttle_rc=$?
+        if [ "$throttle_rc" -eq 2 ]; then
+            warn "Invalid learning interval for docs-update throttling."
+            return 1
+        fi
+        if [ "$throttle_rc" -eq 1 ]; then
+            info "Skipping update-docs for $agent (throttled by round/interval)."
+            return 0
+        fi
     fi
     rm -f "$peer_sync/docs-update-${agent}.done"
 
@@ -3775,9 +3777,8 @@ lib_maybe_run_learning_checkpoint() {
     fi
 
     # Before the first docs-update run, use session start as baseline so
-    # periodic learning doesn't fire immediately on short sessions.
+    # periodic learning does not fire immediately on short sessions.
     if [ ! -f "$peer_sync/docs-update-last-epoch" ]; then
-        [ "$now" -lt "$session_start_epoch" ] && return 0
         local since_start=$((now - session_start_epoch))
         [ "$since_start" -lt "$learning_interval" ] && return 0
     fi
@@ -3790,8 +3791,6 @@ lib_maybe_run_learning_checkpoint() {
     fi
     [ "$throttle_rc" -eq 1 ] && return 0
 
-    info "Learning checkpoint due (${learning_interval}s cadence from session start)."
-
     local pending_agents=()
     local agent
     for agent in claude codex; do
@@ -3799,10 +3798,11 @@ lib_maybe_run_learning_checkpoint() {
             continue
         fi
         pending_agents+=("$agent")
-        rm -f "$peer_sync/docs-update-${agent}.done"
     done
 
     [ "${#pending_agents[@]}" -eq 0 ] && return 0
+
+    info "Learning checkpoint due (${learning_interval}s cadence from session start)."
 
     if [ "${#pending_agents[@]}" -gt 1 ]; then
         if ! lib_ensure_docs_update_parallel "$peer_sync" "$feature" "$mode" "${pending_agents[@]}"; then
