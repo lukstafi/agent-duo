@@ -160,6 +160,7 @@ Given project directory `myapp` and feature `auth`:
 ├── auto-finish       # "true" or "false" - whether auto-finish mode is enabled
 ├── auto-finish-timeout # Inactivity timeout for auto-finish (seconds)
 ├── codex-thinking    # Codex reasoning effort level
+├── events.jsonl      # Append-only structured event stream for timeline/postmortems
 ├── claude.status     # Agent status: "working|1705847123|implementing API"
 ├── codex.status      # Format: status|epoch|message
 ├── claude.transition-advice # Hook-generated suggested next signal/transition

@@ -512,6 +512,84 @@ atomic_write() {
     rmdir "$lockdir"
 }
 
+# Append a structured event to .peer-sync/events.jsonl.
+# Best-effort only: never fails the caller.
+# Usage: append_event <peer_sync> <event_type> [source] [agent] [status] [message]
+append_event() {
+    local peer_sync="$1"
+    local event_type="$2"
+    local source="${3:-orchestrator}"
+    local agent="${4:-}"
+    local status="${5:-}"
+    local message="${6:-}"
+
+    [ -z "$peer_sync" ] || [ -z "$event_type" ] && return 0
+    [ -d "$peer_sync" ] || return 0
+
+    local ts epoch feature phase phase_token mode session_state round
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    epoch="$(date +%s)"
+    feature="$(cat "$peer_sync/feature" 2>/dev/null)" || feature=""
+    phase="$(cat "$peer_sync/phase" 2>/dev/null)" || phase=""
+    phase_token="$(cat "$peer_sync/phase-token" 2>/dev/null)" || phase_token=""
+    mode="$(cat "$peer_sync/mode" 2>/dev/null)" || mode=""
+    session_state="$(cat "$peer_sync/session" 2>/dev/null)" || session_state=""
+    round="$(cat "$peer_sync/round" 2>/dev/null)" || round="0"
+    case "$round" in
+        ''|*[!0-9]*) round="0" ;;
+    esac
+
+    local line=""
+    if command -v jq >/dev/null 2>&1; then
+        line="$(
+            jq -cn \
+                --arg ts "$ts" \
+                --arg event_type "$event_type" \
+                --arg source "$source" \
+                --arg agent "$agent" \
+                --arg status "$status" \
+                --arg message "$message" \
+                --arg feature "$feature" \
+                --arg phase "$phase" \
+                --arg phase_token "$phase_token" \
+                --arg mode "$mode" \
+                --arg session_state "$session_state" \
+                --argjson epoch "$epoch" \
+                --argjson round "$round" \
+                '{
+                    ts: $ts,
+                    epoch: $epoch,
+                    event_type: $event_type,
+                    source: $source,
+                    feature: (if $feature == "" then null else $feature end),
+                    session_state: (if $session_state == "" then null else $session_state end),
+                    mode: (if $mode == "" then null else $mode end),
+                    phase: (if $phase == "" then null else $phase end),
+                    phase_token: (if $phase_token == "" then null else $phase_token end),
+                    round: $round,
+                    agent: (if $agent == "" then null else $agent end),
+                    status: (if $status == "" then null else $status end),
+                    message: (if $message == "" then null else $message end)
+                }'
+        )" || return 0
+    else
+        # Fallback for environments without jq.
+        json_escape() {
+            printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g; s/\r/\\r/g; :a;N;$!ba;s/\n/\\n/g'
+        }
+        line="{\"ts\":\"$(json_escape "$ts")\",\"epoch\":${epoch},\"event_type\":\"$(json_escape "$event_type")\",\"source\":\"$(json_escape "$source")\",\"feature\":\"$(json_escape "$feature")\",\"session_state\":\"$(json_escape "$session_state")\",\"mode\":\"$(json_escape "$mode")\",\"phase\":\"$(json_escape "$phase")\",\"phase_token\":\"$(json_escape "$phase_token")\",\"round\":${round},\"agent\":\"$(json_escape "$agent")\",\"status\":\"$(json_escape "$status")\",\"message\":\"$(json_escape "$message")\"}"
+    fi
+
+    local log_file="$peer_sync/events.jsonl"
+    local lockdir="$peer_sync/.events.lock"
+    while ! mkdir "$lockdir" 2>/dev/null; do
+        sleep 0.01
+    done
+    printf '%s\n' "$line" >> "$log_file"
+    rmdir "$lockdir" 2>/dev/null || true
+    return 0
+}
+
 #------------------------------------------------------------------------------
 # Agent commands
 #------------------------------------------------------------------------------
@@ -1038,6 +1116,9 @@ set_phase_state() {
     local round="${3:-}"
     [ -z "$peer_sync" ] || [ -z "$phase" ] && return 1
 
+    local previous_phase
+    previous_phase="$(cat "$peer_sync/phase" 2>/dev/null)" || previous_phase=""
+
     if [ -z "$round" ]; then
         round="$(cat "$peer_sync/round" 2>/dev/null)" || round="0"
     fi
@@ -1056,6 +1137,7 @@ set_phase_state() {
     atomic_write "$peer_sync/phase" "$phase"
     atomic_write "$seq_file" "$seq"
     atomic_write "$peer_sync/phase-token" "${phase}|r${round}|s${seq}"
+    append_event "$peer_sync" "phase_transition" "orchestrator" "" "$phase" "from=${previous_phase:-unknown}"
 }
 
 # Check if agent has created a PR (from .pr file or by detecting on GitHub)
@@ -1146,6 +1228,7 @@ interrupt_agent() {
 
     # Update status
     atomic_write "$peer_sync/${agent}.status" "interrupted|$(date +%s)|timed out by orchestrator"
+    append_event "$peer_sync" "agent_interrupted" "orchestrator" "$agent" "interrupted" "timed out by orchestrator"
 }
 
 # Check if agent TUI has exited and handle according to behavior setting
@@ -1183,6 +1266,7 @@ check_tui_health() {
 
     # Resume failed or not applicable - fall back to configured behavior
     atomic_write "$peer_sync/${agent}.status" "tui-exited|$(date +%s)|TUI process exited"
+    append_event "$peer_sync" "agent_tui_exited" "orchestrator" "$agent" "tui-exited" "TUI process exited"
 
     case "$behavior" in
         ignore)
@@ -1346,6 +1430,10 @@ send_to_agent() {
             return 1
             ;;
     esac
+
+    local dispatch_desc="$skill_name"
+    [ "$send_type" = "message" ] && dispatch_desc="$skill_name"
+    append_event "$peer_sync" "agent_dispatch" "orchestrator" "$agent" "$send_type" "$dispatch_desc"
 }
 
 # Retry the last send to an agent (used by check_and_retry_on_error)
@@ -1398,6 +1486,7 @@ retry_last_send() {
             ;;
     esac
 
+    append_event "$peer_sync" "agent_dispatch_retry" "orchestrator" "$agent" "$send_type" "$skill_name"
     return 0
 }
 
@@ -1523,6 +1612,7 @@ check_and_retry_on_error() {
     if [ "$attempt" -gt "$DEFAULT_API_MAX_RETRIES" ]; then
         warn "Agent $agent: max retries ($DEFAULT_API_MAX_RETRIES) exceeded for $skill_name"
         rm -f "$retry_file"
+        append_event "$peer_sync" "agent_retry_exhausted" "orchestrator" "$agent" "error" "max retries exceeded for $skill_name"
         return 1
     fi
 
@@ -1537,6 +1627,7 @@ check_and_retry_on_error() {
 
     warn "Agent $agent: API error detected, attempt $attempt/$DEFAULT_API_MAX_RETRIES"
     warn "Waiting ${backoff}s before retry..."
+    append_event "$peer_sync" "agent_retry_scheduled" "orchestrator" "$agent" "error" "attempt=${attempt}/${DEFAULT_API_MAX_RETRIES} backoff=${backoff}s skill=${skill_name}"
 
     # Send notification about retry
     send_ntfy \
@@ -1585,6 +1676,7 @@ lib_cmd_signal() {
     if [ "$status" = "docs-update-done" ]; then
         touch "$peer_sync/docs-update-${agent}.done"
     fi
+    append_event "$peer_sync" "agent_signal" "agent" "$agent" "$status" "$message"
 
     success "$agent status: $status"
 }
@@ -3483,6 +3575,7 @@ lib_create_pr() {
     # Record PR
     echo "$pr_url" > "$peer_sync/${agent}.pr"
     atomic_write "$peer_sync/${agent}.status" "pr-created|$(date +%s)|$pr_url"
+    append_event "$peer_sync" "pr_created" "orchestrator" "$agent" "pr-created" "$pr_url"
 
     success "PR created: $pr_url"
 
