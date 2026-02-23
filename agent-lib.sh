@@ -582,10 +582,50 @@ append_event() {
 
     local log_file="$peer_sync/events.jsonl"
     local lockdir="$peer_sync/.events.lock"
-    while ! mkdir "$lockdir" 2>/dev/null; do
+
+    # Best-effort locking: bounded wait with stale-lock recovery.
+    # Never block indefinitely; if lock cannot be acquired in time, skip logging.
+    local lock_timeout_ms="${EVENT_LOG_LOCK_TIMEOUT_MS:-500}"
+    case "$lock_timeout_ms" in
+        ''|*[!0-9]*) lock_timeout_ms=500 ;;
+    esac
+    local max_attempts=$(( (lock_timeout_ms + 9) / 10 ))
+    [ "$max_attempts" -lt 1 ] && max_attempts=1
+
+    local stale_lock_seconds="${EVENT_LOG_STALE_LOCK_SECONDS:-120}"
+    case "$stale_lock_seconds" in
+        ''|*[!0-9]*) stale_lock_seconds=120 ;;
+    esac
+
+    local acquired=false
+    local attempt=0
+    while [ "$attempt" -lt "$max_attempts" ]; do
+        if mkdir "$lockdir" 2>/dev/null; then
+            acquired=true
+            break
+        fi
+
+        # Recover from stale lock dirs left behind by interrupted processes.
+        if [ -d "$lockdir" ]; then
+            local lock_mtime now age
+            lock_mtime="$(stat -f %m "$lockdir" 2>/dev/null)" || \
+                lock_mtime="$(stat -c %Y "$lockdir" 2>/dev/null)" || \
+                lock_mtime=""
+            if [[ "$lock_mtime" =~ ^[0-9]+$ ]]; then
+                now="$(date +%s)"
+                age=$((now - lock_mtime))
+                if [ "$age" -ge "$stale_lock_seconds" ]; then
+                    rmdir "$lockdir" 2>/dev/null || true
+                fi
+            fi
+        fi
+
+        attempt=$((attempt + 1))
         sleep 0.01
     done
-    printf '%s\n' "$line" >> "$log_file"
+
+    [ "$acquired" = true ] || return 0
+    printf '%s\n' "$line" >> "$log_file" 2>/dev/null || true
     rmdir "$lockdir" 2>/dev/null || true
     return 0
 }

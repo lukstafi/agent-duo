@@ -268,6 +268,18 @@ else
     test_fail "phase_transition event missing"
 fi
 
+test_start "append_event degrades gracefully when events lock is held"
+mkdir -p "$PHASE_SYNC/.events.lock"
+before_lines=$(wc -l < "$PHASE_SYNC/events.jsonl" 2>/dev/null || echo 0)
+EVENT_LOG_LOCK_TIMEOUT_MS=20 append_event "$PHASE_SYNC" "locked_event" "unit-test" "codex" "working" "should skip due to lock"
+after_lines=$(wc -l < "$PHASE_SYNC/events.jsonl" 2>/dev/null || echo 0)
+rmdir "$PHASE_SYNC/.events.lock" 2>/dev/null || true
+if [ "$before_lines" = "$after_lines" ]; then
+    test_pass
+else
+    test_fail "event appended despite held lock (before=$before_lines after=$after_lines)"
+fi
+
 #------------------------------------------------------------------------------
 # Test: Agent command generation
 #------------------------------------------------------------------------------
