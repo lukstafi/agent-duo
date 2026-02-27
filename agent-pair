@@ -318,7 +318,10 @@ cmd_start() {
     if [ -n "$followup_pr" ]; then
         local followup_feature
         followup_feature="$(generate_followup_task "$main_project_root" "$followup_pr" "$followup_msg")"
-        info "Generated follow-up task: ${followup_feature}.md"
+        local followup_task_path
+        followup_task_path="$(get_task_file_relative_path "$main_project_root" "$followup_feature" 2>/dev/null)" || \
+            followup_task_path="${followup_feature}.md"
+        info "Generated follow-up task: ${followup_task_path}"
         features+=("$followup_feature")
     fi
 
@@ -412,12 +415,14 @@ start_single_pair_session() {
     fi
 
     # Check for task file in main project
-    local task_file
+    local task_file=""
+    local task_file_rel=""
     if task_file="$(find_task_file "$main_project_root" "$feature")"; then
         info "Found task file: $task_file"
+        task_file_rel="${task_file#$main_project_root/}"
     else
         warn "Task file not found: $feature.md"
-        warn "Searched: $feature.md, doc/$feature.md, docs/$feature.md, **/$feature.md"
+        warn "Searched: docs/$feature.md, doc/$feature.md, $feature.md, **/$feature.md"
         warn "Create it with the task description, or the agents won't know what to do."
     fi
 
@@ -496,6 +501,7 @@ start_single_pair_session() {
     echo "$early_pr" > "$peer_sync/early-pr"
     echo "$docs_update_mode" > "$peer_sync/docs-update-mode"
     echo "$feature" > "$peer_sync/feature"
+    [ -n "$task_file_rel" ] && echo "$task_file_rel" > "$peer_sync/task-file"
     [ -n "$followup_pr" ] && echo "$followup_pr" > "$peer_sync/followup-pr"
     echo "$codex_thinking" > "$peer_sync/codex-thinking"
 
@@ -520,11 +526,6 @@ start_single_pair_session() {
     templates_dir="$(get_templates_dir)"
     install_pair_skills_to_worktree "$worktree" "$templates_dir"
     success "Installed skills to worktree"
-
-    # Copy task file to worktree if it exists
-    if [ -n "$task_file" ] && [ -f "$task_file" ]; then
-        cp "$task_file" "$worktree/"
-    fi
 
     # Save ttyd mode setting for restart command
     echo "$ttyd_mode" > "$peer_sync/ttyd-mode"
@@ -561,6 +562,8 @@ start_tmux_mode_pair() {
     local early_pr="${20:-false}"
 
     local session_name="pair-${feature}"
+    local task_file_rel=""
+    task_file_rel="$(cat "$peer_sync/task-file" 2>/dev/null)" || true
 
     # Kill existing session if any
     tmux kill-session -t "$session_name" 2>/dev/null || true
@@ -581,6 +584,8 @@ start_tmux_mode_pair() {
     tmux send-keys -t "$session_name:coder" C-m
     tmux send-keys -t "$session_name:coder" "export FEATURE='$feature'"
     tmux send-keys -t "$session_name:coder" C-m
+    tmux send-keys -t "$session_name:coder" "export TASK_FILE='$task_file_rel'"
+    tmux send-keys -t "$session_name:coder" C-m
     tmux send-keys -t "$session_name:coder" "export WORKTREE='$worktree'"
     tmux send-keys -t "$session_name:coder" C-m
 
@@ -595,6 +600,8 @@ start_tmux_mode_pair() {
     tmux send-keys -t "$session_name:reviewer" "export PEER_NAME='coder'"
     tmux send-keys -t "$session_name:reviewer" C-m
     tmux send-keys -t "$session_name:reviewer" "export FEATURE='$feature'"
+    tmux send-keys -t "$session_name:reviewer" C-m
+    tmux send-keys -t "$session_name:reviewer" "export TASK_FILE='$task_file_rel'"
     tmux send-keys -t "$session_name:reviewer" C-m
     tmux send-keys -t "$session_name:reviewer" "export WORKTREE='$worktree'"
     tmux send-keys -t "$session_name:reviewer" C-m
@@ -687,6 +694,8 @@ start_ttyd_mode_pair() {
     local early_pr="${20:-false}"
 
     local session_name="pair-${feature}"
+    local task_file_rel=""
+    task_file_rel="$(cat "$peer_sync/task-file" 2>/dev/null)" || true
 
     # Check ttyd is installed
     command -v ttyd >/dev/null 2>&1 || die "ttyd not found. Install with: brew install ttyd"
@@ -705,19 +714,19 @@ start_ttyd_mode_pair() {
     tmux_set_title "${session_name}-reviewer" "${reviewer}: ${feature}"
 
     # Set environment variables for orchestrator
-    for var in "PEER_SYNC='$peer_sync'" "FEATURE='$feature'"; do
+    for var in "PEER_SYNC='$peer_sync'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'"; do
         tmux send-keys -t "${session_name}-orchestrator" "export $var"
         tmux send-keys -t "${session_name}-orchestrator" C-m
     done
 
     # Set environment variables for coder
-    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='coder'" "MY_ROLE='coder'" "PEER_NAME='reviewer'" "FEATURE='$feature'" "WORKTREE='$worktree'"; do
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='coder'" "MY_ROLE='coder'" "PEER_NAME='reviewer'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'" "WORKTREE='$worktree'"; do
         tmux send-keys -t "${session_name}-coder" "export $var"
         tmux send-keys -t "${session_name}-coder" C-m
     done
 
     # Set environment variables for reviewer
-    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='reviewer'" "MY_ROLE='reviewer'" "PEER_NAME='coder'" "FEATURE='$feature'" "WORKTREE='$worktree'"; do
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='reviewer'" "MY_ROLE='reviewer'" "PEER_NAME='coder'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'" "WORKTREE='$worktree'"; do
         tmux send-keys -t "${session_name}-reviewer" "export $var"
         tmux send-keys -t "${session_name}-reviewer" C-m
     done
@@ -1014,6 +1023,8 @@ cmd_restart() {
     # Load early-pr setting
     local early_pr
     early_pr="$(cat "$peer_sync/early-pr" 2>/dev/null)" || early_pr="false"
+    local task_file_rel=""
+    task_file_rel="$(cat "$peer_sync/task-file" 2>/dev/null)" || true
 
     # Load agent assignments
     local coder_agent reviewer_agent
@@ -1058,7 +1069,7 @@ cmd_restart() {
             info "Creating tmux session: $orchestrator_target"
             tmux new-session -d -s "$orchestrator_target" -c "$root"
             tmux_set_title "$orchestrator_target" "orchestrator: ${feature}"
-            for var in "PEER_SYNC='$peer_sync'" "FEATURE='$feature'"; do
+            for var in "PEER_SYNC='$peer_sync'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'"; do
                 tmux send-keys -t "$orchestrator_target" "export $var"
                 tmux send-keys -t "$orchestrator_target" C-m
             done
@@ -1076,7 +1087,7 @@ cmd_restart() {
                 info "Creating tmux session: $coder_target"
                 tmux new-session -d -s "$coder_target" -c "$worktree"
                 tmux_set_title "$coder_target" "coder: ${feature}"
-                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='coder'" "MY_ROLE='coder'" "PEER_NAME='reviewer'" "FEATURE='$feature'" "WORKTREE='$worktree'"; do
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='coder'" "MY_ROLE='coder'" "PEER_NAME='reviewer'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'" "WORKTREE='$worktree'"; do
                     tmux send-keys -t "$coder_target" "export $var"
                     tmux send-keys -t "$coder_target" C-m
                 done
@@ -1095,7 +1106,7 @@ cmd_restart() {
                 info "Creating tmux session: $reviewer_target"
                 tmux new-session -d -s "$reviewer_target" -c "$worktree"
                 tmux_set_title "$reviewer_target" "reviewer: ${feature}"
-                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='reviewer'" "MY_ROLE='reviewer'" "PEER_NAME='coder'" "FEATURE='$feature'" "WORKTREE='$worktree'"; do
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='reviewer'" "MY_ROLE='reviewer'" "PEER_NAME='coder'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'" "WORKTREE='$worktree'"; do
                     tmux send-keys -t "$reviewer_target" "export $var"
                     tmux send-keys -t "$reviewer_target" C-m
                 done
@@ -1119,14 +1130,14 @@ cmd_restart() {
             if [ -d "$worktree" ]; then
                 # Create coder window
                 tmux new-window -t "$session_name" -n "coder" -c "$worktree"
-                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='coder'" "MY_ROLE='coder'" "PEER_NAME='reviewer'" "FEATURE='$feature'" "WORKTREE='$worktree'"; do
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='coder'" "MY_ROLE='coder'" "PEER_NAME='reviewer'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'" "WORKTREE='$worktree'"; do
                     tmux send-keys -t "$coder_target" "export $var"
                     tmux send-keys -t "$coder_target" C-m
                 done
 
                 # Create reviewer window
                 tmux new-window -t "$session_name" -n "reviewer" -c "$worktree"
-                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='reviewer'" "MY_ROLE='reviewer'" "PEER_NAME='coder'" "FEATURE='$feature'" "WORKTREE='$worktree'"; do
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='reviewer'" "MY_ROLE='reviewer'" "PEER_NAME='coder'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'" "WORKTREE='$worktree'"; do
                     tmux send-keys -t "$reviewer_target" "export $var"
                     tmux send-keys -t "$reviewer_target" C-m
                 done
@@ -1598,7 +1609,8 @@ EOF
 generate_pair_pushback_message() {
     local feature="$1"
     local task_content="$2"
-    local peer_sync="$3"
+    local task_file_path="$3"
+    local peer_sync="$4"
 
     cat <<EOF
 # Task: $feature
@@ -1625,7 +1637,7 @@ Consider:
 
 ### Modify the Task File Directly
 
-If you believe the task could be improved, edit \`$feature.md\` directly. The user will compare your version with the original using diff.
+If you believe the task could be improved, edit \`$task_file_path\` directly. The user will compare your version with the original using diff.
 
 If the task is well-specified and needs no changes, skip to writing your rationale.
 
@@ -2133,14 +2145,20 @@ cmd_run() {
         # Read task content
         local task_content=""
         task_content="$(read_task_content "$root" "$feature")" || true
-        local task_basename="${feature}.md"
+        local task_rel_path=""
+        task_rel_path="$(cat "$peer_sync/task-file" 2>/dev/null)" || true
+        if [ -z "$task_rel_path" ]; then
+            task_rel_path="$(get_task_file_relative_path "$root" "$feature" 2>/dev/null)" || true
+        fi
+        [ -z "$task_rel_path" ] && task_rel_path="${feature}.md"
+        [ -f "$peer_sync/task-file" ] || echo "$task_rel_path" > "$peer_sync/task-file"
 
         # Only reviewer pushes back in pair mode
         atomic_write "$peer_sync/coder.status" "waiting|$(date +%s)|waiting for reviewer pushback"
         atomic_write "$peer_sync/reviewer.status" "pushing-back|$(date +%s)|pushback stage"
         info "Sending pushback task to reviewer..."
         local reviewer_pushback_msg
-        reviewer_pushback_msg="$(generate_pair_pushback_message "$feature" "$task_content" "$peer_sync")"
+        reviewer_pushback_msg="$(generate_pair_pushback_message "$feature" "$task_content" "$task_rel_path" "$peer_sync")"
         send_to_agent "reviewer" "$reviewer_session" "$peer_sync" message "$reviewer_pushback_msg" "pushback"
 
         # Wait for reviewer to complete pushback stage
@@ -2210,13 +2228,13 @@ cmd_run() {
                 echo "reviewer" > "$peer_sync/pushback-accepted"
                 ;;
             *)
-                # Reject: restore original task file from project root
+                # Reject: restore the committed original task file from HEAD
                 info "Rejecting pushback, restoring original task..."
-                if [ -f "$root/$task_basename" ]; then
-                    cp "$root/$task_basename" "$worktree/$task_basename"
+                mkdir -p "$(dirname "$worktree/$task_rel_path")"
+                if git -C "$worktree" show "HEAD:$task_rel_path" > "$worktree/$task_rel_path" 2>/dev/null; then
                     success "Restored original task file"
                 else
-                    warn "Original task file not found in project root"
+                    warn "Original task file not found in current branch"
                 fi
                 echo "rejected" > "$peer_sync/pushback-accepted"
                 ;;

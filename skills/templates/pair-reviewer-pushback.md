@@ -26,7 +26,7 @@ Minimum sections:
 1. Read task and coder clarify file (if present):
 
 ```bash
-cat "$FEATURE.md"
+cat "${TASK_FILE:-$FEATURE.md}"
 cat "$PEER_SYNC/clarify-coder.md" 2>/dev/null || true
 ```
 
@@ -37,7 +37,7 @@ Use this activity brief:
 - Critique task for ambiguity, missing edge cases, and unnecessary constraints
 - Propose minimal edits with highest impact
 
-3. If needed, edit `$FEATURE.md` directly.
+3. If needed, edit `${TASK_FILE:-$FEATURE.md}` directly.
 
 4. Write pushback rationale and signal completion:
 

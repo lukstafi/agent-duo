@@ -27,7 +27,7 @@ If unavailable, manually read the previous round review and peer status.
 
 1. Implement the next highest-impact change.
 2. Keep your approach distinct unless feedback reveals a clear defect.
-3. Record key decisions in `$FEATURE.md` to aid recovery after compaction.
+3. Record key decisions in `${TASK_FILE:-$FEATURE.md}` to aid recovery after compaction.
 4. Check peer progress when useful:
 
 ```bash

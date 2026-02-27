@@ -772,7 +772,10 @@ cmd_start() {
     if [ -n "$followup_pr" ]; then
         local followup_feature
         followup_feature="$(generate_followup_task "$main_project_root" "$followup_pr" "$followup_msg")"
-        info "Generated follow-up task: ${followup_feature}.md"
+        local followup_task_path
+        followup_task_path="$(get_task_file_relative_path "$main_project_root" "$followup_feature" 2>/dev/null)" || \
+            followup_task_path="${followup_feature}.md"
+        info "Generated follow-up task: ${followup_task_path}"
         features+=("$followup_feature")
     fi
 
@@ -864,12 +867,14 @@ start_single_session() {
     fi
 
     # Check for task file in main project
-    local task_file
+    local task_file=""
+    local task_file_rel=""
     if task_file="$(find_task_file "$main_project_root" "$feature")"; then
         info "Found task file: $task_file"
+        task_file_rel="${task_file#$main_project_root/}"
     else
         warn "Task file not found: $feature.md"
-        warn "Searched: $feature.md, doc/$feature.md, docs/$feature.md, **/$feature.md"
+        warn "Searched: docs/$feature.md, doc/$feature.md, $feature.md, **/$feature.md"
         warn "Create it with the task description, or the agents won't know what to do."
     fi
 
@@ -964,6 +969,7 @@ start_single_session() {
     echo "$auto_finish_timeout" > "$peer_sync/auto-finish-timeout"
     echo "$early_pr" > "$peer_sync/early-pr"
     echo "$feature" > "$peer_sync/feature"
+    [ -n "$task_file_rel" ] && echo "$task_file_rel" > "$peer_sync/task-file"
     [ -n "$followup_pr" ] && echo "$followup_pr" > "$peer_sync/followup-pr"
     echo "$codex_thinking" > "$peer_sync/codex-thinking"
     echo "duo" > "$peer_sync/mode"
@@ -996,13 +1002,6 @@ start_single_session() {
     install_duo_skills_to_worktree "$worktree_claude" "$templates_dir"
     install_duo_skills_to_worktree "$worktree_codex" "$templates_dir"
     success "Installed skills to all worktrees"
-
-    # Copy task file to all worktrees if it exists
-    if [ -n "$task_file" ] && [ -f "$task_file" ]; then
-        cp "$task_file" "$root_worktree/"
-        cp "$task_file" "$worktree_claude/"
-        cp "$task_file" "$worktree_codex/"
-    fi
 
     # Save ttyd mode setting for restart command
     echo "$ttyd_mode" > "$peer_sync/ttyd-mode"
@@ -1039,6 +1038,8 @@ start_tmux_mode() {
     local early_pr="${18:-false}"
 
     local session_name="duo-${feature}"
+    local task_file_rel=""
+    task_file_rel="$(cat "$peer_sync/task-file" 2>/dev/null)" || true
 
     # Kill existing session if any
     tmux kill-session -t "$session_name" 2>/dev/null || true
@@ -1061,6 +1062,8 @@ start_tmux_mode() {
     tmux send-keys -t "$session_name:claude" C-m
     tmux send-keys -t "$session_name:claude" "export FEATURE='$feature'"
     tmux send-keys -t "$session_name:claude" C-m
+    tmux send-keys -t "$session_name:claude" "export TASK_FILE='$task_file_rel'"
+    tmux send-keys -t "$session_name:claude" C-m
 
     # Create codex window
     tmux new-window -t "$session_name" -n "codex" -c "$worktree_codex"
@@ -1075,6 +1078,8 @@ start_tmux_mode() {
     tmux send-keys -t "$session_name:codex" "export PEER_WORKTREE='$worktree_claude'"
     tmux send-keys -t "$session_name:codex" C-m
     tmux send-keys -t "$session_name:codex" "export FEATURE='$feature'"
+    tmux send-keys -t "$session_name:codex" C-m
+    tmux send-keys -t "$session_name:codex" "export TASK_FILE='$task_file_rel'"
     tmux send-keys -t "$session_name:codex" C-m
 
     success "Created tmux session: $session_name"
@@ -1154,6 +1159,8 @@ start_ttyd_mode() {
     local early_pr="${18:-false}"
 
     local session_name="duo-${feature}"
+    local task_file_rel=""
+    task_file_rel="$(cat "$peer_sync/task-file" 2>/dev/null)" || true
 
     # Check ttyd is installed
     command -v ttyd >/dev/null 2>&1 || die "ttyd not found. Install with: brew install ttyd"
@@ -1172,18 +1179,18 @@ start_ttyd_mode() {
     tmux_set_title "${session_name}-codex" "codex: ${feature}"
 
     # Set environment variables for orchestrator
-    for var in "PEER_SYNC='$peer_sync'" "FEATURE='$feature'"; do
+    for var in "PEER_SYNC='$peer_sync'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'"; do
         tmux send-keys -t "${session_name}-orchestrator" "export $var"
         tmux send-keys -t "${session_name}-orchestrator" C-m
     done
 
     # Set environment variables for agents
-    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "MY_WORKTREE='$worktree_claude'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "MY_WORKTREE='$worktree_claude'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'"; do
         tmux send-keys -t "${session_name}-claude" "export $var"
         tmux send-keys -t "${session_name}-claude" C-m
     done
 
-    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "MY_WORKTREE='$worktree_codex'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'"; do
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "MY_WORKTREE='$worktree_codex'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'"; do
         tmux send-keys -t "${session_name}-codex" "export $var"
         tmux send-keys -t "${session_name}-codex" C-m
     done
@@ -1479,6 +1486,8 @@ cmd_restart() {
     # Load early-pr setting
     local early_pr
     early_pr="$(cat "$peer_sync/early-pr" 2>/dev/null)" || early_pr="false"
+    local task_file_rel=""
+    task_file_rel="$(cat "$peer_sync/task-file" 2>/dev/null)" || true
 
     echo ""
     echo "=== Agent Duo Restart ==="
@@ -1513,7 +1522,7 @@ cmd_restart() {
             info "Creating tmux session: $orchestrator_target"
             tmux new-session -d -s "$orchestrator_target" -c "$root"
             tmux_set_title "$orchestrator_target" "orchestrator: ${feature}"
-            for var in "PEER_SYNC='$peer_sync'" "FEATURE='$feature'"; do
+            for var in "PEER_SYNC='$peer_sync'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'"; do
                 tmux send-keys -t "$orchestrator_target" "export $var"
                 tmux send-keys -t "$orchestrator_target" C-m
             done
@@ -1531,7 +1540,7 @@ cmd_restart() {
                 info "Creating tmux session: $claude_target"
                 tmux new-session -d -s "$claude_target" -c "$worktree_claude"
                 tmux_set_title "$claude_target" "claude: ${feature}"
-                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "MY_WORKTREE='$worktree_claude'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "MY_WORKTREE='$worktree_claude'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'"; do
                     tmux send-keys -t "$claude_target" "export $var"
                     tmux send-keys -t "$claude_target" C-m
                 done
@@ -1550,7 +1559,7 @@ cmd_restart() {
                 info "Creating tmux session: $codex_target"
                 tmux new-session -d -s "$codex_target" -c "$worktree_codex"
                 tmux_set_title "$codex_target" "codex: ${feature}"
-                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "MY_WORKTREE='$worktree_codex'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'"; do
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "MY_WORKTREE='$worktree_codex'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'"; do
                     tmux send-keys -t "$codex_target" "export $var"
                     tmux send-keys -t "$codex_target" C-m
                 done
@@ -1574,7 +1583,7 @@ cmd_restart() {
             # Create claude window
             if [ -d "$worktree_claude" ]; then
                 tmux new-window -t "$session_name" -n "claude" -c "$worktree_claude"
-                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "MY_WORKTREE='$worktree_claude'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "MY_WORKTREE='$worktree_claude'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'"; do
                     tmux send-keys -t "$claude_target" "export $var"
                     tmux send-keys -t "$claude_target" C-m
                 done
@@ -1586,7 +1595,7 @@ cmd_restart() {
             # Create codex window
             if [ -d "$worktree_codex" ]; then
                 tmux new-window -t "$session_name" -n "codex" -c "$worktree_codex"
-                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "MY_WORKTREE='$worktree_codex'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'"; do
+                for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "MY_WORKTREE='$worktree_codex'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'"; do
                     tmux send-keys -t "$codex_target" "export $var"
                     tmux send-keys -t "$codex_target" C-m
                 done
@@ -2408,10 +2417,11 @@ generate_merge_vote_message() {
     local agent="$1"
     local peer="$2"
     local feature="$3"
-    local peer_sync="$4"
-    local claude_pr="$5"
-    local codex_pr="$6"
-    local round="${7:-0}"
+    local task_file_path="$4"
+    local peer_sync="$5"
+    local claude_pr="$6"
+    local codex_pr="$7"
+    local round="${8:-0}"
 
     cat <<EOF
 # Merge Phase: Vote on PR to Merge
@@ -2439,7 +2449,7 @@ You are **$agent** in a fresh merge session. This is NOT the agent who created e
 
 ### Steps
 
-1. Read the original task: \`cat "$feature.md"\`
+1. Read the original task: \`cat "$task_file_path"\`
 2. View both PRs: \`gh pr view <url> --json title,body,state,commits,files,reviews,comments\` and \`gh pr diff <url>\`
 3. Read previous reviews: \`ls "$peer_sync/reviews/" 2>/dev/null && cat "$peer_sync/reviews/"*.md\`
 
@@ -2692,13 +2702,19 @@ cmd_run_merge() {
     # Derive agent worktree paths from root
     local worktree_claude="${root}-claude"
     local worktree_codex="${root}-codex"
+    local task_file_rel=""
+    task_file_rel="$(cat "$peer_sync/task-file" 2>/dev/null)" || true
+    if [ -z "$task_file_rel" ]; then
+        task_file_rel="$(get_task_file_relative_path "$root" "$feature" 2>/dev/null)" || true
+    fi
+    [ -z "$task_file_rel" ] && task_file_rel="${feature}.md"
 
     # Set environment variables for both agents (including worktree paths for merge-execute)
-    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "MY_WORKTREE='$worktree_claude'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'"; do
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='claude'" "PEER_NAME='codex'" "MY_WORKTREE='$worktree_claude'" "PEER_WORKTREE='$worktree_codex'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'"; do
         tmux send-keys -t "$claude_session" "export $var" || true
         tmux send-keys -t "$claude_session" C-m || true
     done
-    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "MY_WORKTREE='$worktree_codex'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'"; do
+    for var in "PEER_SYNC='$peer_sync'" "MY_NAME='codex'" "PEER_NAME='claude'" "MY_WORKTREE='$worktree_codex'" "PEER_WORKTREE='$worktree_claude'" "FEATURE='$feature'" "TASK_FILE='$task_file_rel'"; do
         tmux send-keys -t "$codex_session" "export $var" || true
         tmux send-keys -t "$codex_session" C-m || true
     done
@@ -2736,13 +2752,13 @@ cmd_run_merge() {
     atomic_write "$peer_sync/claude.status" "voting|$(date +%s)|merge vote phase"
     info "Sending vote request to claude..."
     local claude_vote_msg
-    claude_vote_msg="$(generate_merge_vote_message "claude" "codex" "$feature" "$peer_sync" "$claude_pr" "$codex_pr" "$round")"
+    claude_vote_msg="$(generate_merge_vote_message "claude" "codex" "$feature" "$task_file_rel" "$peer_sync" "$claude_pr" "$codex_pr" "$round")"
     send_to_agent "claude" "$claude_session" "$peer_sync" message "$claude_vote_msg" "merge-vote"
 
     atomic_write "$peer_sync/codex.status" "voting|$(date +%s)|merge vote phase"
     info "Sending vote request to codex..."
     local codex_vote_msg
-    codex_vote_msg="$(generate_merge_vote_message "codex" "claude" "$feature" "$peer_sync" "$claude_pr" "$codex_pr" "$round")"
+    codex_vote_msg="$(generate_merge_vote_message "codex" "claude" "$feature" "$task_file_rel" "$peer_sync" "$claude_pr" "$codex_pr" "$round")"
     send_to_agent "codex" "$codex_session" "$peer_sync" message "$codex_vote_msg" "merge-vote"
 
     # Wait for both votes
@@ -3694,8 +3710,9 @@ generate_pushback_message() {
     local peer="$2"
     local feature="$3"
     local task_content="$4"
-    local peer_worktree="$5"
-    local peer_sync="$6"
+    local task_file_path="$5"
+    local peer_worktree="$6"
+    local peer_sync="$7"
 
     cat <<EOF
 # Task: $feature
@@ -3728,7 +3745,7 @@ Consider:
 
 ### Modify the Task File Directly
 
-If you believe the task could be improved, edit \`$feature.md\` directly in your worktree. The user will compare versions using diff3.
+If you believe the task could be improved, edit \`$task_file_path\` directly in your worktree. The user will compare versions using diff3.
 
 If the task is well-specified and needs no changes, skip to writing your rationale.
 
@@ -4185,19 +4202,25 @@ cmd_run() {
         # Read task content
         local task_content=""
         task_content="$(read_task_content "$root" "$feature")" || true
-        local task_basename="${feature}.md"
+        local task_rel_path=""
+        task_rel_path="$(cat "$peer_sync/task-file" 2>/dev/null)" || true
+        if [ -z "$task_rel_path" ]; then
+            task_rel_path="$(get_task_file_relative_path "$root" "$feature" 2>/dev/null)" || true
+        fi
+        [ -z "$task_rel_path" ] && task_rel_path="${feature}.md"
+        [ -f "$peer_sync/task-file" ] || echo "$task_rel_path" > "$peer_sync/task-file"
 
         # Send pushback message to both agents
         atomic_write "$peer_sync/claude.status" "pushing-back|$(date +%s)|pushback stage"
         info "Sending pushback task to claude..."
         local claude_pushback_msg
-        claude_pushback_msg="$(generate_pushback_message "claude" "codex" "$feature" "$task_content" "$worktree_codex" "$peer_sync")"
+        claude_pushback_msg="$(generate_pushback_message "claude" "codex" "$feature" "$task_content" "$task_rel_path" "$worktree_codex" "$peer_sync")"
         send_to_agent "claude" "$claude_session" "$peer_sync" message "$claude_pushback_msg" "pushback"
 
         atomic_write "$peer_sync/codex.status" "pushing-back|$(date +%s)|pushback stage"
         info "Sending pushback task to codex..."
         local codex_pushback_msg
-        codex_pushback_msg="$(generate_pushback_message "codex" "claude" "$feature" "$task_content" "$worktree_claude" "$peer_sync")"
+        codex_pushback_msg="$(generate_pushback_message "codex" "claude" "$feature" "$task_content" "$task_rel_path" "$worktree_claude" "$peer_sync")"
         send_to_agent "codex" "$codex_session" "$peer_sync" message "$codex_pushback_msg" "pushback"
 
         # Wait for both agents to complete pushback stage
@@ -4288,8 +4311,9 @@ cmd_run() {
             c|C)
                 # Accept Claude's: copy Claude's task file to Codex's worktree
                 info "Accepting Claude's pushback..."
-                if [ -f "$worktree_claude/$task_basename" ]; then
-                    cp "$worktree_claude/$task_basename" "$worktree_codex/$task_basename"
+                if [ -f "$worktree_claude/$task_rel_path" ]; then
+                    mkdir -p "$(dirname "$worktree_codex/$task_rel_path")"
+                    cp "$worktree_claude/$task_rel_path" "$worktree_codex/$task_rel_path"
                     success "Copied Claude's task file to Codex worktree"
                 fi
                 echo "claude" > "$peer_sync/pushback-accepted"
@@ -4297,8 +4321,9 @@ cmd_run() {
             x|X)
                 # Accept Codex's: copy Codex's task file to Claude's worktree
                 info "Accepting Codex's pushback..."
-                if [ -f "$worktree_codex/$task_basename" ]; then
-                    cp "$worktree_codex/$task_basename" "$worktree_claude/$task_basename"
+                if [ -f "$worktree_codex/$task_rel_path" ]; then
+                    mkdir -p "$(dirname "$worktree_claude/$task_rel_path")"
+                    cp "$worktree_codex/$task_rel_path" "$worktree_claude/$task_rel_path"
                     success "Copied Codex's task file to Claude worktree"
                 fi
                 echo "codex" > "$peer_sync/pushback-accepted"
@@ -4306,12 +4331,14 @@ cmd_run() {
             *)
                 # Reject: restore original task file from project root to both worktrees
                 info "Rejecting pushbacks, restoring original task..."
-                if [ -f "$root/$task_basename" ]; then
-                    cp "$root/$task_basename" "$worktree_claude/$task_basename"
-                    cp "$root/$task_basename" "$worktree_codex/$task_basename"
+                if [ -f "$root/$task_rel_path" ]; then
+                    mkdir -p "$(dirname "$worktree_claude/$task_rel_path")"
+                    mkdir -p "$(dirname "$worktree_codex/$task_rel_path")"
+                    cp "$root/$task_rel_path" "$worktree_claude/$task_rel_path"
+                    cp "$root/$task_rel_path" "$worktree_codex/$task_rel_path"
                     success "Restored original task file to both worktrees"
                 else
-                    warn "Original task file not found in project root"
+                    warn "Original task file not found in session root"
                 fi
                 echo "rejected" > "$peer_sync/pushback-accepted"
                 ;;
@@ -5413,8 +5440,8 @@ SESSION COMMANDS
     start <feature> [<feature2> ...] [options]
         Start a new session for the given feature(s).
         Creates worktrees, tmux sessions, and ttyd web terminals.
-        Looks for task description in: <feature>.md, doc/<feature>.md,
-        docs/<feature>.md, or **/<feature>.md (anywhere in project).
+        Looks for task description in: docs/<feature>.md, doc/<feature>.md,
+        <feature>.md, or **/<feature>.md (anywhere in project).
 
         Options:
           --auto-run               Start orchestrator immediately in its own terminal (default)

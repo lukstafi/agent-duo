@@ -362,6 +362,16 @@ else
     test_fail "got: $FOUND"
 fi
 
+test_start "find_task_file prefers docs/ when both docs and root exist"
+echo "# Root Preferred?" > "$MOCK_PROJECT/prefer-docs.md"
+echo "# Docs Preferred" > "$MOCK_PROJECT/docs/prefer-docs.md"
+FOUND=$(find_task_file "$MOCK_PROJECT" "prefer-docs")
+if [ "$FOUND" = "$MOCK_PROJECT/docs/prefer-docs.md" ]; then
+    test_pass
+else
+    test_fail "got: $FOUND"
+fi
+
 test_start "find_task_file returns error for missing file"
 if find_task_file "$MOCK_PROJECT" "nonexistent-feature" 2>/dev/null; then
     test_fail "should have failed"
@@ -433,18 +443,18 @@ else
     test_fail "task file was not committed with expected message"
 fi
 
-test_start "ensure_task_file_committed normalizes docs task file and commits for pair"
+test_start "ensure_task_file_committed keeps docs task file location and commits for pair"
 mkdir -p "$TASK_GIT_REPO/docs"
 echo "# Docs Task" > "$TASK_GIT_REPO/docs/docs-task.md"
 ensure_task_file_committed "$TASK_GIT_REPO" "docs-task" "pair" >/dev/null
 LAST_MSG="$(git -C "$TASK_GIT_REPO" log -1 --pretty=%s)"
 if [ "$LAST_MSG" = "docs-task.md: agent-pair" ] && \
-   [ -f "$TASK_GIT_REPO/docs-task.md" ] && \
+   [ ! -f "$TASK_GIT_REPO/docs-task.md" ] && \
    git -C "$TASK_GIT_REPO" ls-files --error-unmatch docs/docs-task.md >/dev/null 2>&1 && \
-   git -C "$TASK_GIT_REPO" ls-files --error-unmatch docs-task.md >/dev/null 2>&1; then
+   ! git -C "$TASK_GIT_REPO" ls-files --error-unmatch docs-task.md >/dev/null 2>&1; then
     test_pass
 else
-    test_fail "docs task was not normalized/committed as expected"
+    test_fail "docs task location/commit behavior was not preserved as expected"
 fi
 
 #------------------------------------------------------------------------------
@@ -495,10 +505,10 @@ export PATH="$MOCK_BIN_DIR:$PATH"
 test_start "generate_followup_task creates task file from PR data"
 if FOLLOWUP_FEATURE="$(generate_followup_task "$MOCK_PROJECT" "42")" && \
    assert_eq "$FOLLOWUP_FEATURE" "auth-followup" && \
-   assert_file_exists "$MOCK_PROJECT/auth-followup.md" && \
-   grep -Fq "# Follow-up: Improve auth flow" "$MOCK_PROJECT/auth-followup.md" && \
-   grep -Fq "Please fix login validation." "$MOCK_PROJECT/auth-followup.md" && \
-   grep -Fq "Add tests for the new behavior." "$MOCK_PROJECT/auth-followup.md"; then
+   assert_file_exists "$MOCK_PROJECT/docs/auth-followup.md" && \
+   grep -Fq "# Follow-up: Improve auth flow" "$MOCK_PROJECT/docs/auth-followup.md" && \
+   grep -Fq "Please fix login validation." "$MOCK_PROJECT/docs/auth-followup.md" && \
+   grep -Fq "Add tests for the new behavior." "$MOCK_PROJECT/docs/auth-followup.md"; then
     test_pass
 else
     test_fail "generated follow-up task content mismatch"
@@ -506,11 +516,22 @@ fi
 
 test_start "generate_followup_task prepends followup message as first line"
 if FOLLOWUP_FEATURE="$(generate_followup_task "$MOCK_PROJECT" "42" "PRIORITY: fix blocker comments first")" && \
-   FIRST_LINE="$(head -n 1 "$MOCK_PROJECT/${FOLLOWUP_FEATURE}.md")" && \
+   FIRST_LINE="$(head -n 1 "$MOCK_PROJECT/docs/${FOLLOWUP_FEATURE}.md")" && \
    assert_eq "$FIRST_LINE" "PRIORITY: fix blocker comments first"; then
     test_pass
 else
     test_fail "follow-up message was not prepended"
+fi
+
+MOCK_PROJECT_NO_DOCS="$TEST_DIR/mock-project-no-docs"
+mkdir -p "$MOCK_PROJECT_NO_DOCS"
+
+test_start "generate_followup_task writes to project root when docs/ is absent"
+if FOLLOWUP_FEATURE="$(generate_followup_task "$MOCK_PROJECT_NO_DOCS" "42")" && \
+   assert_file_exists "$MOCK_PROJECT_NO_DOCS/${FOLLOWUP_FEATURE}.md"; then
+    test_pass
+else
+    test_fail "follow-up task was not written to project root when docs/ was absent"
 fi
 
 export PATH="$ORIG_PATH"

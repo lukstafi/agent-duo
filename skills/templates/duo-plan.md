@@ -29,7 +29,7 @@ Minimum sections:
 1. Read the task:
 
 ```bash
-cat "$FEATURE.md"
+cat "${TASK_FILE:-$FEATURE.md}"
 ```
 
 2. Inspect relevant code quickly:
@@ -42,7 +42,7 @@ rg -n -- "pattern|keyword|module"
 
 Use this activity brief:
 
-- Read `$FEATURE.md`
+- Read `${TASK_FILE:-$FEATURE.md}`
 - Identify impacted files/modules
 - Draft a concise implementation plan with risks and tests
 - Return only actionable steps (no filler)

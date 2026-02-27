@@ -26,7 +26,7 @@ Minimum sections:
 1. Read task and coder clarify note:
 
 ```bash
-cat "$FEATURE.md"
+cat "${TASK_FILE:-$FEATURE.md}"
 cat "$PEER_SYNC/clarify-coder.md"
 ```
 

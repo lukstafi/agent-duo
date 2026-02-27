@@ -27,7 +27,7 @@ Required line for parser:
 ```bash
 CLAUDE_PR="$(cat "$PEER_SYNC/claude.pr")"
 CODEX_PR="$(cat "$PEER_SYNC/codex.pr")"
-cat "$FEATURE.md"
+cat "${TASK_FILE:-$FEATURE.md}"
 ```
 
 2. Inspect both PRs:

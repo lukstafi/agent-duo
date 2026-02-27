@@ -24,7 +24,7 @@ If unavailable, manually read `$PEER_SYNC/reviews/round-<prev>-review.md`.
 ## Steps
 
 1. Implement highest-priority fixes/features.
-2. Keep `$FEATURE.md` updated with key decisions.
+2. Keep `${TASK_FILE:-$FEATURE.md}` updated with key decisions.
 3. Run relevant tests.
 
 ## Optional Delegation

@@ -29,7 +29,7 @@ Minimum sections:
 1. Read task and prior plan feedback (if any):
 
 ```bash
-cat "$FEATURE.md"
+cat "${TASK_FILE:-$FEATURE.md}"
 PLAN_ROUND=$(cat "$PEER_SYNC/plan-round" 2>/dev/null || echo "1")
 [ "$PLAN_ROUND" -gt 1 ] && cat "$PEER_SYNC/plan-review.md"
 ```

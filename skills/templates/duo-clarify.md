@@ -26,7 +26,7 @@ Minimum sections:
 1. Read task:
 
 ```bash
-cat "$FEATURE.md"
+cat "${TASK_FILE:-$FEATURE.md}"
 ```
 
 2. Optional delegation (if your agent supports sub-agents):

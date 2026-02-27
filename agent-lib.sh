@@ -334,15 +334,15 @@ get_mode() {
 }
 
 # Find task file for a feature
-# Searches in order: <feature>.md, doc/<feature>.md, docs/<feature>.md, **/<feature>.md
+# Searches in order: docs/<feature>.md, doc/<feature>.md, <feature>.md, **/<feature>.md
 find_task_file() {
     local project_root="$1"
     local feature="$2"
 
     # Check standard locations first
-    for path in "$project_root/$feature.md" \
+    for path in "$project_root/docs/$feature.md" \
                 "$project_root/doc/$feature.md" \
-                "$project_root/docs/$feature.md"; do
+                "$project_root/$feature.md"; do
         if [ -f "$path" ]; then
             echo "$path"
             return 0
@@ -360,10 +360,21 @@ find_task_file() {
     return 1
 }
 
+# Return task file path relative to project root for a feature.
+# Usage: rel_path=$(get_task_file_relative_path "$project_root" "$feature")
+get_task_file_relative_path() {
+    local project_root="$1"
+    local feature="$2"
+    local task_file
+    if ! task_file="$(find_task_file "$project_root" "$feature")"; then
+        return 1
+    fi
+    echo "${task_file#$project_root/}"
+}
+
 # Ensure a feature task file is committed before starting sessions.
-# - Normalizes task location to <project_root>/<feature>.md when discovered elsewhere.
 # - Commits untracked or modified task file changes with message: "<feature>.md: agent-<mode>".
-# Returns canonical task file path on stdout when found.
+# Returns discovered task file path on stdout when found.
 sync_branch_with_remote() {
     local project_root="$1"
     local context="${2:-before continuing}"
@@ -388,42 +399,20 @@ ensure_task_file_committed() {
         return 1
     fi
 
-    local canonical_task_file="$project_root/${feature}.md"
-    local commit_paths=("$discovered_task_file")
+    local rel_task_file
+    rel_task_file="${discovered_task_file#$project_root/}"
 
-    if [ "$discovered_task_file" != "$canonical_task_file" ]; then
-        info "Normalizing task file to ${feature}.md for agent-${mode}"
-        cp "$discovered_task_file" "$canonical_task_file"
-        commit_paths+=("$canonical_task_file")
-    fi
-
-    local needs_commit=false
-    local path rel_path
-    for path in "${commit_paths[@]}"; do
-        rel_path="${path#$project_root/}"
-        if [ -n "$(git -C "$project_root" status --porcelain -- "$rel_path")" ]; then
-            needs_commit=true
-            break
-        fi
-    done
-
-    if [ "$needs_commit" = "true" ]; then
-        local rel_commit_paths=()
-        for path in "${commit_paths[@]}"; do
-            rel_path="${path#$project_root/}"
-            git -C "$project_root" add -- "$rel_path"
-            rel_commit_paths+=("$rel_path")
-        done
-
-        if ! git -C "$project_root" diff --cached --quiet -- "${rel_commit_paths[@]}"; then
+    if [ -n "$(git -C "$project_root" status --porcelain -- "$rel_task_file")" ]; then
+        git -C "$project_root" add -- "$rel_task_file"
+        if ! git -C "$project_root" diff --cached --quiet -- "$rel_task_file"; then
             info "Committing task file changes for $feature"
-            git -C "$project_root" commit -m "${feature}.md: agent-${mode}" -- "${rel_commit_paths[@]}" >/dev/null \
+            git -C "$project_root" commit -m "${feature}.md: agent-${mode}" -- "$rel_task_file" >/dev/null \
                 || die "Failed to commit task file changes for $feature"
-            success "Committed ${feature}.md for agent-${mode}"
+            success "Committed ${rel_task_file} for agent-${mode}"
         fi
     fi
 
-    echo "$canonical_task_file"
+    echo "$discovered_task_file"
 }
 
 # Read task file content for a feature, suitable for pasting into an agent prompt.
@@ -473,8 +462,12 @@ generate_followup_task() {
     local feature
     feature="$(echo "$pr_branch" | sed -E 's/-(claude|codex|coder|reviewer)$//')-followup"
 
-    # Build task file content
-    local task_file="$project_root/${feature}.md"
+    # Build task file content (prefer docs/ when present)
+    local task_dir="$project_root"
+    if [ -d "$project_root/docs" ]; then
+        task_dir="$project_root/docs"
+    fi
+    local task_file="$task_dir/${feature}.md"
     {
         if [ -n "$followup_msg" ]; then
             printf '%s\n\n' "$followup_msg"

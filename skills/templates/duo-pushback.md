@@ -26,7 +26,7 @@ Minimum sections:
 1. Read task:
 
 ```bash
-cat "$FEATURE.md"
+cat "${TASK_FILE:-$FEATURE.md}"
 ```
 
 2. Optional delegation (if your agent supports sub-agents):
@@ -36,7 +36,7 @@ Use this activity brief:
 - Critique task framing for ambiguity, missing edge cases, and unnecessary constraints
 - Suggest minimal edits that improve implementation quality
 
-3. If needed, edit `$FEATURE.md` directly.
+3. If needed, edit `${TASK_FILE:-$FEATURE.md}` directly.
 
 4. Write pushback rationale and signal completion:
 
