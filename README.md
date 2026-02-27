@@ -78,24 +78,24 @@ Use the existing Express app structure.
 EOF
 
 # 2. Start the duo session with orchestration (recommended)
-agent-duo start add-auth --auto-run
+agent-duo start add-auth
 # Opens 3 web terminals (orchestrator, claude, codex) and starts immediately
 
 # With optional clarify/pushback stages:
-agent-duo start add-auth --auto-run --clarify    # Agents propose approaches first
-agent-duo start add-auth --auto-run --pushback   # Agents suggest task improvements first
+agent-duo start add-auth --clarify    # Agents propose approaches first
+agent-duo start add-auth --pushback   # Agents suggest task improvements first
 
 # Follow up on PR feedback (generates task from PR comments):
-agent-duo start --followup 42 --auto-run
+agent-duo start --followup 42
 
 # Add a custom first line to the generated follow-up task:
-agent-duo start --followup 42 --followup-msg "Address blocker comments first" --auto-run
+agent-duo start --followup 42 --followup-msg "Address blocker comments first"
 
 # Fully unattended (auto-merge after 30 min inactivity):
-agent-duo start add-auth --auto-run --auto-finish
+agent-duo start add-auth --auto-finish
 
 # Alternative: manual control
-agent-duo start add-auth           # Start ttyd web terminals only
+agent-duo start add-auth --no-auto-run  # Start ttyd web terminals only
 agent-duo run --auto-start         # Then run orchestrator separately
 
 # Or use tmux directly (no web terminals)
@@ -107,19 +107,19 @@ tmux attach -t duo-add-auth
 
 ```bash
 # Pair mode: one agent codes, another reviews
-agent-pair start add-auth --auto-run
+agent-pair start add-auth
 
 # Swap roles (codex codes, claude reviews)
-agent-pair start add-auth --auto-run --coder codex --reviewer claude
+agent-pair start add-auth --coder codex --reviewer claude
 
 # With gather phase (reviewer collects context for coder first)
-agent-pair start add-auth --auto-run --gather
+agent-pair start add-auth --gather
 
 # Follow up on PR feedback
-agent-pair start --followup 42 --auto-run
+agent-pair start --followup 42
 
 # Add a custom first line to the generated follow-up task
-agent-pair start --followup 42 --followup-msg "Address blocker comments first" --auto-run
+agent-pair start --followup 42 --followup-msg "Address blocker comments first"
 ```
 
 ## Example Session
@@ -127,7 +127,7 @@ agent-pair start --followup 42 --followup-msg "Address blocker comments first" -
 Here's what a typical session looks like:
 
 ```
-$ agent-duo start add-auth --auto-run
+$ agent-duo start add-auth
 Starting Agent Duo session: add-auth
 Project: myproject
 Creating worktree for claude...
@@ -177,7 +177,7 @@ Codex PR:  https://github.com/user/myproject/pull/43
 ```bash
 agent-duo start <feature>              # Start with ttyd web terminals (auto-allocates 3 consecutive ports)
 agent-duo start <feature> --port 8000  # Use fixed ports 8000, 8001, 8002 (fails if occupied)
-agent-duo start <feature> --auto-run   # Start and run orchestrator immediately
+agent-duo start <feature> --no-auto-run  # Start without running orchestrator yet
 agent-duo start --followup <PR#>       # Generate task from PR comments and start session
 agent-duo start --followup <PR#> --followup-msg "<message>"  # Prepend message line to generated follow-up task
 agent-duo start <feature> --clarify    # Enable clarify stage (agents propose approaches)
@@ -186,7 +186,7 @@ agent-duo start <feature> --plan       # Enable plan/review stage (agents write 
 agent-duo start <feature> --skip-docs-update  # Skip update-docs phase before PR creation
 agent-duo start <feature> --learning-interval 3600  # Minimum 60m between update-docs runs (0 disables)
 agent-duo start <feature> --no-ttyd    # Start with single tmux session (no web terminals)
-agent-duo run [options]                # Run orchestrator loop (if not using --auto-run)
+agent-duo run [options]                # Run orchestrator loop (if started with --no-auto-run)
 agent-duo status                       # Show current state
 agent-duo stop                         # Stop servers, keep worktrees
 agent-duo restart [--auto-run] [--no-ttyd]  # Recover session after system restart/crash
@@ -214,7 +214,7 @@ agent-duo run \
 ### Model Selection
 
 ```bash
-agent-duo start <feature> --auto-run \
+agent-duo start <feature> \
   --claude-model opus \     # Claude model (opus, sonnet)
   --codex-model o3 \        # Codex/GPT model (o3, gpt-4.1)
   --codex-thinking high     # Codex reasoning effort (low, medium, high)
@@ -329,14 +329,14 @@ Integrate Stripe for payment handling.
 EOF
 
 # Start multiple features at once
-agent-duo start auth payments --auto-run
+agent-duo start auth payments
 # Creates separate worktrees and sessions for each feature:
 #   ~/myproject-auth-claude/    ~/myproject-auth-codex/
 #   ~/myproject-payments-claude/ ~/myproject-payments-codex/
 
 # Or start them individually
-agent-duo start auth --auto-run
-agent-duo start payments --auto-run
+agent-duo start auth
+agent-duo start payments
 ```
 
 ### Managing Multiple Sessions
@@ -389,7 +389,7 @@ Commands auto-detect which session to operate on based on your current directory
 Agent-pair is a simpler alternative where one agent codes and another reviews:
 
 ```bash
-agent-pair start <feature> --auto-run
+agent-pair start <feature>
 ```
 
 **Workflow:**

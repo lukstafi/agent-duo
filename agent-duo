@@ -685,7 +685,7 @@ cmd_config() {
 cmd_start() {
     local features=()
     local ttyd_mode=true
-    local auto_run=false
+    local auto_run=true
     local clarify_mode=false
     local pushback_mode=false
     local plan_mode=false
@@ -712,6 +712,7 @@ cmd_start() {
         case "$1" in
             --no-ttyd) ttyd_mode=false; shift ;;
             --auto-run) auto_run=true; shift ;;
+            --no-auto-run) auto_run=false; shift ;;
             --clarify) clarify_mode=true; shift ;;
             --pushback) pushback_mode=true; shift ;;
             --plan) plan_mode=true; shift ;;
@@ -1025,7 +1026,7 @@ start_tmux_mode() {
     local clarify_mode="${7:-false}"
     local pushback_mode="${8:-false}"
     local plan_mode="${9:-false}"
-    local auto_run="${10:-false}"
+    local auto_run="${10:-true}"
     local work_timeout="${11:-$DEFAULT_WORK_TIMEOUT}"
     local review_timeout="${12:-$DEFAULT_REVIEW_TIMEOUT}"
     local max_rounds="${13:-10}"
@@ -1136,7 +1137,7 @@ start_ttyd_mode() {
     local worktree_claude="$3"
     local worktree_codex="$4"
     local peer_sync="$5"
-    local auto_run="${6:-false}"
+    local auto_run="${6:-true}"
     local work_timeout="${7:-$DEFAULT_WORK_TIMEOUT}"
     local review_timeout="${8:-$DEFAULT_REVIEW_TIMEOUT}"
     local max_rounds="${9:-10}"
@@ -5397,7 +5398,8 @@ SESSION COMMANDS
         docs/<feature>.md, or **/<feature>.md (anywhere in project).
 
         Options:
-          --auto-run               Start orchestrator immediately in its own terminal
+          --auto-run               Start orchestrator immediately in its own terminal (default)
+          --no-auto-run            Start session only; run orchestrator manually later
           --no-ttyd                Use single tmux session instead of web terminals
           --clarify                Enable clarify stage before work starts
           --pushback               Enable pushback stage (after clarify if both enabled)
@@ -5406,12 +5408,12 @@ SESSION COMMANDS
           --auto-finish-timeout <secs> Inactivity timeout for auto-finish (default: ${DEFAULT_AUTO_FINISH_TIMEOUT})
           --early-pr               Allow PR creation before final merge stage
           --skip-docs-update       Skip update-docs phase before PR creation
-          --work-timeout <secs>    Work phase timeout (default: ${DEFAULT_WORK_TIMEOUT}, with --auto-run)
-          --review-timeout <secs>  Review phase timeout (default: ${DEFAULT_REVIEW_TIMEOUT}, with --auto-run)
+          --work-timeout <secs>    Work phase timeout (default: ${DEFAULT_WORK_TIMEOUT}, when auto-run enabled)
+          --review-timeout <secs>  Review phase timeout (default: ${DEFAULT_REVIEW_TIMEOUT}, when auto-run enabled)
           --clarify-timeout <secs> Clarify stage timeout (default: ${DEFAULT_CLARIFY_TIMEOUT}, with --clarify)
           --pushback-timeout <secs> Pushback stage timeout (default: ${DEFAULT_PUSHBACK_TIMEOUT}, with --pushback)
           --plan-timeout <secs>    Plan phase timeout (default: ${DEFAULT_PLAN_TIMEOUT}, with --plan)
-          --max-rounds <n>         Maximum rounds (default: 10, with --auto-run)
+          --max-rounds <n>         Maximum rounds (default: 10, when auto-run enabled)
           --learning-interval <secs> Minimum wallclock seconds between update-docs runs (default: ${DEFAULT_LEARNING_INTERVAL}, 0 disables)
           --codex-thinking <level> Codex reasoning effort: low, medium, high (default: high)
           --codex-model <model>    GPT model for Codex (e.g., o3, gpt-4.1)
@@ -5440,7 +5442,8 @@ SESSION COMMANDS
         Run the orchestrator loop (work -> review -> work... -> pr-comments).
         Automatically manages phase transitions and timeouts.
         After both PRs are created, monitors for new GitHub comments/reviews.
-        Not needed if using 'start --auto-run'.
+        Not needed with default 'start' behavior.
+        Use this if you started with '--no-auto-run'.
 
         Options:
           --clarify                Enable clarify stage before work starts
@@ -5637,24 +5640,24 @@ ENVIRONMENT VARIABLES (set in agent sessions)
     FEATURE         Feature name
 
 EXAMPLES
-    # Recommended: start with auto-run (opens 3 web terminals, starts everything)
-    agent-duo start auth --auto-run
+    # Start session (auto-runs by default; opens 3 web terminals)
+    agent-duo start auth
 
     # With clarify stage: agents propose approaches before starting work
-    agent-duo start auth --auto-run --clarify
+    agent-duo start auth --clarify
 
     # With pushback stage: agents propose improvements to the task file
-    agent-duo start auth --auto-run --pushback
+    agent-duo start auth --pushback
 
     # With both stages: clarify -> pushback -> work
-    agent-duo start auth --auto-run --clarify --pushback
+    agent-duo start auth --clarify --pushback
     # Review approaches, respond to agents, then press Enter in orchestrator
 
     # Follow up on PR feedback with a custom prepended note
-    agent-duo start --followup 42 --followup-msg "Address blocker comments first" --auto-run
+    agent-duo start --followup 42 --followup-msg "Address blocker comments first"
 
-    # Alternative: start manually then run orchestrator
-    agent-duo start auth
+    # Alternative: start manually then run orchestrator yourself
+    agent-duo start auth --no-auto-run
     agent-duo run --auto-start
 
     # Use tmux instead of web terminals

@@ -216,7 +216,7 @@ cmd_setup() {
 cmd_start() {
     local features=()
     local ttyd_mode=true
-    local auto_run=false
+    local auto_run=true
     local gather_mode=false
     local clarify_mode=false
     local pushback_mode=false
@@ -246,6 +246,7 @@ cmd_start() {
         case "$1" in
             --no-ttyd) ttyd_mode=false; shift ;;
             --auto-run) auto_run=true; shift ;;
+            --no-auto-run) auto_run=false; shift ;;
             --gather) gather_mode=true; shift ;;
             --clarify) clarify_mode=true; shift ;;
             --pushback) pushback_mode=true; shift ;;
@@ -542,7 +543,7 @@ start_tmux_mode_pair() {
     local pushback_mode="${9:-false}"
     local gather_mode="${10:-false}"
     local plan_mode="${11:-false}"
-    local auto_run="${12:-false}"
+    local auto_run="${12:-true}"
     local work_timeout="${13:-$DEFAULT_WORK_TIMEOUT}"
     local review_timeout="${14:-$DEFAULT_REVIEW_TIMEOUT}"
     local max_rounds="${15:-10}"
@@ -661,7 +662,7 @@ start_ttyd_mode_pair() {
     local project_root="$2"
     local worktree="$3"
     local peer_sync="$4"
-    local auto_run="${5:-false}"
+    local auto_run="${5:-true}"
     local work_timeout="${6:-$DEFAULT_WORK_TIMEOUT}"
     local review_timeout="${7:-$DEFAULT_REVIEW_TIMEOUT}"
     local max_rounds="${8:-10}"
@@ -3187,7 +3188,8 @@ SESSION COMMANDS
           --codex                Shorthand: coder=codex, reviewer=claude
           --coder <agent>        Agent for coding (use with --reviewer)
           --reviewer <agent>     Agent for reviewing (use with --coder)
-          --auto-run             Start orchestrator immediately
+          --auto-run             Start orchestrator immediately (default)
+          --no-auto-run          Start session only; run orchestrator manually later
           --no-ttyd              Use single tmux session instead of web terminals
           --gather               Enable gather stage (reviewer collects task context)
           --clarify              Enable clarify stage before work starts
@@ -3329,20 +3331,20 @@ WORKFLOW
       6. If changes requested: loop back to step 1
 
 EXAMPLES
-    # Start with auto-run (opens 3 web terminals, starts everything)
-    agent-pair start auth --claude --auto-run
+    # Start session (auto-runs by default; opens 3 web terminals)
+    agent-pair start auth --claude
 
     # With gather phase (reviewer collects context first)
-    agent-pair start auth --claude --auto-run --gather
+    agent-pair start auth --claude --gather
 
     # With clarify phase
-    agent-pair start auth --claude --auto-run --clarify
+    agent-pair start auth --claude --clarify
 
     # With all optional phases (gather -> clarify -> pushback -> work)
-    agent-pair start auth --claude --auto-run --gather --clarify --pushback --plan
+    agent-pair start auth --claude --gather --clarify --pushback --plan
 
     # Follow up on PR feedback with a custom prepended note
-    agent-pair start --followup 42 --claude --followup-msg "Address blocker comments first" --auto-run
+    agent-pair start --followup 42 --claude --followup-msg "Address blocker comments first"
 
     # Swap agent roles (codex codes, claude reviews)
     agent-pair start auth --coder codex --reviewer claude
