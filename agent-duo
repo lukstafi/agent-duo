@@ -1649,7 +1649,7 @@ cmd_restart() {
     info "Checking agent TUIs..."
 
     # Check claude TUI (resume first, then fall back to fresh launch)
-    if ! resume_agent_tui "claude" "$claude_target"; then
+    if ! resume_agent_tui "claude" "$claude_target" "" "" "true"; then
         if ! restart_agent_tui "claude" "$claude_target"; then
             errors=$((errors + 1))
         fi

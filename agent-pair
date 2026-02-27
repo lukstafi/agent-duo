@@ -1190,14 +1190,14 @@ cmd_restart() {
     [ "$reviewer_agent" = "codex" ] && reviewer_thinking="$codex_thinking"
 
     # Check coder TUI (resume first, then fall back to fresh launch)
-    if ! resume_agent_tui "$coder_agent" "$coder_target" "$coder_thinking" "coder ($coder_agent)"; then
+    if ! resume_agent_tui "$coder_agent" "$coder_target" "$coder_thinking" "coder ($coder_agent)" "true"; then
         if ! restart_agent_tui "$coder_agent" "$coder_target" "$coder_thinking" "coder ($coder_agent)"; then
             errors=$((errors + 1))
         fi
     fi
 
     # Check reviewer TUI (resume first, then fall back to fresh launch)
-    if ! resume_agent_tui "$reviewer_agent" "$reviewer_target" "$reviewer_thinking" "reviewer ($reviewer_agent)"; then
+    if ! resume_agent_tui "$reviewer_agent" "$reviewer_target" "$reviewer_thinking" "reviewer ($reviewer_agent)" "true"; then
         if ! restart_agent_tui "$reviewer_agent" "$reviewer_target" "$reviewer_thinking" "reviewer ($reviewer_agent)"; then
             errors=$((errors + 1))
         fi

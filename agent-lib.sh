@@ -1009,16 +1009,18 @@ restart_ttyd_for_session() {
 }
 
 # Restart an agent TUI in its tmux session
-# Usage: resume_agent_tui <agent> <session> [thinking_effort] [display_name]
+# Usage: resume_agent_tui <agent> <session> [thinking_effort] [display_name] [claude_continue]
 # agent: agent name like "claude" or "codex"
 # session: tmux session name
 # thinking_effort: optional, for codex reasoning effort (low/medium/high)
 # display_name: optional, for display purposes (e.g., "coder (claude)")
+# claude_continue: optional, "true" to pass -c for claude resume
 resume_agent_tui() {
     local agent="$1"
     local session="$2"
     local thinking="${3:-$DEFAULT_CODEX_THINKING}"
     local display_name="${4:-$agent}"
+    local claude_continue="${5:-false}"
 
     if ! tmux_session_exists "$session"; then
         warn "tmux session $session does not exist"
@@ -1032,7 +1034,13 @@ resume_agent_tui() {
 
     local resume_cmd=""
     case "$agent" in
-        claude) resume_cmd="$(get_agent_cmd "claude" "" "-c")" ;;
+        claude)
+            if [ "$claude_continue" = "true" ]; then
+                resume_cmd="$(get_agent_cmd "claude" "" "-c")"
+            else
+                resume_cmd="$(get_agent_cmd "claude")"
+            fi
+            ;;
         codex) resume_cmd="$(get_agent_cmd "codex" "$thinking" "resume -l")" ;;
         *)
             return 1

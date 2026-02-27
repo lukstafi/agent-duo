@@ -218,7 +218,7 @@ recover_agent_tui() {
     local restart_extra=("$@")
 
     if [ -n "$worktree" ]; then
-        if resume_agent_tui "$AGENT_TYPE" "$tmux_name"; then
+        if resume_agent_tui "$AGENT_TYPE" "$tmux_name" "" "" "true"; then
             return 0
         fi
     elif [ -n "$resume_key" ]; then
