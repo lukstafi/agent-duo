@@ -364,6 +364,20 @@ find_task_file() {
 # - Normalizes task location to <project_root>/<feature>.md when discovered elsewhere.
 # - Commits untracked or modified task file changes with message: "<feature>.md: agent-<mode>".
 # Returns canonical task file path on stdout when found.
+sync_branch_with_remote() {
+    local project_root="$1"
+    local context="${2:-before continuing}"
+
+    local upstream
+    if ! upstream="$(git -C "$project_root" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null)"; then
+        return 0
+    fi
+
+    info "Syncing current branch with ${upstream} (${context})..."
+    git -C "$project_root" pull --rebase --autostash >/dev/null \
+        || die "Failed to sync current branch with ${upstream} (${context}). Resolve conflicts and retry."
+}
+
 ensure_task_file_committed() {
     local project_root="$1"
     local feature="$2"

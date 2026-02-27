@@ -745,19 +745,6 @@ cmd_start() {
         die "--followup-msg requires --followup <PR-number>"
     fi
 
-    # Generate task from PR if --followup was specified
-    if [ -n "$followup_pr" ]; then
-        git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not a git repository"
-        local main_root
-        main_root="$(get_main_project_root)"
-        local followup_feature
-        followup_feature="$(generate_followup_task "$main_root" "$followup_pr" "$followup_msg")"
-        info "Generated follow-up task: ${followup_feature}.md"
-        features+=("$followup_feature")
-    fi
-
-    [ ${#features[@]} -eq 0 ] && die "Usage: agent-duo start <feature> [feature2 ...] [options]"
-
     # Validate codex thinking effort
     case "$codex_thinking" in
         low|medium|high) ;;
@@ -778,11 +765,27 @@ cmd_start() {
     local project_name
     project_name="$(basename "$main_project_root")"
 
+    # Rebase on latest upstream before auto-generating/committing task files.
+    sync_branch_with_remote "$main_project_root" "before committing task files"
+
+    # Generate task from PR if --followup was specified
+    if [ -n "$followup_pr" ]; then
+        local followup_feature
+        followup_feature="$(generate_followup_task "$main_project_root" "$followup_pr" "$followup_msg")"
+        info "Generated follow-up task: ${followup_feature}.md"
+        features+=("$followup_feature")
+    fi
+
+    [ ${#features[@]} -eq 0 ] && die "Usage: agent-duo start <feature> [feature2 ...] [options]"
+
     # Ensure each task file is committed before creating session worktrees
     # so spec files are tracked consistently across agent branches.
     for feature in "${features[@]}"; do
         ensure_task_file_committed "$main_project_root" "$feature" "duo" || true
     done
+
+    # Rebase once more so push includes any commits that landed while we auto-committed specs.
+    sync_branch_with_remote "$main_project_root" "before pushing task file commits"
 
     # Push current branch to remote to avoid PRs incorporating unpushed commits
     info "Pushing current branch to remote..."

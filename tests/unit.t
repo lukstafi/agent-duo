@@ -385,6 +385,43 @@ echo "seed" > "$TASK_GIT_REPO/README.md"
 git -C "$TASK_GIT_REPO" add README.md
 git -C "$TASK_GIT_REPO" commit -q -m "seed"
 
+test_start "sync_branch_with_remote no-ops when upstream is missing"
+if sync_branch_with_remote "$TASK_GIT_REPO" "unit test without upstream" >/dev/null 2>&1; then
+    test_pass
+else
+    test_fail "sync should succeed without upstream"
+fi
+
+SYNC_REMOTE="$TEST_DIR/sync-remote.git"
+SYNC_MAIN="$TEST_DIR/sync-main"
+SYNC_OTHER="$TEST_DIR/sync-other"
+git init --bare -q "$SYNC_REMOTE"
+git clone -q "$SYNC_REMOTE" "$SYNC_MAIN"
+git -C "$SYNC_MAIN" config user.name "Unit Test"
+git -C "$SYNC_MAIN" config user.email "unit@example.com"
+echo "base" > "$SYNC_MAIN/sync.txt"
+git -C "$SYNC_MAIN" add sync.txt
+git -C "$SYNC_MAIN" commit -q -m "base commit"
+git -C "$SYNC_MAIN" push -q -u origin HEAD
+
+git clone -q "$SYNC_REMOTE" "$SYNC_OTHER"
+git -C "$SYNC_OTHER" config user.name "Unit Test"
+git -C "$SYNC_OTHER" config user.email "unit@example.com"
+echo "remote update" >> "$SYNC_OTHER/sync.txt"
+git -C "$SYNC_OTHER" add sync.txt
+git -C "$SYNC_OTHER" commit -q -m "remote update"
+git -C "$SYNC_OTHER" push -q origin HEAD
+
+test_start "sync_branch_with_remote rebases onto latest upstream"
+SYNC_BEFORE="$(git -C "$SYNC_MAIN" rev-parse HEAD)"
+sync_branch_with_remote "$SYNC_MAIN" "unit test with upstream update" >/dev/null
+SYNC_AFTER="$(git -C "$SYNC_MAIN" rev-parse HEAD)"
+if [ "$SYNC_BEFORE" != "$SYNC_AFTER" ] && grep -Fq "remote update" "$SYNC_MAIN/sync.txt"; then
+    test_pass
+else
+    test_fail "expected sync-main to fast-forward/rebase to include remote update"
+fi
+
 test_start "ensure_task_file_committed commits untracked root task file"
 echo "# Root Task" > "$TASK_GIT_REPO/root-task.md"
 ensure_task_file_committed "$TASK_GIT_REPO" "root-task" "duo" >/dev/null
