@@ -44,18 +44,16 @@ SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 # Source shared library
 if [ -f "$SCRIPT_DIR/agent-lib.sh" ]; then
     # shellcheck source=agent-lib.sh
+    # shellcheck disable=SC1091
     source "$SCRIPT_DIR/agent-lib.sh"
 elif [ -f "$HOME/.local/bin/agent-lib.sh" ]; then
     # shellcheck source=agent-lib.sh
+    # shellcheck disable=SC1091
     source "$HOME/.local/bin/agent-lib.sh"
 else
     echo "Error: agent-lib.sh not found" >&2
     exit 1
 fi
-
-# Default agents for duo mode
-DEFAULT_AGENT_A="claude"
-DEFAULT_AGENT_B="codex"
 
 # Session registry prefix for .agent-sessions/ namespace isolation
 SESSION_REGISTRY_PREFIX="duo"
@@ -199,7 +197,7 @@ cmd_setup() {
     # Hint about VS Code terminal title
     echo ""
     info "VS Code tip: To show agent names in terminal tabs, add to VS Code settings:"
-    echo '  "terminal.integrated.tabs.title": "${sequence}"'
+    echo "  \"terminal.integrated.tabs.title\": \"\${sequence}\""
 
     # Prominent message about agent-pair
     echo ""
@@ -366,7 +364,8 @@ cmd_doctor() {
         if [ "$send_test_email" = true ]; then
             if [ -n "$git_email" ]; then
                 info "Sending test email to $git_email..."
-                local test_body="This is a test email from agent-duo doctor.
+                local test_body
+                test_body="This is a test email from agent-duo doctor.
 
 If you received this, your email configuration is working correctly.
 
@@ -525,9 +524,9 @@ Sent: $(date)"
 
     local install_dir="$HOME/.local/bin"
     if [[ ":$PATH:" == *":$install_dir:"* ]]; then
-        success "~/.local/bin is in PATH"
+        success "$HOME/.local/bin is in PATH"
     else
-        warn "~/.local/bin is NOT in PATH"
+        warn "$HOME/.local/bin is NOT in PATH"
         warn "  Add to your shell profile:"
         warn "  export PATH=\"\$HOME/.local/bin:\$PATH\""
         all_ok=false
@@ -854,7 +853,7 @@ start_single_session() {
 
     # Check for existing session for THIS feature
     local sessions_dir="$main_project_root/.agent-sessions"
-    if [ -L "$sessions_dir/duo-${feature}.session" ]; then
+    if [ -L "$sessions_dir/${SESSION_REGISTRY_PREFIX}-${feature}.session" ]; then
         warn "Session already exists for feature '$feature'."
         warn "To continue: agent-duo restart --feature $feature"
         warn "To start fresh: agent-duo cleanup --feature $feature && agent-duo start $feature"
@@ -1189,9 +1188,12 @@ start_ttyd_mode() {
     # Allocate and load ports
     allocate_ports "$peer_sync" "$base_port"
     get_ports "$peer_sync"
-    local orchestrator_port=$ORCHESTRATOR_PORT
-    local claude_port=$CLAUDE_PORT
-    local codex_port=$CODEX_PORT
+    local orchestrator_port="${ORCHESTRATOR_PORT:-}"
+    local claude_port="${CLAUDE_PORT:-}"
+    local codex_port="${CODEX_PORT:-}"
+    [ -n "$orchestrator_port" ] || die "Failed to allocate orchestrator port"
+    [ -n "$claude_port" ] || die "Failed to allocate claude port"
+    [ -n "$codex_port" ] || die "Failed to allocate codex port"
 
     ttyd -p "$orchestrator_port" -t titleFixed="orchestrator: ${feature}" -W tmux attach -t "${session_name}-orchestrator" &
     echo $! > "$peer_sync/pids/ttyd-orchestrator.pid"
@@ -1607,10 +1609,12 @@ cmd_restart() {
         if ! restart_ttyd_for_session "orchestrator" "$orchestrator_port" \
                 "$orchestrator_target" "$peer_sync/pids/ttyd-orchestrator.pid"; then
             errors=$((errors + 1))
-        elif [ $? -eq 0 ] && ! is_port_in_use "$orchestrator_port" 2>/dev/null; then
+        else
             # Verify port came up
-            sleep 0.5
-            is_port_in_use "$orchestrator_port" || errors=$((errors + 1))
+            if ! is_port_in_use "$orchestrator_port" 2>/dev/null; then
+                sleep 0.5
+                is_port_in_use "$orchestrator_port" || errors=$((errors + 1))
+            fi
         fi
 
         # Check claude ttyd
@@ -2033,9 +2037,10 @@ cmd_feedback() {
             fi
             info "Accumulated workflow feedback:"
             echo ""
-            ls -1 "$feedback_dir" | while read -r file; do
-                local filepath="$feedback_dir/$file"
-                local lines
+            local filepath file lines
+            for filepath in "$feedback_dir"/*; do
+                [ -f "$filepath" ] || continue
+                file="$(basename "$filepath")"
                 lines="$(wc -l < "$filepath" | tr -d ' ')"
                 echo "  $file ($lines lines)"
             done
@@ -3290,7 +3295,8 @@ cmd_signal() {
         *) die "Invalid status: $status (valid: clarifying, clarify-done, pushing-back, pushback-done, planning, plan-done, plan-reviewing, plan-review-done, needs-clarify, working, done, reviewing, review-done, updating-docs, docs-update-done, integrating, integrate-done, final-merging, final-merge-done, suggest-refactor-done, interrupted, error, pr-created, escalated, voting, vote-done, debating, debate-done, merging, merge-done, merge-reviewing, merge-review-done)" ;;
     esac
 
-    local content="${status}|$(date +%s)|${message}"
+    local content
+    content="${status}|$(date +%s)|${message}"
     atomic_write "$peer_sync/${agent}.status" "$content"
     if [ "$status" = "docs-update-done" ]; then
         touch "$peer_sync/docs-update-${agent}.done"
@@ -3540,7 +3546,8 @@ Reasons:
     } > "$escalation_file"
 
     # Update agent status to escalated
-    local content="escalated|$(date +%s)|$reason: ${message:-no details}"
+    local content
+    content="escalated|$(date +%s)|$reason: ${message:-no details}"
     atomic_write "$peer_sync/${agent}.status" "$content"
 
     success "Escalation filed: $reason"
@@ -4632,6 +4639,7 @@ cmd_run() {
             local claude_done=false
             local codex_done=false
             local waiting_line_active=false
+            # These values are updated by name in emit_phase_terminal_status_update.
             local claude_terminal_logged_status
             local codex_terminal_logged_status
             local claude_terminal_logged_epoch
@@ -4640,6 +4648,8 @@ cmd_run() {
             codex_terminal_logged_status="$(get_agent_status "codex" "$peer_sync")"
             claude_terminal_logged_epoch="$(get_agent_status_epoch "claude" "$peer_sync")"
             codex_terminal_logged_epoch="$(get_agent_status_epoch "codex" "$peer_sync")"
+            : "$claude_terminal_logged_status" "$codex_terminal_logged_status" \
+                "$claude_terminal_logged_epoch" "$codex_terminal_logged_epoch"
 
             # Pre-set done for converged agents
             $claude_converged && claude_done=true
@@ -4711,6 +4721,7 @@ cmd_run() {
 
                 printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status_display" "$codex_status_display" "$elapsed" "$work_timeout"
                 waiting_line_active=true
+                : "$waiting_line_active"
                 sleep "$poll_interval"
             done
             echo ""
@@ -4827,6 +4838,8 @@ cmd_run() {
                 codex_terminal_logged_status="$(get_agent_status "codex" "$peer_sync")"
                 claude_terminal_logged_epoch="$(get_agent_status_epoch "claude" "$peer_sync")"
                 codex_terminal_logged_epoch="$(get_agent_status_epoch "codex" "$peer_sync")"
+                : "$claude_terminal_logged_status" "$codex_terminal_logged_status" \
+                    "$claude_terminal_logged_epoch" "$codex_terminal_logged_epoch"
 
                 # Pre-set done for agents not triggered for review
                 ! $claude_reviews && claude_done=true
@@ -4890,6 +4903,7 @@ cmd_run() {
 
                     printf "\r  Waiting... claude=%s codex=%s (%ds/%ds)  " "$claude_status_display" "$codex_status_display" "$elapsed" "$review_timeout"
                     waiting_line_active=true
+                    : "$waiting_line_active"
                     sleep "$poll_interval"
                 done
                 echo ""

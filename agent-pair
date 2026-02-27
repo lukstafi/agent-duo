@@ -40,9 +40,11 @@ SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 # Source shared library
 if [ -f "$SCRIPT_DIR/agent-lib.sh" ]; then
     # shellcheck source=agent-lib.sh
+    # shellcheck disable=SC1091
     source "$SCRIPT_DIR/agent-lib.sh"
 elif [ -f "$HOME/.local/bin/agent-lib.sh" ]; then
     # shellcheck source=agent-lib.sh
+    # shellcheck disable=SC1091
     source "$HOME/.local/bin/agent-lib.sh"
 else
     echo "Error: agent-lib.sh not found" >&2
@@ -108,11 +110,13 @@ parse_pair_verdict() {
     [ -f "$file" ] || return 1
 
     # Prefer explicit verdict lines first.
+    # shellcheck disable=SC2016
     if grep -Eiq '^[[:space:]]*`?REQUEST_CHANGES`?[[:space:]]*$' "$file" || \
        grep -Eiq '^[[:space:]]*verdict[[:space:]]*:[[:space:]]*`?REQUEST_CHANGES`?[[:space:]]*$' "$file"; then
         echo "REQUEST_CHANGES"
         return 0
     fi
+    # shellcheck disable=SC2016
     if grep -Eiq '^[[:space:]]*`?APPROVE`?[[:space:]]*$' "$file" || \
        grep -Eiq '^[[:space:]]*verdict[[:space:]]*:[[:space:]]*`?APPROVE`?[[:space:]]*$' "$file"; then
         echo "APPROVE"
@@ -206,7 +210,7 @@ cmd_setup() {
     # Hint about VS Code terminal title
     echo ""
     info "VS Code tip: To show agent names in terminal tabs, add to VS Code settings:"
-    echo '  "terminal.integrated.tabs.title": "${sequence}"'
+    echo "  \"terminal.integrated.tabs.title\": \"\${sequence}\""
 }
 
 #------------------------------------------------------------------------------
@@ -397,7 +401,7 @@ start_single_pair_session() {
 
     # Check for existing session for THIS feature
     local sessions_dir="$main_project_root/.agent-sessions"
-    if [ -L "$sessions_dir/pair-${feature}.session" ]; then
+    if [ -L "$sessions_dir/${SESSION_REGISTRY_PREFIX}-${feature}.session" ]; then
         warn "Session already exists for feature '$feature'."
         warn "To continue: agent-pair restart --feature $feature"
         warn "To start fresh: agent-pair cleanup --feature $feature && agent-pair start $feature <role-flags>"
@@ -718,9 +722,12 @@ start_ttyd_mode_pair() {
     # Allocate and load ports
     allocate_ports_pair "$peer_sync" "$base_port"
     get_ports "$peer_sync"
-    local orchestrator_port=$ORCHESTRATOR_PORT
-    local coder_port=$CODER_PORT
-    local reviewer_port=$REVIEWER_PORT
+    local orchestrator_port="${ORCHESTRATOR_PORT:-}"
+    local coder_port="${CODER_PORT:-}"
+    local reviewer_port="${REVIEWER_PORT:-}"
+    [ -n "$orchestrator_port" ] || die "Failed to allocate orchestrator port"
+    [ -n "$coder_port" ] || die "Failed to allocate coder port"
+    [ -n "$reviewer_port" ] || die "Failed to allocate reviewer port"
 
     ttyd -p "$orchestrator_port" -t titleFixed="orchestrator: ${feature}" -W tmux attach -t "${session_name}-orchestrator" &
     echo $! > "$peer_sync/pids/ttyd-orchestrator.pid"
