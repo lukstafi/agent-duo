@@ -399,7 +399,7 @@ start_single_pair_session() {
     local sessions_dir="$main_project_root/.agent-sessions"
     if [ -L "$sessions_dir/pair-${feature}.session" ]; then
         warn "Session already exists for feature '$feature'."
-        warn "To continue: agent-pair restart --feature $feature --auto-run"
+        warn "To continue: agent-pair restart --feature $feature"
         warn "To start fresh: agent-pair cleanup --feature $feature && agent-pair start $feature <role-flags>"
         return 1
     fi
@@ -880,7 +880,7 @@ stop_single_pair_session() {
 #------------------------------------------------------------------------------
 
 cmd_restart() {
-    local auto_run=false
+    local auto_run=true
     local work_timeout=$DEFAULT_WORK_TIMEOUT
     local review_timeout=$DEFAULT_REVIEW_TIMEOUT
     local clarify_timeout=$DEFAULT_CLARIFY_TIMEOUT
@@ -895,6 +895,7 @@ cmd_restart() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --auto-run) auto_run=true; shift ;;
+            --no-auto-run) auto_run=false; shift ;;
             --no-ttyd) ttyd_mode_override="false"; shift ;;
             --work-timeout) work_timeout="$2"; shift 2 ;;
             --review-timeout) review_timeout="$2"; shift 2 ;;
@@ -941,6 +942,7 @@ cmd_restart() {
                     cmd_args+=(--pushback-timeout "$pushback_timeout")
                     cmd_args+=(--max-rounds "$max_rounds")
                     [ "$auto_run" = true ] && cmd_args+=(--auto-run)
+                    [ "$auto_run" = false ] && cmd_args+=(--no-auto-run)
                     [ "$ttyd_mode_override" = "false" ] && cmd_args+=(--no-ttyd)
                     [ -n "$auto_finish" ] && cmd_args+=(--auto-finish)
                     [ -n "$auto_finish_timeout" ] && cmd_args+=(--auto-finish-timeout "$auto_finish_timeout")
@@ -3246,7 +3248,8 @@ SESSION COMMANDS
         Checks and recreates tmux sessions, ttyd servers (if applicable), and agent TUIs.
 
         Options:
-          --auto-run             Restart the orchestrator loop automatically
+          --auto-run             Restart the orchestrator loop automatically (default)
+          --no-auto-run          Recover sessions only; do not restart orchestrator
           --no-ttyd              Force tmux-only mode (override recorded setting)
           --feature <name>       Restart a specific session
           --auto-finish          Override session setting to enable auto-finish

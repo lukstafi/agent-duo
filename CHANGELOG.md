@@ -5,7 +5,7 @@ All notable changes to agent-duo will be documented in this file.
 ## [Unreleased]
 
 ### Changed
-- **`start` now auto-runs orchestrator by default**: `agent-duo start` and `agent-pair start` now launch the orchestrator loop automatically unless `--no-auto-run` is passed
+- **`start` and `restart` now auto-run orchestrator by default**: `agent-duo` and `agent-pair` now launch/restart the orchestrator loop automatically unless `--no-auto-run` is passed
 
 ## [v0.7] - 2026-02-22
 

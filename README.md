@@ -189,7 +189,7 @@ agent-duo start <feature> --no-ttyd    # Start with single tmux session (no web 
 agent-duo run [options]                # Run orchestrator loop (if started with --no-auto-run)
 agent-duo status                       # Show current state
 agent-duo stop                         # Stop servers, keep worktrees
-agent-duo restart [--auto-run] [--no-ttyd]  # Recover session after system restart/crash
+agent-duo restart [--no-auto-run] [--no-ttyd]  # Recover session after system restart/crash (auto-run default)
 agent-duo cleanup [--full]             # Remove session state (--full: also worktrees/branches)
 agent-duo doctor                       # Check system configuration and diagnose issues
 agent-duo config [key] [value]         # Get/set configuration (e.g., ntfy_topic)
