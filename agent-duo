@@ -701,6 +701,8 @@ cmd_start() {
     local codex_thinking=$DEFAULT_CODEX_THINKING
     local codex_model=""
     local claude_model=""
+    local codex_flags=""
+    local claude_flags=""
     local base_port=""
     local followup_pr=""
     local followup_msg=""
@@ -729,6 +731,8 @@ cmd_start() {
             --codex-thinking) codex_thinking="$2"; shift 2 ;;
             --codex-model) codex_model="$2"; shift 2 ;;
             --claude-model) claude_model="$2"; shift 2 ;;
+            --codex-flags) codex_flags="$2"; shift 2 ;;
+            --claude-flags) claude_flags="$2"; shift 2 ;;
             --port) base_port="$2"; shift 2 ;;
             --followup) followup_pr="$2"; shift 2 ;;
             --followup-msg) followup_msg="$2"; shift 2 ;;
@@ -805,7 +809,8 @@ cmd_start() {
                 "$ttyd_mode" "$auto_run" "$clarify_mode" "$pushback_mode" "$plan_mode" \
                 "$docs_update_mode" "$auto_finish" "$auto_finish_timeout" \
                 "$work_timeout" "$review_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
-                "$max_rounds" "$learning_interval" "$codex_thinking" "$base_port" "$followup_pr" "$early_pr"; then
+                "$max_rounds" "$learning_interval" "$codex_thinking" "$base_port" "$followup_pr" "$early_pr" \
+                "$claude_flags" "$codex_flags"; then
                 started=$((started + 1))
             else
                 failed=$((failed + 1))
@@ -828,7 +833,8 @@ cmd_start() {
         "$ttyd_mode" "$auto_run" "$clarify_mode" "$pushback_mode" "$plan_mode" \
         "$docs_update_mode" "$auto_finish" "$auto_finish_timeout" \
         "$work_timeout" "$review_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
-        "$max_rounds" "$learning_interval" "$codex_thinking" "$base_port" "$followup_pr" "$early_pr"
+        "$max_rounds" "$learning_interval" "$codex_thinking" "$base_port" "$followup_pr" "$early_pr" \
+        "$claude_flags" "$codex_flags"
 }
 
 # Start a single session for one feature
@@ -856,6 +862,8 @@ start_single_session() {
     local base_port="${20}"
     local followup_pr="${21}"
     local early_pr="${22:-false}"
+    local claude_flags="${23:-}"
+    local codex_flags="${24:-}"
 
     # Check for existing session for THIS feature
     local sessions_dir="$main_project_root/.agent-sessions"
@@ -972,6 +980,8 @@ start_single_session() {
     [ -n "$task_file_rel" ] && echo "$task_file_rel" > "$peer_sync/task-file"
     [ -n "$followup_pr" ] && echo "$followup_pr" > "$peer_sync/followup-pr"
     echo "$codex_thinking" > "$peer_sync/codex-thinking"
+    [ -n "$claude_flags" ] && echo "$claude_flags" > "$peer_sync/claude-flags"
+    [ -n "$codex_flags" ] && echo "$codex_flags" > "$peer_sync/codex-flags"
     echo "duo" > "$peer_sync/mode"
 
     # Create symlinks in agent worktrees pointing to root worktree's .peer-sync
@@ -1092,8 +1102,8 @@ start_tmux_mode() {
     echo "Attach with: tmux attach -t $session_name"
     echo ""
     echo "To start agents, in each window run their CLI:"
-    echo "  claude window: $(get_agent_cmd claude)"
-    echo "  codex window:  $(get_agent_cmd codex "$codex_thinking")"
+    echo "  claude window: $(PEER_SYNC="$peer_sync" get_agent_cmd claude)"
+    echo "  codex window:  $(PEER_SYNC="$peer_sync" get_agent_cmd codex "$codex_thinking")"
 
     if [ "$auto_run" = "true" ]; then
         info "Starting orchestrator with --auto-start..."
@@ -1365,6 +1375,10 @@ cmd_restart() {
     local ttyd_mode_override=""  # Empty means use recorded setting
     local auto_finish=""         # Empty means use session default
     local auto_finish_timeout="" # Empty means use session default
+    local claude_flags=""
+    local codex_flags=""
+    local claude_flags_set=false
+    local codex_flags_set=false
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -1376,6 +1390,8 @@ cmd_restart() {
             --review-timeout) review_timeout="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
             --learning-interval) learning_interval="$2"; shift 2 ;;
+            --claude-flags) claude_flags="$2"; claude_flags_set=true; shift 2 ;;
+            --codex-flags) codex_flags="$2"; codex_flags_set=true; shift 2 ;;
             --feature) feature_arg="$2"; shift 2 ;;
             --auto-finish) auto_finish="true"; shift ;;
             --auto-finish-timeout) auto_finish_timeout="$2"; shift 2 ;;
@@ -1419,6 +1435,8 @@ cmd_restart() {
                     [ "$ttyd_mode_override" = "false" ] && cmd_args+=(--no-ttyd)
                     [ -n "$auto_finish" ] && cmd_args+=(--auto-finish)
                     [ -n "$auto_finish_timeout" ] && cmd_args+=(--auto-finish-timeout "$auto_finish_timeout")
+                    $claude_flags_set && cmd_args+=(--claude-flags "$claude_flags")
+                    $codex_flags_set && cmd_args+=(--codex-flags "$codex_flags")
 
                     if ! "$0" restart "${cmd_args[@]}"; then
                         failed=$((failed + 1))
@@ -1442,6 +1460,22 @@ cmd_restart() {
 
     # Check we have an active session
     [ -f "$peer_sync/feature" ] || die "No active session (missing .peer-sync/feature)"
+
+    # Optional restart-time passthrough flag overrides
+    if $claude_flags_set; then
+        if [ -n "$claude_flags" ]; then
+            atomic_write "$peer_sync/claude-flags" "$claude_flags"
+        else
+            rm -f "$peer_sync/claude-flags"
+        fi
+    fi
+    if $codex_flags_set; then
+        if [ -n "$codex_flags" ]; then
+            atomic_write "$peer_sync/codex-flags" "$codex_flags"
+        else
+            rm -f "$peer_sync/codex-flags"
+        fi
+    fi
 
     # Check ttyd mode (default to true for backward compatibility with old sessions)
     # Command-line override takes precedence over recorded setting
@@ -2726,9 +2760,9 @@ cmd_run_merge() {
 
     # Start fresh agent CLIs
     info "Starting fresh agent CLIs..."
-    tmux send-keys -t "$claude_session" "$(get_agent_cmd claude)" || true
+    tmux send-keys -t "$claude_session" "$(PEER_SYNC="$peer_sync" get_agent_cmd claude)" || true
     tmux send-keys -t "$claude_session" C-m || true
-    tmux send-keys -t "$codex_session" "$(get_agent_cmd codex "$codex_thinking")" || true
+    tmux send-keys -t "$codex_session" "$(PEER_SYNC="$peer_sync" get_agent_cmd codex "$codex_thinking")" || true
     tmux send-keys -t "$codex_session" C-m || true
 
     # Wait for agents to initialize
@@ -5482,6 +5516,8 @@ SESSION COMMANDS
           --codex-thinking <level> Codex reasoning effort: low, medium, high (default: high)
           --codex-model <model>    GPT model for Codex (e.g., o3, gpt-4.1)
           --claude-model <model>   Claude model (e.g., opus, sonnet)
+          --claude-flags "<args>"  Extra flags appended to Claude CLI command
+          --codex-flags "<args>"   Extra flags appended to Codex CLI command
           --port <port>            Base port for web terminals (uses 3 consecutive ports)
                                    If not specified, finds first available consecutive ports.
                                    Fails if any of the 3 ports are occupied.
@@ -5550,6 +5586,8 @@ SESSION COMMANDS
           --review-timeout <secs>  Review phase timeout (default: ${DEFAULT_REVIEW_TIMEOUT})
           --max-rounds <n>         Maximum rounds (default: 10)
           --learning-interval <secs> Override minimum wallclock seconds between update-docs runs
+          --claude-flags "<args>"  Override persisted Claude passthrough flags for this session
+          --codex-flags "<args>"   Override persisted Codex passthrough flags for this session
 
     status [--feature <name>]
         Show current session state, agent statuses, and PRs.
@@ -5717,6 +5755,9 @@ EXAMPLES
     # With both stages: clarify -> pushback -> work
     agent-duo start auth --clarify --pushback
     # Review approaches, respond to agents, then press Enter in orchestrator
+
+    # Pass through extra CLI args to each agent
+    agent-duo start auth --claude-flags "--allowedTools Bash,Read" --codex-flags "--provider openai"
 
     # Follow up on PR feedback with a custom prepended note
     agent-duo start --followup 42 --followup-msg "Address blocker comments first"

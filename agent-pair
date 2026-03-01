@@ -239,6 +239,8 @@ cmd_start() {
     local reviewer=""
     local codex_model=""
     local claude_model=""
+    local codex_flags=""
+    local claude_flags=""
     local base_port=""
     local followup_pr=""
     local followup_msg=""
@@ -269,6 +271,8 @@ cmd_start() {
             --codex-thinking) codex_thinking="$2"; shift 2 ;;
             --codex-model) codex_model="$2"; shift 2 ;;
             --claude-model) claude_model="$2"; shift 2 ;;
+            --codex-flags) codex_flags="$2"; shift 2 ;;
+            --claude-flags) claude_flags="$2"; shift 2 ;;
             --claude) coder="claude"; reviewer="codex"; shift ;;
             --codex) coder="codex"; reviewer="claude"; shift ;;
             --coder) coder="$2"; shift 2 ;;
@@ -351,7 +355,8 @@ cmd_start() {
                 "$ttyd_mode" "$auto_run" "$gather_mode" "$clarify_mode" "$pushback_mode" "$plan_mode" \
                 "$auto_finish" "$auto_finish_timeout" \
                 "$work_timeout" "$review_timeout" "$gather_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
-                "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port" "$followup_pr" "$early_pr" "$docs_update_mode"; then
+                "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port" "$followup_pr" "$early_pr" "$docs_update_mode" \
+                "$claude_flags" "$codex_flags"; then
                 started=$((started + 1))
             else
                 failed=$((failed + 1))
@@ -374,7 +379,8 @@ cmd_start() {
         "$ttyd_mode" "$auto_run" "$gather_mode" "$clarify_mode" "$pushback_mode" "$plan_mode" \
         "$auto_finish" "$auto_finish_timeout" \
         "$work_timeout" "$review_timeout" "$gather_timeout" "$clarify_timeout" "$pushback_timeout" "$plan_timeout" \
-        "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port" "$followup_pr" "$early_pr" "$docs_update_mode"
+        "$max_rounds" "$codex_thinking" "$coder" "$reviewer" "$base_port" "$followup_pr" "$early_pr" "$docs_update_mode" \
+        "$claude_flags" "$codex_flags"
 }
 
 # Start a single pair session for one feature
@@ -404,6 +410,8 @@ start_single_pair_session() {
     local followup_pr="${23}"
     local early_pr="${24:-false}"
     local docs_update_mode="${25:-true}"
+    local claude_flags="${26:-}"
+    local codex_flags="${27:-}"
 
     # Check for existing session for THIS feature
     local sessions_dir="$main_project_root/.agent-sessions"
@@ -504,6 +512,8 @@ start_single_pair_session() {
     [ -n "$task_file_rel" ] && echo "$task_file_rel" > "$peer_sync/task-file"
     [ -n "$followup_pr" ] && echo "$followup_pr" > "$peer_sync/followup-pr"
     echo "$codex_thinking" > "$peer_sync/codex-thinking"
+    [ -n "$claude_flags" ] && echo "$claude_flags" > "$peer_sync/claude-flags"
+    [ -n "$codex_flags" ] && echo "$codex_flags" > "$peer_sync/codex-flags"
 
     # Register session in main project's .agent-sessions directory
     mkdir -p "$sessions_dir"
@@ -616,8 +626,8 @@ start_tmux_mode_pair() {
     echo "Attach with: tmux attach -t $session_name"
     echo ""
     echo "To start agents, in each window run their CLI:"
-    echo "  coder window:    $(get_agent_cmd "$coder" "$codex_thinking")"
-    echo "  reviewer window: $(get_agent_cmd "$reviewer" "$codex_thinking")"
+    echo "  coder window:    $(PEER_SYNC="$peer_sync" get_agent_cmd "$coder" "$codex_thinking")"
+    echo "  reviewer window: $(PEER_SYNC="$peer_sync" get_agent_cmd "$reviewer" "$codex_thinking")"
 
     if [ "$auto_run" = "true" ]; then
         info "Starting orchestrator with --auto-start..."
@@ -909,6 +919,10 @@ cmd_restart() {
     local ttyd_mode_override=""  # Empty means use recorded setting
     local auto_finish=""         # Empty means use session default
     local auto_finish_timeout="" # Empty means use session default
+    local claude_flags=""
+    local codex_flags=""
+    local claude_flags_set=false
+    local codex_flags_set=false
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -921,6 +935,8 @@ cmd_restart() {
             --clarify-timeout) clarify_timeout="$2"; shift 2 ;;
             --pushback-timeout) pushback_timeout="$2"; shift 2 ;;
             --max-rounds) max_rounds="$2"; shift 2 ;;
+            --claude-flags) claude_flags="$2"; claude_flags_set=true; shift 2 ;;
+            --codex-flags) codex_flags="$2"; codex_flags_set=true; shift 2 ;;
             --feature) feature_arg="$2"; shift 2 ;;
             --auto-finish) auto_finish="true"; shift ;;
             --auto-finish-timeout) auto_finish_timeout="$2"; shift 2 ;;
@@ -965,6 +981,8 @@ cmd_restart() {
                     [ "$ttyd_mode_override" = "false" ] && cmd_args+=(--no-ttyd)
                     [ -n "$auto_finish" ] && cmd_args+=(--auto-finish)
                     [ -n "$auto_finish_timeout" ] && cmd_args+=(--auto-finish-timeout "$auto_finish_timeout")
+                    $claude_flags_set && cmd_args+=(--claude-flags "$claude_flags")
+                    $codex_flags_set && cmd_args+=(--codex-flags "$codex_flags")
 
                     if ! "$0" restart "${cmd_args[@]}"; then
                         failed=$((failed + 1))
@@ -988,6 +1006,22 @@ cmd_restart() {
 
     # Check we have an active session
     [ -f "$peer_sync/feature" ] || die "No active session (missing .peer-sync/feature)"
+
+    # Optional restart-time passthrough flag overrides
+    if $claude_flags_set; then
+        if [ -n "$claude_flags" ]; then
+            atomic_write "$peer_sync/claude-flags" "$claude_flags"
+        else
+            rm -f "$peer_sync/claude-flags"
+        fi
+    fi
+    if $codex_flags_set; then
+        if [ -n "$codex_flags" ]; then
+            atomic_write "$peer_sync/codex-flags" "$codex_flags"
+        else
+            rm -f "$peer_sync/codex-flags"
+        fi
+    fi
 
     # Check ttyd mode (default to true for backward compatibility with old sessions)
     # Command-line override takes precedence over recorded setting
@@ -3257,6 +3291,8 @@ SESSION COMMANDS
           --codex-thinking <level> Codex reasoning effort: low, medium, high (default: high)
           --codex-model <model>  GPT model for Codex (e.g., o3, gpt-4.1)
           --claude-model <model> Claude model (e.g., opus, sonnet)
+          --claude-flags "<args>" Extra flags appended to Claude CLI command
+          --codex-flags "<args>"  Extra flags appended to Codex CLI command
           --port <port>          Base port for web terminals (uses 3 consecutive ports)
                                  If not specified, finds first available consecutive ports.
                                  Fails if any of the 3 ports are occupied.
@@ -3305,6 +3341,8 @@ SESSION COMMANDS
           --clarify-timeout <secs> Clarify stage timeout (default: ${DEFAULT_CLARIFY_TIMEOUT})
           --pushback-timeout <secs> Pushback stage timeout (default: ${DEFAULT_PUSHBACK_TIMEOUT})
           --max-rounds <n>       Maximum rounds (default: 10)
+          --claude-flags "<args>" Override persisted Claude passthrough flags for this session
+          --codex-flags "<args>"  Override persisted Codex passthrough flags for this session
 
     status [--feature <name>]
         Show current session state and agent statuses.
@@ -3385,6 +3423,9 @@ EXAMPLES
 
     # With gather phase (reviewer collects context first)
     agent-pair start auth --claude --gather
+
+    # Pass through extra CLI args to each agent
+    agent-pair start auth --claude --claude-flags "--allowedTools Bash,Read" --codex-flags "--provider openai"
 
     # With clarify phase
     agent-pair start auth --claude --clarify

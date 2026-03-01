@@ -319,6 +319,36 @@ else
     test_fail "got: $CMD"
 fi
 
+FLAGS_SYNC="$TEST_DIR/flags-sync"
+mkdir -p "$FLAGS_SYNC"
+
+test_start "get_agent_cmd appends claude passthrough flags from PEER_SYNC"
+echo '--allowedTools Bash,Read' > "$FLAGS_SYNC/claude-flags"
+CMD=$(PEER_SYNC="$FLAGS_SYNC" get_agent_cmd "claude")
+if [[ "$CMD" == *"--allowedTools Bash,Read"* ]]; then
+    test_pass
+else
+    test_fail "got: $CMD"
+fi
+
+test_start "get_agent_cmd appends codex passthrough flags from PEER_SYNC"
+echo '--provider openai' > "$FLAGS_SYNC/codex-flags"
+CMD=$(PEER_SYNC="$FLAGS_SYNC" get_agent_cmd "codex" "medium")
+if [[ "$CMD" == *"--provider openai"* ]] && [[ "$CMD" == *"model_reasoning_effort=\"medium\""* ]]; then
+    test_pass
+else
+    test_fail "got: $CMD"
+fi
+
+test_start "get_agent_cmd ignores empty passthrough file"
+: > "$FLAGS_SYNC/claude-flags"
+CMD=$(PEER_SYNC="$FLAGS_SYNC" get_agent_cmd "claude")
+if [[ "$CMD" != *"--allowedTools Bash,Read"* ]]; then
+    test_pass
+else
+    test_fail "got: $CMD"
+fi
+
 test_start "is_valid_codex_resume_key accepts UUID-shaped key"
 if is_valid_codex_resume_key "123e4567-e89b-12d3-a456-426614174000"; then
     test_pass
