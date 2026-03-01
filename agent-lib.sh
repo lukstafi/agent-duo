@@ -694,6 +694,33 @@ get_claude_model() {
     echo "$DEFAULT_CLAUDE_MODEL"
 }
 
+# Resolve optional passthrough flags from session state.
+# Reads $PEER_SYNC/<agent>-flags when available.
+get_agent_passthrough_flags() {
+    local agent="$1"
+    local flags_file=""
+
+    case "$agent" in
+        claude) flags_file="claude-flags" ;;
+        codex) flags_file="codex-flags" ;;
+        *) return 0 ;;
+    esac
+
+    local peer_sync="${PEER_SYNC:-${RESOLVED_PEER_SYNC:-}}"
+    if [ -z "$peer_sync" ] && [ -d "$PWD/.peer-sync" ]; then
+        peer_sync="$PWD/.peer-sync"
+    fi
+    [ -n "$peer_sync" ] || return 0
+    [ -d "$peer_sync" ] || return 0
+
+    local flags_path="$peer_sync/$flags_file"
+    if [ -f "$flags_path" ]; then
+        local flags
+        flags="$(cat "$flags_path" 2>/dev/null)" || flags=""
+        [ -n "$flags" ] && echo "$flags"
+    fi
+}
+
 # Get agent command
 # Usage: get_agent_cmd <agent> [thinking_effort] [-- extra_args...]
 # thinking_effort is only used for codex (low, medium, high)
@@ -706,9 +733,10 @@ get_agent_cmd() {
     [ "${1:-}" = "--" ] && shift
     local extra_args="$*"
 
-    local codex_model claude_model
+    local codex_model claude_model passthrough_flags
     codex_model="$(get_codex_model)"
     claude_model="$(get_claude_model)"
+    passthrough_flags="$(get_agent_passthrough_flags "$agent")"
 
     local cmd
     case "$agent" in
@@ -730,6 +758,7 @@ get_agent_cmd() {
         *) cmd="$agent" ;;  # Allow custom agents
     esac
 
+    [ -n "$passthrough_flags" ] && cmd="$cmd $passthrough_flags"
     [ -n "$extra_args" ] && cmd="$cmd $extra_args"
     echo "$cmd"
 }

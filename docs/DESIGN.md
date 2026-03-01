@@ -87,6 +87,8 @@ agent-duo start <feature> --auto-run \
   --claude-model opus \        # Claude model (opus, sonnet)
   --codex-model o3 \           # Codex/GPT model (o3, gpt-4.1)
   --codex-thinking high \      # Codex reasoning effort (low, medium, high)
+  --claude-flags "--allowedTools Bash,Read" \  # Extra Claude CLI args
+  --codex-flags "--provider openai" \          # Extra Codex CLI args
   --plan-timeout 600 \         # Plan phase timeout in seconds (default: 600)
   --auto-finish                # Auto-merge last remaining PR when other closes
 ```

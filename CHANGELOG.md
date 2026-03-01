@@ -6,6 +6,7 @@ All notable changes to agent-duo will be documented in this file.
 
 ### Changed
 - **`start` and `restart` now auto-run orchestrator by default**: `agent-duo` and `agent-pair` now launch/restart the orchestrator loop automatically unless `--no-auto-run` is passed
+- **Passthrough agent flags are now session-persistent**: `agent-duo`/`agent-pair` support `--claude-flags` and `--codex-flags` on `start` and `restart`, store them in `.peer-sync/`, and append them to launch commands via `get_agent_cmd`
 
 ## [v0.7] - 2026-02-22
 

@@ -226,6 +226,19 @@ agent-duo config claude_model opus
 agent-duo config codex_model gpt-5.2-codex
 ```
 
+### Agent Flag Passthrough
+
+```bash
+agent-duo start <feature> \
+  --claude-flags "--allowedTools Bash,Read,Write" \
+  --codex-flags "--provider openai --some-future-flag value"
+
+# Later, override persisted passthrough flags on restart
+agent-duo restart --feature <feature> \
+  --claude-flags "--allowedTools Bash,Read" \
+  --codex-flags "--provider openai"
+```
+
 ### Manual Control
 
 ```bash
