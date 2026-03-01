@@ -2273,6 +2273,23 @@ $pr_url"
     fi
 }
 
+# Send low-priority progress notifications via ntfy.
+# Usage: send_progress_notification <mode> <feature> <message> [tags]
+send_progress_notification() {
+    local mode="$1"
+    local feature="$2"
+    local message="$3"
+    local tags="${4:-robot}"
+
+    # Only send via ntfy, silently skip when not configured.
+    if ! get_ntfy_topic >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local title="[agent-${mode}] Progress: ${feature}"
+    send_ntfy "$title" "$message" "low" "$tags" 2>/dev/null || true
+}
+
 # Send pushback stage notification via ntfy
 send_pushback_ntfy() {
     local peer_sync="$1"

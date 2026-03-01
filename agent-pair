@@ -2433,6 +2433,12 @@ cmd_run() {
     local round
     round="$(cat "$peer_sync/round" 2>/dev/null)" || round=1
 
+    if [ "$round" -le "$max_rounds" ]; then
+        send_progress_notification "pair" "$feature" \
+            "Work phase started. Resuming at round ${round}/${max_rounds}." \
+            "hourglass_flowing_sand,robot"
+    fi
+
     while [ "$round" -le "$max_rounds" ]; do
         # Check if session is complete
         if [ "$(cat "$peer_sync/session" 2>/dev/null)" = "complete" ]; then
@@ -2470,6 +2476,9 @@ cmd_run() {
         info "=== Round $round: Coder Work Phase ==="
         echo "$round" > "$peer_sync/round"
         set_phase_state "$peer_sync" "work"
+        send_progress_notification "pair" "$feature" \
+            "Round ${round}/${max_rounds}: coder work phase started." \
+            "repeat,hammer_and_wrench"
 
         # Record pre-round HEAD for quiescence detection (detects in-phase commits)
         if [ -d "$worktree" ]; then
@@ -2569,6 +2578,9 @@ cmd_run() {
         # Review phase
         info "=== Round $round: Review Phase ==="
         set_phase_state "$peer_sync" "review"
+        send_progress_notification "pair" "$feature" \
+            "Round ${round}/${max_rounds}: review phase started." \
+            "repeat,memo"
 
         atomic_write "$peer_sync/reviewer.status" "reviewing|$(date +%s)|round $round review phase"
         atomic_write "$peer_sync/coder.status" "waiting|$(date +%s)|waiting for review"
@@ -2626,6 +2638,12 @@ cmd_run() {
         # Check for escalations before transitioning to next work round
         if has_pending_escalations "$peer_sync" >/dev/null; then
             handle_escalation_block "$peer_sync" "$feature" "pair" || true
+        fi
+
+        if [ "$round" -lt "$max_rounds" ]; then
+            send_progress_notification "pair" "$feature" \
+                "Round ${round} complete. Next up: round $((round + 1)) coder work phase." \
+                "repeat,arrow_forward"
         fi
 
         round=$((round + 1))

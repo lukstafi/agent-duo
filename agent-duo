@@ -4578,6 +4578,12 @@ cmd_run() {
         local round
         round="$(cat "$peer_sync/round" 2>/dev/null)" || round=1
 
+        if [ "$round" -le "$max_rounds" ]; then
+            send_progress_notification "duo" "$feature" \
+                "Work phase started. Resuming at round ${round}/${max_rounds}." \
+                "hourglass_flowing_sand,robot"
+        fi
+
         # Initialize convergence state (persisted across restarts)
         local claude_converged=false codex_converged=false
         [ -f "$peer_sync/claude.converged" ] && claude_converged=true
@@ -4604,6 +4610,9 @@ cmd_run() {
             info "=== Round $round: Work Phase ==="
             echo "$round" > "$peer_sync/round"
             set_phase_state "$peer_sync" "work"
+            send_progress_notification "duo" "$feature" \
+                "Round ${round}/${max_rounds}: work phase started." \
+                "repeat,hammer_and_wrench"
 
             # Record pre-round HEAD for quiescence detection (detects in-phase commits)
             if ! $claude_converged && [ -d "$worktree_claude" ]; then
@@ -4842,6 +4851,9 @@ cmd_run() {
             if $claude_reviews || $codex_reviews; then
                 info "=== Round $round: Review Phase ==="
                 set_phase_state "$peer_sync" "review"
+                send_progress_notification "duo" "$feature" \
+                    "Round ${round}/${max_rounds}: review phase started." \
+                    "repeat,memo"
 
                 if $claude_reviews; then
                     check_tui_health "claude" "$claude_session" "$peer_sync" "$tui_exit_behavior"
@@ -4956,6 +4968,12 @@ cmd_run() {
             if [ "$learning_interval" -gt 0 ]; then
                 lib_maybe_run_learning_checkpoint "$peer_sync" "$feature" "duo" || \
                     warn "Learning checkpoint skipped due to update-docs failure."
+            fi
+
+            if [ "$round" -lt "$max_rounds" ]; then
+                send_progress_notification "duo" "$feature" \
+                    "Round ${round} complete. Next up: round $((round + 1)) work phase." \
+                    "repeat,arrow_forward"
             fi
 
             round=$((round + 1))
