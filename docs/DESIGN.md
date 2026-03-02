@@ -413,7 +413,7 @@ Given project directory `myapp` and feature `auth`:
 │     - Runs tests to verify                                      │
 │     - Force-pushes rebased branch                               │
 │     - Waits for CI checks to pass                               │
-│     - Merges PR via squash merge                                │
+│     - Merges PR via merge commit                                │
 │     - Deletes remote branch                                     │
 │  3. Agent signals completion (status: final-merge-done)         │
 │  4. Session completes                                           │
@@ -597,7 +597,7 @@ Key skill behaviors:
 - **Merge Execute phase**: For losing agent — cd to winning worktree, cherry-pick from losing PR into winning branch, close losing PR, signal `merge-done`
 - **Merge Review phase**: For winning agent — review cherry-picks in own worktree, can reference losing worktree, signal `merge-review-done`
 - **Merge Amend phase**: For losing agent — address review feedback in winning worktree, signal `merge-done`
-- **Final Merge phase**: Rebase onto main, run tests, merge PR via squash, delete branch, signal `final-merge-done` (auto-finish mode)
+- **Final Merge phase**: Rebase onto main, run tests, merge PR via merge commit, delete branch, signal `final-merge-done` (auto-finish mode)
 - **Divergence**: Maintain distinct approach from peer
 - **Interrupts**: If interrupted, gracefully yield and continue next round
 - **Preflight context**: Work/review/amend templates run `phase-preflight.sh` first to print previous review notes, peer status, and `main...HEAD` diff stats before continuing
@@ -958,7 +958,7 @@ The session's ttyd mode is recorded in `.peer-sync/ttyd-mode` during start. When
 | **Plan-review phase** (duo) | After planning, agents cross-review each other's plans with `duo-plan-review` skill |
 | **Plan phase** (pair) | Iterative plan → review → revise loop (up to 3 rounds) with binding reviewer verdict |
 | **Auto-finish mode** | `--auto-finish` flag: when one PR closes during PR-comments phase, remaining agent auto-merges via `final-merge` phase |
-| **Final merge phase** | `duo-final-merge`/`pair-final-merge` skills: rebase, test, squash-merge, delete branch |
+| **Final merge phase** | `duo-final-merge`/`pair-final-merge` skills: rebase, test, merge commit, delete branch |
 | **`learn` command** | Agents record project learnings to `AGENTS_STAGING.md` during sessions |
 | **`workflow-feedback` command** | Agents record feedback about the agent-duo workflow itself |
 | **`feedback` command** | User manages accumulated workflow feedback (list, view, delete, submit as GitHub issue) |
@@ -966,6 +966,6 @@ The session's ttyd mode is recorded in `.peer-sync/ttyd-mode` during start. When
 
 The plan phase enables agents to write and review implementation plans before coding begins. In duo mode, both agents plan simultaneously and then cross-review each other's plans (informational feedback only). In pair mode, the coder writes a plan that the reviewer evaluates with a binding verdict (`APPROVE` or `REQUEST_CHANGES`), iterating up to 3 rounds.
 
-Auto-finish mode (`--auto-finish`) enables fully unattended sessions. During the PR-comments watch phase, if one PR is closed/merged and only one remains, the orchestrator triggers the `final-merge` phase where the remaining agent rebases onto main, runs tests, waits for CI, and squash-merges the PR.
+Auto-finish mode (`--auto-finish`) enables fully unattended sessions. During the PR-comments watch phase, if one PR is closed/merged and only one remains, the orchestrator triggers the `final-merge` phase where the remaining agent rebases onto main, runs tests, waits for CI, and creates a merge commit for the PR.
 
 The `learn` and `workflow-feedback` commands let agents capture knowledge during sessions — project learnings go to `AGENTS_STAGING.md` in the worktree, while workflow feedback is accumulated to `~/.agent-duo/workflow-feedback/` for later review via `agent-duo feedback`. Feedback persistence deduplicates placeholder-only and repeated entries so digesting focuses on new actionable items.

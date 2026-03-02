@@ -79,7 +79,7 @@ done
 
 ### 6. Merge the PR
 
-Attempt to merge using squash (preferred) or regular merge.
+Attempt to merge using a merge commit (preferred) for more informative history.
 
 **Note**: Don't use `--delete-branch` as it fails when running from a worktree (tries to checkout main locally). Delete the remote branch separately instead.
 
@@ -88,13 +88,13 @@ Attempt to merge using squash (preferred) or regular merge.
 BRANCH_NAME=$(gh pr view "$PR_URL" --json headRefName -q '.headRefName')
 
 # Merge the PR (without --delete-branch)
-gh pr merge "$PR_URL" --squash
+gh pr merge "$PR_URL" --merge
 ```
 
-If squash merge is not allowed by the repository settings:
+If merge commits are not allowed by the repository settings:
 
 ```bash
-gh pr merge "$PR_URL" --merge
+gh pr merge "$PR_URL" --squash
 ```
 
 After successful merge, delete the remote branch:
@@ -137,5 +137,5 @@ agent-duo signal "$MY_NAME" final-merge-done "merge blocked, needs manual interv
 - **Always rebase before merging** — Ensures clean history and no conflicts
 - **Use `--force-with-lease`** — Safer than `--force`, fails if remote changed unexpectedly
 - **Wait for CI** — Don't merge if checks are still running
-- **Prefer squash merge** — Cleaner history for feature branches
+- **Prefer merge commits** — Preserves full per-commit context in history
 - **Delete branch after merge** — Keeps repository clean
