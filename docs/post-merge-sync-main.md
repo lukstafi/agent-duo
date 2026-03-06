@@ -124,3 +124,10 @@ works without changes to the template environment.
 **Dependencies:**
 - Must land before gh-agent-duo-50 (TypeScript rewrite) begins
 - No dependencies on other open tasks
+
+## Implementation Notes
+
+- Added `sync_main_after_merge <main_branch>` to `agent-lib.sh`; it resolves the main checkout via `get_main_project_root`, runs `git -C <main_root> fetch`, tries `git -C <main_root> pull --ff-only`, then falls back to `git -C <main_root> merge --no-edit origin/<main_branch>`.
+- Sync failures are intentionally non-blocking: the helper emits warnings and returns success so a completed remote merge does not block final-merge completion.
+- Updated both final-merge templates to call `sync_main_after_merge "$(get_main_branch "$PEER_SYNC")"` immediately after `gh pr merge` and before remote branch deletion, with a worktree-vs-main-checkout rationale comment.
+- Added unit coverage for the fast-forward path, the fallback merge path, and the template hook presence.

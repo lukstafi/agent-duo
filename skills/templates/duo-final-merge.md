@@ -86,15 +86,22 @@ Attempt to merge using a merge commit (preferred) for more informative history.
 ```bash
 # Get the branch name for later cleanup
 BRANCH_NAME=$(gh pr view "$PR_URL" --json headRefName -q '.headRefName')
+MAIN_BRANCH=$(get_main_branch "$PEER_SYNC")
 
 # Merge the PR (without --delete-branch)
 gh pr merge "$PR_URL" --merge
+
+# This runs from a worktree, so refresh the main checkout explicitly after the remote merge.
+sync_main_after_merge "$MAIN_BRANCH"
 ```
 
 If merge commits are not allowed by the repository settings:
 
 ```bash
 gh pr merge "$PR_URL" --squash
+
+# This runs from a worktree, so refresh the main checkout explicitly after the remote merge.
+sync_main_after_merge "$MAIN_BRANCH"
 ```
 
 After successful merge, delete the remote branch:
