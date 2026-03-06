@@ -89,6 +89,9 @@ BRANCH_NAME=$(gh pr view "$PR_URL" --json headRefName -q '.headRefName')
 
 # Merge the PR (without --delete-branch)
 gh pr merge "$PR_URL" --merge
+
+# This runs from a worktree, so refresh the main checkout explicitly after the remote merge.
+sync_main_after_merge "$(get_main_branch "$PEER_SYNC")"
 ```
 
 If merge commits are not allowed by the repository settings:

@@ -462,6 +462,62 @@ else
     test_fail "expected sync-main to fast-forward/rebase to include remote update"
 fi
 
+MERGE_REMOTE="$TEST_DIR/merge-remote.git"
+MERGE_MAIN="$TEST_DIR/merge-main"
+MERGE_WORKTREE="$TEST_DIR/merge-worktree"
+MERGE_OTHER="$TEST_DIR/merge-other"
+git init --bare -q "$MERGE_REMOTE"
+git clone -q "$MERGE_REMOTE" "$MERGE_MAIN"
+git -C "$MERGE_MAIN" config user.name "Unit Test"
+git -C "$MERGE_MAIN" config user.email "unit@example.com"
+echo "base" > "$MERGE_MAIN/merge.txt"
+git -C "$MERGE_MAIN" add merge.txt
+git -C "$MERGE_MAIN" commit -q -m "base commit"
+git -C "$MERGE_MAIN" push -q -u origin HEAD
+git -C "$MERGE_MAIN" worktree add -q -b feature "$MERGE_WORKTREE"
+
+git clone -q "$MERGE_REMOTE" "$MERGE_OTHER"
+git -C "$MERGE_OTHER" config user.name "Unit Test"
+git -C "$MERGE_OTHER" config user.email "unit@example.com"
+echo "remote update" >> "$MERGE_OTHER/merge.txt"
+git -C "$MERGE_OTHER" add merge.txt
+git -C "$MERGE_OTHER" commit -q -m "remote update"
+git -C "$MERGE_OTHER" push -q origin HEAD
+
+test_start "sync_main_after_merge updates the main checkout from a worktree"
+MERGE_BEFORE="$(git -C "$MERGE_MAIN" rev-parse HEAD)"
+(
+    cd "$MERGE_WORKTREE" || exit 1
+    sync_main_after_merge main
+) >/dev/null 2>&1
+MERGE_AFTER="$(git -C "$MERGE_MAIN" rev-parse HEAD)"
+REMOTE_HEAD="$(git -C "$MERGE_MAIN" rev-parse origin/main)"
+if [ "$MERGE_BEFORE" != "$MERGE_AFTER" ] && [ "$MERGE_AFTER" = "$REMOTE_HEAD" ] && grep -Fq "remote update" "$MERGE_MAIN/merge.txt"; then
+    test_pass
+else
+    test_fail "expected merge-main to fast-forward to origin/main"
+fi
+
+echo "local only" > "$MERGE_MAIN/local-only.txt"
+git -C "$MERGE_MAIN" add local-only.txt
+git -C "$MERGE_MAIN" commit -q -m "local only"
+echo "remote second update" > "$MERGE_OTHER/remote-second.txt"
+git -C "$MERGE_OTHER" add remote-second.txt
+git -C "$MERGE_OTHER" commit -q -m "remote second update"
+git -C "$MERGE_OTHER" push -q origin HEAD
+
+test_start "sync_main_after_merge falls back to merge when fast-forward fails"
+(
+    cd "$MERGE_WORKTREE" || exit 1
+    sync_main_after_merge main
+) >/dev/null 2>&1
+PARENT_COUNT="$(git -C "$MERGE_MAIN" rev-list --parents -n 1 HEAD | awk '{print NF-1}')"
+if [ "$PARENT_COUNT" = "2" ] && [ -f "$MERGE_MAIN/local-only.txt" ] && [ -f "$MERGE_MAIN/remote-second.txt" ]; then
+    test_pass
+else
+    test_fail "expected merge-main to create a merge commit containing local and remote changes"
+fi
+
 test_start "ensure_task_file_committed commits untracked root task file"
 echo "# Root Task" > "$TASK_GIT_REPO/root-task.md"
 ensure_task_file_committed "$TASK_GIT_REPO" "root-task" "duo" >/dev/null
@@ -723,6 +779,32 @@ if [ -n "$HASH_A" ] && [ "$HASH_A" = "$HASH_B" ]; then
     test_pass
 else
     test_fail "expected matching hashes, got A='$HASH_A' B='$HASH_B'"
+fi
+
+#------------------------------------------------------------------------------
+# Test: Final merge templates
+#------------------------------------------------------------------------------
+
+echo ""
+echo "--- Final Merge Templates ---"
+
+DUO_FINAL_TEMPLATE="$REPO_ROOT/skills/templates/duo-final-merge.md"
+PAIR_FINAL_TEMPLATE="$REPO_ROOT/skills/templates/pair-final-merge.md"
+
+test_start "duo final-merge template syncs the main checkout after merge"
+if grep -Fq 'sync_main_after_merge "$(get_main_branch "$PEER_SYNC")"' "$DUO_FINAL_TEMPLATE" && \
+   grep -Fq "refresh the main checkout explicitly after the remote merge" "$DUO_FINAL_TEMPLATE"; then
+    test_pass
+else
+    test_fail "duo final-merge template is missing the post-merge main sync step"
+fi
+
+test_start "pair final-merge template syncs the main checkout after merge"
+if grep -Fq 'sync_main_after_merge "$(get_main_branch "$PEER_SYNC")"' "$PAIR_FINAL_TEMPLATE" && \
+   grep -Fq "refresh the main checkout explicitly after the remote merge" "$PAIR_FINAL_TEMPLATE"; then
+    test_pass
+else
+    test_fail "pair final-merge template is missing the post-merge main sync step"
 fi
 
 #------------------------------------------------------------------------------

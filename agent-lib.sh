@@ -3218,6 +3218,41 @@ get_main_head() {
     git rev-parse "origin/$main_branch" 2>/dev/null
 }
 
+# Sync the main checkout after a remote PR merge completes.
+# Usage: sync_main_after_merge <main_branch>
+# Returns: 0 even when sync fails, since the remote merge already succeeded.
+sync_main_after_merge() {
+    local main_branch="$1"
+
+    if [ -z "$main_branch" ]; then
+        warn "Could not sync main checkout after merge: missing main branch name"
+        return 0
+    fi
+
+    local main_root
+    if ! main_root="$(get_main_project_root 2>/dev/null)"; then
+        warn "Could not sync main checkout after merge: failed to locate main project root"
+        return 0
+    fi
+
+    if ! git -C "$main_root" fetch origin "$main_branch"; then
+        warn "Could not sync main checkout after merge in $main_root: fetch origin $main_branch failed"
+        return 0
+    fi
+
+    if git -C "$main_root" pull --ff-only origin "$main_branch"; then
+        return 0
+    fi
+
+    warn "Fast-forward pull failed for $main_root; attempting merge from origin/$main_branch"
+    if git -C "$main_root" merge --no-edit "origin/$main_branch"; then
+        return 0
+    fi
+
+    warn "Could not sync main checkout after merge in $main_root; local checkout may be stale"
+    return 0
+}
+
 # Check if main has advanced since we last checked
 # Usage: main_has_advanced <peer_sync>
 # Returns: 0 if main has new commits, 1 otherwise
