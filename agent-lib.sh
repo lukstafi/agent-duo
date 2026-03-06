@@ -3249,6 +3249,8 @@ sync_main_after_merge() {
         return 0
     fi
 
+    git -C "$main_root" merge --abort >/dev/null 2>&1 || true
+
     warn "Could not sync main checkout after merge in $main_root; local checkout may be stale"
     return 0
 }

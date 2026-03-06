@@ -474,6 +474,7 @@ echo "base" > "$MERGE_MAIN/merge.txt"
 git -C "$MERGE_MAIN" add merge.txt
 git -C "$MERGE_MAIN" commit -q -m "base commit"
 git -C "$MERGE_MAIN" push -q -u origin HEAD
+MERGE_BRANCH="$(git -C "$MERGE_MAIN" rev-parse --abbrev-ref HEAD)"
 git -C "$MERGE_MAIN" worktree add -q -b feature "$MERGE_WORKTREE"
 
 git clone -q "$MERGE_REMOTE" "$MERGE_OTHER"
@@ -488,10 +489,10 @@ test_start "sync_main_after_merge updates the main checkout from a worktree"
 MERGE_BEFORE="$(git -C "$MERGE_MAIN" rev-parse HEAD)"
 (
     cd "$MERGE_WORKTREE" || exit 1
-    sync_main_after_merge main
+    sync_main_after_merge "$MERGE_BRANCH"
 ) >/dev/null 2>&1
 MERGE_AFTER="$(git -C "$MERGE_MAIN" rev-parse HEAD)"
-REMOTE_HEAD="$(git -C "$MERGE_MAIN" rev-parse origin/main)"
+REMOTE_HEAD="$(git -C "$MERGE_MAIN" rev-parse "origin/$MERGE_BRANCH")"
 if [ "$MERGE_BEFORE" != "$MERGE_AFTER" ] && [ "$MERGE_AFTER" = "$REMOTE_HEAD" ] && grep -Fq "remote update" "$MERGE_MAIN/merge.txt"; then
     test_pass
 else
@@ -509,13 +510,36 @@ git -C "$MERGE_OTHER" push -q origin HEAD
 test_start "sync_main_after_merge falls back to merge when fast-forward fails"
 (
     cd "$MERGE_WORKTREE" || exit 1
-    sync_main_after_merge main
+    sync_main_after_merge "$MERGE_BRANCH"
 ) >/dev/null 2>&1
 PARENT_COUNT="$(git -C "$MERGE_MAIN" rev-list --parents -n 1 HEAD | awk '{print NF-1}')"
 if [ "$PARENT_COUNT" = "2" ] && [ -f "$MERGE_MAIN/local-only.txt" ] && [ -f "$MERGE_MAIN/remote-second.txt" ]; then
     test_pass
 else
     test_fail "expected merge-main to create a merge commit containing local and remote changes"
+fi
+
+git clone -q "$MERGE_REMOTE" "$TEST_DIR/merge-conflict-other"
+MERGE_CONFLICT_OTHER="$TEST_DIR/merge-conflict-other"
+git -C "$MERGE_CONFLICT_OTHER" config user.name "Unit Test"
+git -C "$MERGE_CONFLICT_OTHER" config user.email "unit@example.com"
+echo "local conflict" > "$MERGE_MAIN/conflict.txt"
+git -C "$MERGE_MAIN" add conflict.txt
+git -C "$MERGE_MAIN" commit -q -m "local conflict"
+echo "remote conflict" > "$MERGE_CONFLICT_OTHER/conflict.txt"
+git -C "$MERGE_CONFLICT_OTHER" add conflict.txt
+git -C "$MERGE_CONFLICT_OTHER" commit -q -m "remote conflict"
+git -C "$MERGE_CONFLICT_OTHER" push -q origin HEAD
+
+test_start "sync_main_after_merge aborts a failed fallback merge"
+(
+    cd "$MERGE_WORKTREE" || exit 1
+    sync_main_after_merge "$MERGE_BRANCH"
+) >/dev/null 2>&1
+if [ ! -f "$MERGE_MAIN/.git/MERGE_HEAD" ] && ! git -C "$MERGE_MAIN" status --short | grep -q '^UU '; then
+    test_pass
+else
+    test_fail "expected failed fallback merge to leave no in-progress merge state"
 fi
 
 test_start "ensure_task_file_committed commits untracked root task file"
@@ -792,7 +816,8 @@ DUO_FINAL_TEMPLATE="$REPO_ROOT/skills/templates/duo-final-merge.md"
 PAIR_FINAL_TEMPLATE="$REPO_ROOT/skills/templates/pair-final-merge.md"
 
 test_start "duo final-merge template syncs the main checkout after merge"
-if grep -Fq 'sync_main_after_merge "$(get_main_branch "$PEER_SYNC")"' "$DUO_FINAL_TEMPLATE" && \
+if grep -Fq 'MAIN_BRANCH=$(get_main_branch "$PEER_SYNC")' "$DUO_FINAL_TEMPLATE" && \
+   [ "$(grep -Fc 'sync_main_after_merge "$MAIN_BRANCH"' "$DUO_FINAL_TEMPLATE")" -eq 2 ] && \
    grep -Fq "refresh the main checkout explicitly after the remote merge" "$DUO_FINAL_TEMPLATE"; then
     test_pass
 else
@@ -800,7 +825,8 @@ else
 fi
 
 test_start "pair final-merge template syncs the main checkout after merge"
-if grep -Fq 'sync_main_after_merge "$(get_main_branch "$PEER_SYNC")"' "$PAIR_FINAL_TEMPLATE" && \
+if grep -Fq 'MAIN_BRANCH=$(get_main_branch "$PEER_SYNC")' "$PAIR_FINAL_TEMPLATE" && \
+   [ "$(grep -Fc 'sync_main_after_merge "$MAIN_BRANCH"' "$PAIR_FINAL_TEMPLATE")" -eq 2 ] && \
    grep -Fq "refresh the main checkout explicitly after the remote merge" "$PAIR_FINAL_TEMPLATE"; then
     test_pass
 else
