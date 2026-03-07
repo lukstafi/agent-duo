@@ -2,11 +2,30 @@
 
 All notable changes to agent-duo will be documented in this file.
 
-## [Unreleased]
+## [v0.8] - 2026-03-07
+
+**Final release.** agent-duo is being folded into the [Ludics](https://github.com/lukstafi/ludics) project rather than continuing as a separate codebase.
+
+### Added
+- **Post-merge local main sync**: final-merge templates now automatically checkout and sync the local `main` branch after a remote PR merge, with fast-forward and fallback support
+- **Structured event logging**: new `append_event` helper writes structured orchestrator events with lock-guarded appends
+- **More ntfy.sh progress notices**: additional notification hooks for key orchestrator milestones
 
 ### Changed
 - **`start` and `restart` now auto-run orchestrator by default**: `agent-duo` and `agent-pair` now launch/restart the orchestrator loop automatically unless `--no-auto-run` is passed
 - **Passthrough agent flags are now session-persistent**: `agent-duo`/`agent-pair` support `--claude-flags` and `--codex-flags` on `start` and `restart`, store them in `.peer-sync/`, and append them to launch commands via `get_agent_cmd`
+- **Prefer merge commits in final merge**: final-merge instructions now default to merge commits instead of squash
+- **Feature specs kept in docs with path-aware task references**: spec files are stored under `docs/` and task paths resolve correctly from worktrees
+- **Rebase before task spec auto-commit/push**: ensures clean history before committing the spec
+- **Restrict Claude `-c` to restart recovery**: the continue flag is no longer passed on fresh launches
+- **Throttle update-docs runs**: prevents redundant doc-update cycles
+- **Update-docs PR flow documented**: explains the PR workflow for doc updates
+
+### Fixed
+- **Fix terminal status dedupe for fast transitions**: rapid phase transitions no longer produce duplicate status lines
+- **Fix duo status logging**: corrected status output formatting
+- **Add timeout to `append_event` locking**: prevents deadlocks in event logging
+- **Fix shellcheck findings**: addressed linting warnings across duo/pair scripts
 
 ## [v0.7] - 2026-02-22
 

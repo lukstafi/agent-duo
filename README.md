@@ -1,5 +1,7 @@
 # agent-duo
 
+> **Note:** agent-duo has been folded into the [Ludics](https://github.com/lukstafi/ludics) project. This repository is no longer actively maintained as a standalone project. See [v0.8 release notes](CHANGELOG.md) for details.
+
 Coordinate two AI coding agents (Claude, Codex, etc.) working in parallel on the same task, producing **two alternative solutions** as separate PRs.
 
 Also includes **agent-pair**: a single-worktree mode where one agent codes and another reviews.
